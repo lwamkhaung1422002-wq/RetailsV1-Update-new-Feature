@@ -92,6 +92,9 @@ const paymentInput = z.object({
   signatureDataUrl: z.string().trim().optional(),
   mobileAccountName: z.string().trim().optional(),
 }).superRefine((value, context) => {
+  if (value.method.toLowerCase() === "cash" && !value.signatureDataUrl) {
+    context.addIssue({ code: "custom", path: ["signatureDataUrl"], message: "Receiver signature is required for cash payments." });
+  }
   if (value.method.toLowerCase() !== "cash" && !value.reference) {
     context.addIssue({ code: "custom", path: ["reference"], message: "Transaction ID is required for non-cash payments." });
   }

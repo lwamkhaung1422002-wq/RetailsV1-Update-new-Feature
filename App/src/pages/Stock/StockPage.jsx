@@ -64,7 +64,7 @@ export default function StockPage() {
     return (productResult?.products || []).map((product) => ({
       id: product.id, name: product.name, sku: product.sku || "", barcodeValues: (product.barcodes || []).map((barcode) => barcode.value).filter(Boolean),
       category: product.category?.name || categoryNames.get(product.categoryId) || "Uncategorized", price: Number(product.price || 0), cost: Number(product.cost || 0),
-      stock: Number(product.currentStock ?? totals.get(product.id) ?? 0), hasSaleHistory: Boolean(product.hasSaleHistory), icon: <Inventory2RoundedIcon />, color: "#1976d2",
+      stock: Number(product.currentStock ?? totals.get(product.id) ?? 0), hasSaleHistory: Boolean(product.hasSaleHistory),
     }));
   }, [categoryResult, inventoryResult, productResult]);
 
@@ -169,19 +169,15 @@ export default function StockPage() {
         {scanNotice && <Alert severity={scanNotice.severity} onClose={() => setScanNotice(null)}>{scanNotice.text}</Alert>}
         {requestError && <Alert severity="warning">{requestError.message || "Inventory request failed."}</Alert>}
         {visibleProducts.map((product) => (
-          <Card key={product.id} onClick={() => navigate(`/stock/${product.id}`)} sx={{ minHeight: 112, borderRadius: 2.5, bgcolor: "background.paper", boxShadow: "0 2px 7px rgba(15,23,42,0.16)", cursor: "pointer" }}>
-            <CardContent sx={{ height: "100%", boxSizing: "border-box", p: 1.5, "&:last-child": { pb: 1.5 } }}>
+          <Card key={product.id} onClick={() => navigate(`/stock/${product.id}`)} sx={{ borderRadius: 2.5, bgcolor: "background.paper", boxShadow: "0 2px 7px rgba(15,23,42,0.16)", cursor: "pointer" }}>
+            <CardContent sx={{ boxSizing: "border-box", p: 1.5, "&:last-child": { pb: 1.5 } }}>
               <Stack direction="row" alignItems="center" spacing={1.25}>
-                <Box sx={{ display: "grid", placeItems: "center", width: 62, height: 66, borderRadius: 1.75, bgcolor: product.id === "water" ? "#e8f6fb" : "transparent", color: product.color, flexShrink: 0 }}>
-                  {product.icon}
-                </Box>
                 <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                  <Typography color="text.primary" fontSize={18} fontWeight={600}>{product.name}</Typography>
-                  <Typography color="text.secondary" sx={{ mt: 0.25 }}>{product.category}</Typography>
+                  <Typography color="text.primary" fontSize={18} fontWeight={600}>{product.name}<Box component="span" sx={{ ml: 0.75, color: "text.secondary", fontSize: 14, fontWeight: 400 }}>· {product.category}</Box></Typography>
                   <Stack direction="row" alignItems="center" spacing={0.7} sx={{ mt: 0.65, color: product.stock < 10 ? "error.main" : "success.main" }}><Inventory2RoundedIcon fontSize="small" /><Typography variant="body2">{product.stock} pcs</Typography></Stack>
                 </Box>
                 <Box sx={{ alignSelf: "stretch", display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "flex-end" }}>
-                  <Typography color="primary.main" fontWeight={700} fontSize={17}>{formatMoney(product.price)}</Typography>
+                  <Typography color="primary.main" fontWeight={700} fontSize={17}>{formatMoney(product.cost)}</Typography>
                   <IconButton size="small" aria-label={`More actions for ${product.name}`} onClick={(event) => { event.stopPropagation(); setMenuAnchor(event.currentTarget); setMenuProduct(product); }}><MoreVertRoundedIcon /></IconButton>
                 </Box>
               </Stack>
@@ -198,10 +194,10 @@ export default function StockPage() {
       <Paper elevation={5} sx={{ position: "fixed", left: 0, right: 0, bottom: 72, px: 3, py: 2, borderTop: 1, borderColor: "divider", bgcolor: "background.paper", zIndex: 10 }}>
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1 }}>
           <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => navigate("/stock/add")} sx={{ minHeight: 56, borderRadius: 2, bgcolor: "primary.main", fontSize: 15, textTransform: "none", "&:hover": { bgcolor: "primary.dark" } }}>Add Product</Button>
+          <Button variant="outlined" startIcon={<ArchiveRoundedIcon />} onClick={() => navigate("/stock/movement/add")} sx={{ minHeight: 56, borderRadius: 2, borderColor: "text.primary", color: "primary.main", fontSize: 12, textTransform: "none" }}>Add Stock</Button>
           <Button variant="outlined" startIcon={<HistoryRoundedIcon />} onClick={() => navigate("/stock/history")} sx={{ minHeight: 56, borderRadius: 2, borderColor: "text.primary", color: "primary.main", fontSize: 12, textTransform: "none" }}>History</Button>
-          <Button variant="outlined" onClick={() => setBarcodeGeneratorOpen(true)} sx={{ minHeight: 56, borderRadius: 2, borderColor: "text.primary", color: "primary.main", fontSize: 12, textTransform: "none" }}>Generate Barcodes</Button>
         </Box>
-      </Paper><BarcodeManagerDialog open={barcodeGeneratorOpen} onClose={() => setBarcodeGeneratorOpen(false)} api={api} standalone /><BarcodeScannerDialog open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={handleBarcodeDetected} />
+      </Paper><BarcodeScannerDialog open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={handleBarcodeDetected} />
     </Box>
   );
 }
@@ -229,14 +225,11 @@ function DesktopInventoryPage({ products, search, setSearch, summary, lowStockOn
     <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 2 }}>
       {products.map((product) => <Card key={product.id} onClick={() => navigate(`/stock/${product.id}`)} sx={{ minWidth: 0, borderRadius: 2.25, border: "1px solid", borderColor: "divider", boxShadow: "0 2px 8px rgba(15,23,42,.05)", cursor: "pointer", overflow: "hidden", "&:hover": { boxShadow: "0 7px 18px rgba(15,23,42,.12)", transform: "translateY(-1px)" } }}>
         <CardContent sx={{ p: 1.75, "&:last-child": { pb: 1.75 } }}>
-          <Box sx={{ height: 86, display: "grid", placeItems: "center", borderRadius: 1.75, bgcolor: product.id === "water" ? "#eaf7fc" : "#f5f7fa", color: product.color, "& .MuiSvgIcon-root": { fontSize: 44 } }}>{product.icon}</Box>
-          <Typography noWrap sx={{ fontSize: 17, fontWeight: 700, mt: 1.5 }}>{product.name}</Typography>
-          <Typography noWrap color="text.secondary" sx={{ fontSize: 13, mt: 0.5 }}>{product.category} product</Typography>
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mt: 1.5 }}><Box><Typography color="text.secondary" sx={{ fontSize: 12 }}>Category</Typography><Box sx={{ display: "inline-flex", mt: 0.6, px: 1, py: 0.35, borderRadius: 1, bgcolor: "#eaf3ff", color: "primary.main", fontSize: 12, fontWeight: 700 }}>{product.category}</Box></Box><IconButton aria-label={`Actions for ${product.name}`} onClick={(event) => { event.stopPropagation(); setMenuAnchor(event.currentTarget); setMenuProduct(product); }} size="small"><MoreVertRoundedIcon /></IconButton></Box>
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography noWrap sx={{ minWidth: 0, fontSize: 17, fontWeight: 700 }}>{product.name}<Box component="span" sx={{ ml: 0.75, color: "text.secondary", fontSize: 13, fontWeight: 400 }}>· {product.category}</Box></Typography><IconButton aria-label={`Actions for ${product.name}`} onClick={(event) => { event.stopPropagation(); setMenuAnchor(event.currentTarget); setMenuProduct(product); }} size="small"><MoreVertRoundedIcon /></IconButton></Box>
           <Divider sx={{ my: 1.5 }} />
-          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}><Box><Typography color="text.secondary" sx={{ fontSize: 12 }}>Stock</Typography><Typography color={product.stock < 10 ? "error.main" : "success.main"} sx={{ fontSize: 15, fontWeight: 800, mt: .5 }}>{product.stock} pcs</Typography></Box><Box sx={{ textAlign: "right" }}><Typography color="text.secondary" sx={{ fontSize: 12 }}>Unit Price</Typography><Typography sx={{ fontSize: 15, fontWeight: 800, mt: .5, whiteSpace: "nowrap" }}>{formatMoney(product.price)}</Typography></Box></Box>
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}><Box><Typography color="text.secondary" sx={{ fontSize: 12 }}>Stock</Typography><Typography color={product.stock < 10 ? "error.main" : "success.main"} sx={{ fontSize: 15, fontWeight: 800, mt: .5 }}>{product.stock} pcs</Typography></Box><Box sx={{ textAlign: "right" }}><Typography color="text.secondary" sx={{ fontSize: 12 }}>Cost Price</Typography><Typography sx={{ fontSize: 15, fontWeight: 800, mt: .5, whiteSpace: "nowrap" }}>{formatMoney(product.cost)}</Typography></Box></Box>
           <Divider sx={{ my: 1.5 }} />
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Typography color="text.secondary" sx={{ fontSize: 12 }}>Total Value</Typography><Typography sx={{ fontSize: 14, fontWeight: 800 }}>{formatMoney(product.price * product.stock)}</Typography></Box>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Typography color="text.secondary" sx={{ fontSize: 12 }}>Total Value</Typography><Typography sx={{ fontSize: 14, fontWeight: 800 }}>{formatMoney(product.cost * product.stock)}</Typography></Box>
         </CardContent>
       </Card>)}
     </Box>

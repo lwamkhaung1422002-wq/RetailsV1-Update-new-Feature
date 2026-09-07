@@ -32,7 +32,10 @@ import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import MoreVertRoundedIcon from "@mui/icons-material/MoreVertRounded";
 import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
-import { DesktopSupplierHistory } from "../Suppliers/SuppliersPage";
+import SupplierHistoryPage from "../Suppliers/SupplierHistoryPage";
+import OrderDetailsPage from "../Sale/OrderDetailsPage";
+import SupplierDetailsPage from "../Suppliers/SupplierDetailsPage";
+import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
 import { usePosApi } from "../../hooks/useApiResource";
 import { usePaymentWorklistQuery, useShopSettingsQuery } from "../../hooks/usePosQueries";
 import { useQueryClient } from "@tanstack/react-query";
@@ -301,6 +304,7 @@ export default function PaymentPage() {
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuPayment, setMenuPayment] = useState(null);
   const [mobileDialog, setMobileDialog] = useState(null);
+  const [detailPayment, setDetailPayment] = useState(null);
   const [paymentError, setPaymentError] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
   const paymentMethods = useMemo(() => {
@@ -321,6 +325,10 @@ export default function PaymentPage() {
     await invalidatePaymentData(queryClient, paymentRefreshKeys.expense(shop?.id));
   };
   const openMobilePayment = useCallback((payment) => {
+    if (!isMobile && ["sale", "supplier", "supplier-delivery"].includes(payment.kind)) {
+      setDetailPayment(payment);
+      return;
+    }
     if (payment.kind === "sale") {
       navigate(`/sale/${payment.apiId}`, { state: { from: "/payment" } });
       return;
@@ -335,7 +343,7 @@ export default function PaymentPage() {
       return;
     }
     setMobileDialog({ mode: "details", record: payment });
-  }, [navigate]);
+  }, [navigate, isMobile]);
   const openMobilePaymentMenu = useCallback((event, payment) => {
     event.stopPropagation();
     setMenuAnchor(event.currentTarget);
@@ -382,17 +390,22 @@ export default function PaymentPage() {
     setMenuPayment(null);
   };
 
-  if (!isMobile) return <DesktopPaymentsPage />;
-
   return (
     <Box
       sx={{
         minHeight: "100dvh",
-        pb: "104px",
+        pb: isMobile ? "104px" : 3,
         bgcolor: "#fff",
         fontFamily: "Inter, Roboto, 'Noto Sans Myanmar', sans-serif",
       }}
     >
+      {!isMobile ? (
+        <DesktopPaymentsPage
+          onAddPayment={() => setMobileDialog({ mode: "entry" })}
+          onDetails={openMobilePayment}
+          onMenu={openMobilePaymentMenu}
+        />
+      ) : <>
       <Box sx={topBarSx}>
         <IconButton
           aria-label="Back to settings"
@@ -435,8 +448,8 @@ export default function PaymentPage() {
         />
         <Box
           sx={{
-            display: "grid",
-            gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+            display: "flex",
+            flexWrap: "wrap",
             gap: 1,
             mt: 1.5,
           }}
@@ -456,17 +469,15 @@ export default function PaymentPage() {
             label="Paid"
             active={status === "Paid"}
             onClick={() => setStatus("Paid")}
-            icon={<CheckCircleOutlineRoundedIcon />}
             color="success.main"
           />
           <StatusButton
             label="Unpaid"
             active={status === "Unpaid"}
             onClick={() => setStatus("Unpaid")}
-            icon={<CreditCardOutlinedIcon />}
             color="#ef6c00"
           />
-          <StatusButton label="Cancel" active={status === "Cancel"} onClick={() => setStatus("Cancel")} icon={<CancelOutlinedIcon />} color="error.main" />
+          <StatusButton label="Cancel" active={status === "Cancel"} onClick={() => setStatus("Cancel")} color="error.main" />
         </Box>
         <Box
           sx={{
@@ -504,7 +515,7 @@ export default function PaymentPage() {
       <Paper
         elevation={5}
         sx={{
-          position: "fixed",
+          position: isMobile ? "fixed" : "sticky",
           left: 0,
           right: 0,
           bottom: 0,
@@ -541,6 +552,7 @@ export default function PaymentPage() {
           </Button>
         </Box>
       </Paper>
+      </>}
 
       <Dialog
         open={filterOpen}
@@ -779,6 +791,12 @@ export default function PaymentPage() {
             </MenuItem>
           )}
       </Menu>
+      {!isMobile && detailPayment && <Dialog open onClose={() => setDetailPayment(null)} fullWidth maxWidth="sm">
+        <Box sx={{ display: "flex", justifyContent: "flex-end" }}><IconButton aria-label="Close details" onClick={() => setDetailPayment(null)}><CloseRoundedIcon /></IconButton></Box>
+        <DialogContent sx={{ p: 0 }}>
+          {detailPayment.kind === "sale" ? <OrderDetailsPage embeddedOrderId={detailPayment.apiId} embeddedOnClose={() => setDetailPayment(null)} forceMobileLayout hideBackButton /> : <SupplierDetailsPage embeddedSupplierId={detailPayment.supplierId} embeddedRecordId={detailPayment.kind === "supplier-delivery" ? detailPayment.apiId : undefined} hideBackButton />}
+        </DialogContent>
+      </Dialog>}
       <MobilePaymentDialog
         dialog={mobileDialog}
         saving={savingPayment}
@@ -851,7 +869,7 @@ export default function PaymentPage() {
                     reversal.originalPaymentId === payment.id,
                 ),
             );
-            if (activePayments.length > 1)
+            if (activePayments.length > 0)
               throw new Error(
                 "Cancel later payment records from Payment before cancelling this order.",
               );
@@ -931,9 +949,8 @@ export default function PaymentPage() {
   );
 }
 
-function DesktopPaymentsPage() {
+function DesktopPaymentsPage({ onAddPayment, onDetails, onMenu }) {
   const api = usePosApi();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { shop } = useAuth();
   const { data: records = [] } = usePaymentWorklistQuery();
@@ -966,19 +983,6 @@ function DesktopPaymentsPage() {
   }), [dateMode, from, records, search, status, to]);
   const total = useMemo(() => visible.reduce((sum, record) => sum + record.amount, 0), [visible]);
   const close = () => setDialog(null);
-  const showDetails = useCallback((record) => setDialog({ mode: "details", record }), []);
-  const payRecord = useCallback((record) => {
-    if (record.kind === "supplier") {
-      navigate(`/suppliers/${record.supplierId}/pay`, {
-        state: { purchaseId: record.apiId, from: "/payment" },
-      });
-      return;
-    }
-    setDialog({ mode: "pay", record });
-  }, [navigate]);
-  const openRecordMenu = useCallback((event, record) => {
-    setMenu({ anchor: event.currentTarget, record });
-  }, []);
   const deleteRecord = async (record) => {
     if (record.kind !== "expense")
       throw new Error("Only expense records can be deleted.");
@@ -1008,7 +1012,7 @@ function DesktopPaymentsPage() {
         <Button
           variant="contained"
           startIcon={<AddRoundedIcon />}
-          onClick={() => setDialog({ mode: "entry" })}
+          onClick={onAddPayment}
           sx={desktopPaymentPrimarySx}
         >
           Add Payment
@@ -1076,9 +1080,8 @@ function DesktopPaymentsPage() {
           <DesktopPaymentCard
             key={record.recordKey || record.id}
             payment={record}
-            onDetails={showDetails}
-            onPay={payRecord}
-            onMenu={openRecordMenu}
+            onClick={onDetails}
+            onMenu={onMenu}
           />
         ))}
       </Box>
@@ -1163,162 +1166,6 @@ function DesktopPaymentFilter({
   );
 }
 
-const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onDetails, onPay, onMenu }) {
-  const cancelled = ["Cancel", "Cancelled"].includes(payment.status);
-  const paid = payment.status === "Paid";
-  const payDue = ["sale", "supplier", "supplier-delivery"].includes(payment.kind)
-    ? !cancelled && Number(payment.remainingAmount || 0) > 0
-    : payment.status === "Unpaid";
-  const tone = cancelled ? "#d14343" : paid
-    ? "#278a45"
-    : payment.kind === "receivable"
-      ? "#7b4cc2"
-      : "#ef6c00";
-  return (
-    <Paper
-      variant="outlined"
-      onClick={() => onDetails(payment)}
-      sx={{
-        p: 1.5,
-        minHeight: 156,
-        borderRadius: 1.5,
-        cursor: "pointer",
-        boxShadow: "0 2px 7px rgba(15,23,42,.05)",
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 42px 28px",
-        gridTemplateRows: "auto 1fr auto",
-        columnGap: 0.65,
-        "&:hover": {
-          borderColor: "primary.light",
-          boxShadow: "0 4px 12px rgba(15,23,42,.1)",
-        },
-      }}
-    >
-      <Chip
-        label={payment.status}
-        size="small"
-        sx={{
-          justifySelf: "start",
-          height: 24,
-          borderRadius: 1,
-          color: tone,
-          bgcolor: cancelled ? "#fff1f0" : paid
-            ? "#e5f5e8"
-            : payment.kind === "receivable"
-              ? "#f1eaff"
-              : "#fff1e4",
-          fontSize: 11,
-          fontWeight: 700,
-        }}
-      />
-      {payDue && (
-        <Button
-          aria-label={`Pay ${payment.name}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onPay(payment);
-          }}
-          sx={{
-            gridColumn: 2,
-            gridRow: 2,
-            alignSelf: "center",
-            minWidth: 42,
-            width: 42,
-            minHeight: 34,
-            height: 34,
-            px: 0.5,
-            color: "success.main",
-            border: "1px solid",
-            borderColor: "#b9dfc3",
-            borderRadius: 1.25,
-            bgcolor: "#eef9f0",
-            textTransform: "none",
-            fontSize: 12,
-            fontWeight: 800,
-            "&:hover": { bgcolor: "#e2f4e6" },
-          }}
-        >
-          Pay
-        </Button>
-      )}
-      <IconButton
-        aria-label={`More actions for ${payment.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onMenu(event, payment);
-        }}
-        size="small"
-        disabled={cancelled}
-        sx={{
-          gridColumn: 3,
-          gridRow: 1,
-          alignSelf: "start",
-          justifySelf: "end",
-          p: 0.15,
-        }}
-      >
-        <MoreVertRoundedIcon fontSize="small" />
-      </IconButton>
-      <Box sx={{ gridColumn: 1, gridRow: 2, alignSelf: "center", minWidth: 0 }}>
-        <Typography noWrap sx={{ fontSize: 14, fontWeight: 700 }}>
-          {payment.name}
-        </Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.8, fontSize: 12.5 }}>
-          {payment.kind === "expense" ? "Expense" : payment.id}
-        </Typography>
-      </Box>
-      <Box
-        sx={{
-          gridColumn: "1 / -1",
-          gridRow: 3,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 1,
-          minWidth: 0,
-          color: tone,
-        }}
-      >
-        <Stack
-          direction="row"
-          spacing={0.55}
-          alignItems="center"
-          sx={{ minWidth: 0 }}
-        >
-          <CalendarTodayOutlinedIcon sx={{ fontSize: 17 }} />
-          <Typography noWrap sx={{ fontSize: 12.5, color: "inherit" }}>
-            {payment.dateLabel}: {payment.date.split("-").reverse().join("/")}
-          </Typography>
-        </Stack>
-        <Stack
-          direction="row"
-          spacing={0.6}
-          alignItems="baseline"
-          sx={{ whiteSpace: "nowrap" }}
-        >
-          {paid && (
-            <Typography sx={{ color: tone, fontSize: 13, fontWeight: 700 }}>
-              {payment.method}
-            </Typography>
-          )}
-          {!cancelled && ["sale", "supplier", "supplier-delivery"].includes(payment.kind) &&
-            Number(payment.remainingAmount || 0) > 0 && (
-              <Typography
-                sx={{ color: "#ef6c00", fontSize: 12, fontWeight: 700 }}
-              >
-                Remaining {money(payment.remainingAmount)}
-              </Typography>
-            )}
-          <Typography
-            sx={{ color: "text.primary", fontSize: 14, fontWeight: 800 }}
-          >
-            {money(payment.amount)}
-          </Typography>
-        </Stack>
-      </Box>
-    </Paper>
-  );
-});
 
 function DesktopPaymentDialog({
   dialog,
@@ -1355,7 +1202,7 @@ function DesktopPaymentDialog({
         slotProps={{ paper: { sx: { borderRadius: 2.5 } } }}
       >
         <DialogContent sx={desktopPaymentDialogContentSx}>
-          <DesktopSupplierHistory />
+          <SupplierHistoryPage embedded />
         </DialogContent>
         <Divider />
         <Box
@@ -1930,9 +1777,10 @@ function StatusButton({ label, active, onClick, icon, color }) {
       onClick={onClick}
       startIcon={icon}
       sx={{
-        minWidth: 0,
+        minWidth: "max-content",
+        flex: "1 0 auto",
         minHeight: 54,
-        px: 0.5,
+        px: 1,
         borderRadius: 1.25,
         border: "1px solid",
         borderColor: active ? "primary.main" : "#dfe3e8",
@@ -1955,6 +1803,16 @@ function StatusButton({ label, active, onClick, icon, color }) {
 const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
   const cancelled = ["Cancel", "Cancelled"].includes(payment.status);
   const paid = payment.status === "Paid";
+  const showRemaining =
+    !cancelled &&
+    ["sale", "supplier", "supplier-delivery"].includes(payment.kind) &&
+    Number(payment.remainingAmount || 0) > 0;
+  const detailLabel =
+    payment.kind === "expense"
+      ? "Expense"
+      : payment.kind === "income"
+        ? "Income"
+        : payment.id;
   const tone =
     cancelled
       ? "#d14343"
@@ -1971,17 +1829,17 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
         p: 1.5,
         borderRadius: 1.5,
         display: "grid",
-        gridTemplateColumns: "68px minmax(0, 1fr) auto",
-        gridTemplateRows: "auto auto",
+        gridTemplateColumns: "auto minmax(0, 1fr) auto",
+        gridTemplateRows: "auto auto auto",
         columnGap: 1.5,
-        rowGap: 1.25,
+        rowGap: 1.15,
         alignItems: "center",
         cursor: "pointer",
         fontFamily: "Inter, Roboto, Noto Sans Myanmar, sans-serif",
       }}
     >
       <Chip
-        label={payment.status}
+        label={cancelled ? "Cancel" : payment.status}
         size="small"
         sx={{
           gridColumn: 1,
@@ -2006,8 +1864,8 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
       <Typography
         noWrap
         sx={{
-          gridColumn: 2,
-          gridRow: 1,
+          gridColumn: "1 / 3",
+          gridRow: 2,
           minWidth: 0,
           fontSize: 17,
           fontWeight: 600,
@@ -2023,49 +1881,25 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
         alignItems="baseline"
         sx={{
           gridColumn: 3,
-          gridRow: 1,
+          gridRow: 2,
           justifySelf: "end",
           whiteSpace: "nowrap",
         }}
       >
-        {paid && (
-          <Typography
-            sx={{ color: tone, fontSize: 18, fontWeight: 600, lineHeight: 1.2 }}
-          >
+        {payment.method && (
+          <Typography noWrap sx={{ color: tone, fontSize: 18, fontWeight: 600, lineHeight: 1.2 }}>
             {payment.method}
           </Typography>
         )}
-          {!cancelled && ["sale", "supplier", "supplier-delivery"].includes(payment.kind) &&
-            Number(payment.remainingAmount || 0) > 0 && (
-            <Typography
-              sx={{
-                color: "#ef6c00",
-                fontSize: 13,
-                fontWeight: 700,
-                lineHeight: 1.2,
-              }}
-            >
-              Remaining {money(payment.remainingAmount)}
-            </Typography>
-          )}
-        <Typography
-          noWrap
-          sx={{
-            textAlign: "right",
-            fontSize: 18,
-            fontWeight: 600,
-            lineHeight: 1.2,
-            color: "text.primary",
-            whiteSpace: "nowrap",
-          }}
-        >
+        <Typography noWrap sx={{ color: "text.primary", fontSize: 18, fontWeight: 600, lineHeight: 1.2 }}>
           {money(payment.amount)}
         </Typography>
       </Stack>
       <Typography
+        noWrap
         sx={{
           gridColumn: 1,
-          gridRow: 2,
+          gridRow: 3,
           fontSize: 14,
           fontWeight: 400,
           lineHeight: 1.3,
@@ -2077,16 +1911,221 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
                 : "text.secondary",
         }}
       >
-        {payment.kind === "expense"
-          ? "Expense"
-          : payment.kind === "income"
-            ? "Income"
-            : payment.id}
+        {detailLabel}
       </Typography>
       <Box
         sx={{
+          gridColumn: "2 / 4",
+          gridRow: 1,
+          display: "flex",
+          minWidth: 0,
+          alignItems: "center",
+          gap: 0.55,
+          color: tone,
+          justifySelf: "end",
+        }}
+      >
+        <Box
+          component="span"
+          sx={{
+            flexShrink: 0,
+            px: 0.55,
+            minHeight: 18,
+            borderRadius: 0.65,
+            display: "inline-flex",
+            alignItems: "center",
+            bgcolor: cancelled ? "#fff1f0" : paid ? "#e3f5e6" : "#fff1e4",
+            fontSize: 11.5,
+            fontWeight: 700,
+            lineHeight: 1,
+          }}
+        >
+          Date
+        </Box>
+        <Typography
+          noWrap
+          component="span"
+          sx={{
+            fontSize: 12.5,
+            fontWeight: 500,
+            lineHeight: 1.3,
+            color: "inherit",
+          }}
+        >
+          {payment.date.split("-").reverse().join("/")}
+        </Typography>
+      </Box>
+      <Stack
+        direction="row"
+        spacing={0.65}
+        alignItems="center"
+        sx={{ gridColumn: "2 / 4", gridRow: 3, justifySelf: "end", minWidth: 0, minHeight: 28 }}
+      >
+        {showRemaining && (
+          <Typography
+            noWrap
+            sx={{
+              color: "#ef6c00",
+              fontSize: 12,
+              fontWeight: 700,
+              lineHeight: 1.2,
+            }}
+          >
+            Remaining {money(payment.remainingAmount)}
+          </Typography>
+        )}
+        <IconButton
+          aria-label={`More actions for ${payment.name}`}
+          onClick={(event) => onMenu(event, payment)}
+          disabled={cancelled}
+          size="small"
+          sx={{ width: 28, height: 28, p: 0, flexShrink: 0 }}
+        >
+          <MoreVertRoundedIcon sx={{ fontSize: 21 }} />
+        </IconButton>
+      </Stack>
+    </Paper>
+  );
+});
+
+const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onClick, onMenu }) {
+  const cancelled = ["Cancel", "Cancelled"].includes(payment.status);
+  const paid = payment.status === "Paid";
+  const showRemaining = !cancelled && Number(payment.remainingAmount || 0) > 0;
+  const detailLabel =
+    payment.kind === "expense"
+      ? "Expense"
+      : payment.kind === "income"
+        ? "Income"
+        : payment.id;
+  const dateLabel =
+    cancelled ||
+    (payment.kind === "sale" && ["Unpaid", "Partial"].includes(payment.status))
+      ? "Date"
+      : payment.dateLabel;
+  const tone =
+    cancelled
+      ? "#d14343"
+      : paid || payment.kind === "income" || payment.kind === "expense"
+        ? "#168437"
+        : payment.kind === "receivable"
+          ? "#7b4cc2"
+          : "#ef6c00";
+  return (
+    <Box sx={{ minWidth: 0 }}><Paper
+      elevation={2}
+      onClick={() => onClick(payment)}
+      sx={{
+        p: 1.5,
+        borderRadius: 1.5,
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gridTemplateRows: "auto auto auto auto",
+        height: "100%",
+        boxSizing: "border-box",
+        columnGap: 1.5,
+        rowGap: 1.25,
+        alignItems: "center",
+        cursor: "pointer",
+        fontFamily: "Inter, Roboto, Noto Sans Myanmar, sans-serif",
+        minWidth: 0,
+        "& > *": { minWidth: 0 },
+      }}
+    >
+      <Chip
+        label={cancelled ? "Cancel" : payment.status}
+        size="small"
+        sx={{
+          gridColumn: 1,
+          gridRow: 1,
+          justifySelf: "start",
+          height: 28,
+          bgcolor:
+            cancelled
+              ? "#fff1f0"
+              : paid
+                ? "#e3f5e6"
+                : payment.kind === "receivable"
+                  ? "#f1eaff"
+                  : "#fff1e4",
+          color: tone,
+          fontSize: 13,
+          fontWeight: 600,
+          "& .MuiChip-label": { px: 1.1 },
+          borderRadius: 1,
+        }}
+      />
+      <Typography
+        noWrap
+        sx={{
+          gridColumn: 1,
+          gridRow: 2,
+          minWidth: 0,
+          fontSize: 17,
+          fontWeight: 600,
+          lineHeight: 1.3,
+          color: "text.primary",
+        }}
+      >
+        {payment.name}
+      </Typography>
+      <Typography
+        noWrap
+        sx={{
           gridColumn: 2,
           gridRow: 2,
+          justifySelf: "end",
+          textAlign: "right",
+          fontSize: 17,
+          fontWeight: 700,
+          lineHeight: 1.2,
+          color: "text.primary",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {money(payment.amount)}
+      </Typography>
+      <Typography
+        noWrap
+        sx={{
+          gridColumn: 1,
+          gridRow: 3,
+          fontSize: 13,
+          fontWeight: 400,
+          lineHeight: 1.3,
+          color:
+            payment.kind === "expense"
+              ? "#d14343"
+              : payment.kind === "income"
+                ? "#168437"
+                : "text.secondary",
+        }}
+      >
+        {detailLabel}
+      </Typography>
+      {(showRemaining || (paid && payment.method)) && (
+        <Typography
+          noWrap
+          sx={{
+            gridColumn: 2,
+            gridRow: 3,
+            justifySelf: "end",
+            textAlign: "right",
+            fontSize: showRemaining ? 12.5 : 13.5,
+            fontWeight: 700,
+            lineHeight: 1.3,
+            color: showRemaining ? "#ef6c00" : tone,
+          }}
+        >
+          {showRemaining
+            ? `Remaining ${money(payment.remainingAmount)}`
+            : payment.method}
+        </Typography>
+      )}
+      <Box
+        sx={{
+          gridColumn: "1 / -1",
+          gridRow: 4,
           display: "flex",
           minWidth: 0,
           alignItems: "center",
@@ -2096,7 +2135,6 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
       >
         <CalendarTodayOutlinedIcon sx={{ fontSize: 17, flexShrink: 0 }} />
         <Typography
-          noWrap
           component="span"
           sx={{
             fontSize: 13,
@@ -2105,7 +2143,7 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
             color: "inherit",
           }}
         >
-          {payment.dateLabel}:{" "}
+          {dateLabel}:{" "}
           <Box
             component="span"
             sx={{ color: "inherit", fontSize: 13, fontWeight: 500 }}
@@ -2119,11 +2157,11 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
         onClick={(event) => onMenu(event, payment)}
         disabled={cancelled}
         size="small"
-        sx={{ gridColumn: 3, gridRow: 2, justifySelf: "end", p: 0.25 }}
+        sx={{ gridColumn: 2, gridRow: 1, justifySelf: "end", p: 0.25 }}
       >
         <MoreVertRoundedIcon />
       </IconButton>
-    </Paper>
+    </Paper></Box>
   );
 });
 
@@ -2140,6 +2178,7 @@ function MobilePaymentDialog({
   saving,
   error,
 }) {
+  const isMobile = useMediaQuery("(max-width:768px)");
   const [form, setForm] = useState({
     name: "",
     type: "expense",
@@ -2152,6 +2191,7 @@ function MobilePaymentDialog({
   const update = (key) => (event) =>
     setForm((current) => ({ ...current, [key]: event.target.value }));
   const record = dialog.record;
+  if (!isMobile && dialog.mode === "select-supplier-payment") return <PaymentCancellationDialog key={record.apiId} kind="supplier" recordId={record.apiId} onClose={onClose} />;
   return (
     <Dialog
       open
@@ -2658,9 +2698,6 @@ const desktopPaymentGridSx = {
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 1.75,
   pt: 1.75,
-  "@media (max-width: 1200px)": {
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  },
 };
 const desktopPaymentMenuItemSx = {
   minHeight: 42,

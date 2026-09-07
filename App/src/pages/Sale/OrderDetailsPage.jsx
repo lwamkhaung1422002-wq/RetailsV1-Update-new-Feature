@@ -19,17 +19,19 @@ import ShareRoundedIcon from "@mui/icons-material/ShareRounded";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { useTheme } from "@mui/material/styles";
 import { usePosApi } from "../../hooks/useApiResource";
-import { useOrderCancelMutation, useOrderQuery } from "../../hooks/usePosQueries";
+import { useOrderQuery } from "../../hooks/usePosQueries";
+import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
 
 const formatKyat = (amount) =>
   `${new Intl.NumberFormat("en-US").format(amount)} ကျပ်`;
 
-export default function OrderDetailsPage() {
-  const { orderId } = useParams();
+export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, forceMobileLayout = false, hideBackButton = false }) {
+  const { orderId: routeOrderId } = useParams();
+  const orderId = embeddedOrderId || routeOrderId;
   const navigate = useNavigate();
   const location = useLocation();
   const api = usePosApi();
-  const cancelOrder = useOrderCancelMutation();
+  const [cancelOpen, setCancelOpen] = useState(false);
   const {
     data: orderResult,
     error: orderError,
@@ -39,8 +41,8 @@ export default function OrderDetailsPage() {
   const record = orderResult?.order || null;
   const [shop, setShop] = useState(null);
   const [loadError, setLoadError] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const isMobile = useMediaQuery("(max-width:768px)");
+  const viewportIsMobile = useMediaQuery("(max-width:768px)");
+  const isMobile = forceMobileLayout || viewportIsMobile;
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
   const colors = isDark
@@ -475,24 +477,8 @@ export default function OrderDetailsPage() {
   void legacyPrintOrder;
   void legacyShareInvoice;
   void shareOrder;
-  const deleteOrder = async () => {
-    if (!record || deleting) return;
-    const reason = window.prompt("Cancel reason (required):");
-    if (
-      !reason?.trim() ||
-      !window.confirm("Cancel this order? The order record will be kept.")
-    )
-      return;
-    setDeleting(true);
-    try {
-      if (record.fulfillmentStatus !== "cancelled")
-        await cancelOrder.mutateAsync({ id: record.id, reason: reason.trim() });
-      navigate("/sale");
-    } catch (error) {
-      setLoadError(error.message || "This order cannot be deleted.");
-    } finally {
-      setDeleting(false);
-    }
+  const deleteOrder = () => {
+    if (record && record.fulfillmentStatus !== "cancelled") setCancelOpen(true);
   };
 
   return (
@@ -505,6 +491,7 @@ export default function OrderDetailsPage() {
         px: isMobile ? 0 : 3,
       }}
     >
+      {cancelOpen && <PaymentCancellationDialog kind="sale" recordId={record.id} onClose={() => setCancelOpen(false)} onSaved={() => void refetchOrder()} />}
       <Box sx={{ maxWidth: isMobile ? "none" : 880, mx: "auto" }}>
         <Box
           sx={{
@@ -522,8 +509,9 @@ export default function OrderDetailsPage() {
         >
           <IconButton
             aria-label="Back to orders"
-            onClick={() => navigate(location.state?.from || "/sale")}
+            onClick={() => embeddedOnClose ? embeddedOnClose() : navigate(location.state?.from || "/sale")}
             sx={{
+              visibility: hideBackButton ? "hidden" : "visible",
               color: isMobile ? "common.white" : colors.text,
               justifySelf: "start",
             }}
@@ -656,9 +644,7 @@ export default function OrderDetailsPage() {
                 fullWidth
                 startIcon={<DeleteOutlineRoundedIcon />}
                 disabled={
-                  deleting ||
-                  record.fulfillmentStatus === "cancelled" ||
-                  activePaymentRecordCount > 1
+                  record.fulfillmentStatus === "cancelled"
                 }
                 onClick={() => void deleteOrder()}
                 color="error"
@@ -670,7 +656,7 @@ export default function OrderDetailsPage() {
                   fontWeight: 700,
                 }}
               >
-                {deleting ? "Cancelling…" : "Cancel Order"}
+                {activePaymentRecordCount > 0 ? "Cancel Payment" : "Cancel Order"}
               </Button>
             </CardContent>
           </Card>
@@ -686,12 +672,16 @@ export default function OrderDetailsPage() {
                   <Box
                     key={item.id}
                     sx={{
-                      display: "flex",
+                      display: isMobile ? "flex" : "grid",
+                      gridTemplateColumns: isMobile
+                        ? undefined
+                        : "minmax(0, 1fr) auto auto",
                       justifyContent: "space-between",
                       alignItems: "center",
                       gap: 2,
                     }}
                   >
+                    {isMobile ? (
                     <Box>
                       <Typography sx={{ fontSize: 18, fontWeight: 700 }}>
                         {item.productName || item.product?.name}
@@ -701,6 +691,16 @@ export default function OrderDetailsPage() {
                         {formatKyat(item.sellUnitPrice)}
                       </Typography>
                     </Box>
+                    ) : (
+                      <>
+                        <Typography noWrap sx={{ minWidth: 0, fontSize: 18, fontWeight: 700 }}>
+                          {item.productName || item.product?.name}
+                        </Typography>
+                        <Typography sx={{ color: colors.muted, whiteSpace: "nowrap" }}>
+                          {Number(item.quantity)} × {formatKyat(item.sellUnitPrice)}
+                        </Typography>
+                      </>
+                    )}
                     <Typography sx={{ fontSize: 20, fontWeight: 800 }}>
                       {formatKyat(item.sellLineTotal)}
                     </Typography>

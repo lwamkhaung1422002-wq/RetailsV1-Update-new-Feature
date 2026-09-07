@@ -8,7 +8,7 @@ import Home from "./pages/Home/HomePage";
 import {
   loadAddPricePage, loadAddProductPage, loadAddPromotionPage, loadAddStockMovementPage,
   loadAuthPage, loadCategoryManagementPage, loadCreateOrderPage, loadNotePage, loadPaymentMethodManagementPage,
-  loadOrderDetailsPage, loadPaymentPage, loadPriceHistoryPage,
+  loadOrderDetailsPage, loadPaymentPage, loadPriceHistoryPage, loadPromotionReportPage,
   loadPricePage, loadProductDetailsPage, loadProductReportPage, loadRecordSupplierPaymentPage,
   loadReportPage, loadSalePage, loadSaleRecordPage, loadSalesReportPage, loadSettingsPage,
   loadShopDetailsPage, loadStockHistoryPage, loadStockPage, loadSupplierDetailsPage,
@@ -28,6 +28,7 @@ const Price = lazy(loadPricePage);
 const AddPrice = lazy(loadAddPricePage);
 const AddPromotion = lazy(loadAddPromotionPage);
 const PriceHistory = lazy(loadPriceHistoryPage);
+const PromotionReport = lazy(loadPromotionReportPage);
 const Report = lazy(loadReportPage);
 const ProductReport = lazy(loadProductReportPage);
 const SalesReport = lazy(loadSalesReportPage);
@@ -87,6 +88,7 @@ const router = createBrowserRouter([
       { path: "price/add", element: <RouteContent><AddPrice /></RouteContent> },
       { path: "price/promotion/add", element: <RouteContent><AddPromotion /></RouteContent> },
       { path: "price/history", element: <RouteContent><PriceHistory /></RouteContent> },
+      { path: "price/promotion/:campaignId/report", element: <RouteContent><PromotionReport /></RouteContent> },
       { path: "report", element: <RouteContent><Report /></RouteContent> },
       { path: "report/products", element: <RouteContent><ProductReport /></RouteContent> },
       { path: "report/sales", element: <RouteContent><SalesReport /></RouteContent> },

@@ -1102,8 +1102,8 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
           reversal.amount < 0 && reversal.originalPaymentId === payment.id,
         ),
       );
-      if (activePaymentRecords.length > 1) {
-        throw badRequest("Cancel later payment records before cancelling this order.");
+      if (activePaymentRecords.length > 0) {
+        throw badRequest("Cancel active payment records before cancelling this order.");
       }
 
       for (const item of existingOrder.items) {

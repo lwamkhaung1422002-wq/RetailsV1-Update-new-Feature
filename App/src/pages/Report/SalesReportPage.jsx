@@ -17,19 +17,21 @@ import {
 } from "@mui/material";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
-import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
-import ShoppingBagRoundedIcon from "@mui/icons-material/ShoppingBagRounded";
-import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
-import MonetizationOnRoundedIcon from "@mui/icons-material/MonetizationOnRounded";
-import AccountBalanceWalletRoundedIcon from "@mui/icons-material/AccountBalanceWalletRounded";
 import { useSalesReportQuery } from "../../hooks/usePosQueries";
 import { useAuth } from "../../context/AuthContext";
 import { useNavigate } from "react-router";
-import MobileReportNavigation from "../../components/Report/MobileReportNavigation";
 
-const reportTabs = [
+const desktopReportTabs = [
   "Overview",
   "Daily",
+  "Weekly",
+  "Monthly",
+  "Yearly",
+  "Compare",
+];
+const mobileReportTabs = [
+  "Overview",
+  "Today",
   "Weekly",
   "Monthly",
   "Yearly",
@@ -73,6 +75,25 @@ function monthToDate() {
 
 function allHistoryRange() {
   return { mode: "all", from: "2000-01-01", to: yangonDateKey() };
+}
+
+function defaultMonthRange() {
+  return { mode: "mtd", ...monthToDate() };
+}
+
+function todayRange() {
+  const today = yangonDateKey();
+  return { mode: "today", from: today, to: today };
+}
+
+function lastSevenDaysRange() {
+  const today = yangonDateKey();
+  return { mode: "custom", from: addCalendarDays(today, -6), to: today };
+}
+
+function yearToDateRange() {
+  const today = yangonDateKey();
+  return { mode: "custom", from: `${today.slice(0, 4)}-01-01`, to: today };
 }
 
 function reportQuery(range, trend) {
@@ -197,8 +218,7 @@ function guestDemoReport(query) {
 }
 
 function growthText(metric) {
-  if (!metric || metric.percentage === null)
-    return metric?.current ? "New" : "—";
+  if (!metric || metric.percentage === null) return "";
   return `${metric.percentage > 0 ? "+" : ""}${metric.percentage}%`;
 }
 
@@ -237,61 +257,6 @@ function compactMobileAmount(value) {
   return `${Number((amount / divisor).toFixed(1))}${suffix}`;
 }
 
-function compactRangeLabel(from, to) {
-  if (!from || !to) return "Date range";
-  const start = new Date(`${from}T00:00:00+06:30`);
-  const end = new Date(`${to}T00:00:00+06:30`);
-  const startDay = new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    timeZone: "Asia/Yangon",
-  }).format(start);
-  const endDay = new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    timeZone: "Asia/Yangon",
-  }).format(end);
-  const startMonth = new Intl.DateTimeFormat("en-GB", {
-    month: "short",
-    timeZone: "Asia/Yangon",
-  }).format(start);
-  const endMonth = new Intl.DateTimeFormat("en-GB", {
-    month: "short",
-    timeZone: "Asia/Yangon",
-  }).format(end);
-  const startYear = new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    timeZone: "Asia/Yangon",
-  }).format(start);
-  const endYear = new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    timeZone: "Asia/Yangon",
-  }).format(end);
-  if (startYear === endYear && startMonth === endMonth)
-    return `${startDay}–${endDay} ${endMonth} ${endYear}`;
-  if (startYear === endYear)
-    return `${startDay} ${startMonth}–${endDay} ${endMonth} ${endYear}`;
-  return `${startDay} ${startMonth} ${startYear}–${endDay} ${endMonth} ${endYear}`;
-}
-
-function compactKpiRangeLabel(from, to) {
-  if (!from || !to) return "Previous period";
-  const start = new Date(`${from}T00:00:00+06:30`);
-  const end = new Date(`${to}T00:00:00+06:30`);
-  const formatter = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    timeZone: "Asia/Yangon",
-  });
-  const startParts = Object.fromEntries(
-    formatter.formatToParts(start).map(({ type, value }) => [type, value]),
-  );
-  const endParts = Object.fromEntries(
-    formatter.formatToParts(end).map(({ type, value }) => [type, value]),
-  );
-  return startParts.month === endParts.month
-    ? `${startParts.day}\u2013${endParts.day} ${endParts.month}`
-    : `${startParts.day} ${startParts.month}\u2013${endParts.day} ${endParts.month}`;
-}
-
 void guestDemoReport;
 
 export default function SalesReportPage() {
@@ -301,24 +266,48 @@ export default function SalesReportPage() {
   const [tab, setTab] = useState("Overview");
   const [trend, setTrend] = useState("daily");
   const [dateAnchor, setDateAnchor] = useState(null);
-  const [draftRange, setDraftRange] = useState(allHistoryRange);
-  const [range, setRange] = useState(allHistoryRange);
+  const [draftRange, setDraftRange] = useState(defaultMonthRange);
+  const [range, setRange] = useState(defaultMonthRange);
   const [comparisonFocused, setComparisonFocused] = useState(false);
   const comparisonRef = useRef(null);
   const mobileComparisonRef = useRef(null);
   const query = useMemo(() => reportQuery(range, trend), [range, trend]);
+  const salesComparisonQuery = useMemo(
+    () => ({
+      ...reportQuery(defaultMonthRange(), "monthly"),
+      comparison: "month",
+    }),
+    [],
+  );
   const {
     data: report,
     error: reportError,
     isLoading,
   } = useSalesReportQuery(query, { enabled: !isGuest });
+  const { data: salesComparisonReport } = useSalesReportQuery(
+    salesComparisonQuery,
+    { enabled: !isGuest },
+  );
   const activeReport = isGuest ? null : report;
   const error = reportError?.message || "";
   const loading = !isGuest && isLoading;
 
   const selectTab = (next) => {
     setTab(next);
-    if (trendTabs.includes(next.toLowerCase())) setTrend(next.toLowerCase());
+    const nextTrend = next === "Today" ? "daily" : next.toLowerCase();
+    if (trendTabs.includes(nextTrend)) setTrend(nextTrend);
+    if (isMobile) {
+      const nextRange =
+        next === "Today"
+          ? todayRange()
+          : next === "Weekly" || next === "Compare"
+            ? lastSevenDaysRange()
+            : next === "Yearly"
+              ? yearToDateRange()
+              : defaultMonthRange();
+      setRange(nextRange);
+      setDraftRange(nextRange);
+    }
     if (next === "Compare") {
       requestAnimationFrame(() => {
         (isMobile
@@ -335,34 +324,19 @@ export default function SalesReportPage() {
     {
       key: "totalSales",
       label: "Total Sales",
-      icon: <TrendingUpRoundedIcon />,
-      tone: "purple",
     },
     {
       key: "orders",
       label: "Orders",
-      icon: <ShoppingBagRoundedIcon />,
-      tone: "blue",
-      plain: true,
-    },
-    {
-      key: "itemsSold",
-      label: "Items Sold",
-      icon: <Inventory2RoundedIcon />,
-      tone: "green",
       plain: true,
     },
     {
       key: "totalCostPrice",
       label: "Total Cost Price",
-      icon: <MonetizationOnRoundedIcon />,
-      tone: "orange",
     },
     {
       key: "grossProfit",
-      label: "Gross Profit",
-      icon: <AccountBalanceWalletRoundedIcon />,
-      tone: "amber",
+      label: "Profit",
     },
   ];
   const rangeLabel = range.mode === "all"
@@ -390,7 +364,7 @@ export default function SalesReportPage() {
         navigate={navigate}
         comparisonRef={mobileComparisonRef}
         comparisonFocused={comparisonFocused}
-        rangeLabel={rangeLabel}
+        comparisonReport={salesComparisonReport}
       />
     );
 
@@ -406,7 +380,7 @@ export default function SalesReportPage() {
         }}
       >
         <Stack direction="row" spacing={0.5}>
-          {reportTabs.map((item) => (
+          {desktopReportTabs.map((item) => (
             <Button
               key={item}
               variant={tab === item ? "contained" : "text"}
@@ -452,7 +426,7 @@ export default function SalesReportPage() {
           <Box
             sx={{
               display: "grid",
-              gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
               gap: 1.75,
               mb: 2.25,
             }}
@@ -462,7 +436,6 @@ export default function SalesReportPage() {
                 key={stat.key}
                 {...stat}
                 metric={summary?.[stat.key]}
-                previousRange={activeReport?.range?.previous}
               />
             ))}
           </Box>
@@ -511,7 +484,7 @@ export default function SalesReportPage() {
                   ])}
                 />
               </Box>
-              <Box
+              {salesComparisonReport && <Box
                 ref={comparisonRef}
                 sx={{
                   scrollMarginTop: 24,
@@ -524,10 +497,9 @@ export default function SalesReportPage() {
                 }}
               >
                 <ComparisonTable
-                  comparison={activeReport.comparison}
-                  range={activeReport.range}
+                  comparison={salesComparisonReport.comparison}
                 />
-              </Box>
+              </Box>}
             </>
           )}
         </>
@@ -560,34 +532,26 @@ function MobileSalesReport({
   navigate,
   comparisonRef,
   comparisonFocused,
-  rangeLabel,
+  comparisonReport,
 }) {
   const summary = report?.summary;
   const mobileStats = [
     {
       key: "totalSales",
       label: "Total Sales",
-      icon: <TrendingUpRoundedIcon />,
-      tone: "purple",
     },
     {
       key: "orders",
       label: "Orders",
-      icon: <ShoppingBagRoundedIcon />,
-      tone: "blue",
       plain: true,
     },
     {
       key: "totalCostPrice",
       label: "Total Cost Price",
-      icon: <MonetizationOnRoundedIcon />,
-      tone: "orange",
     },
     {
       key: "grossProfit",
-      label: "Gross Profit",
-      icon: <AccountBalanceWalletRoundedIcon />,
-      tone: "amber",
+      label: "Profit",
     },
   ];
   return (
@@ -613,7 +577,7 @@ function MobileSalesReport({
             align="center"
             sx={{ px: 0.5, fontSize: 17, fontWeight: 800 }}
           >
-            Sales Reports &amp; Analytics
+            Sale Report
           </Typography>
           <IconButton
             aria-label="Choose date range"
@@ -627,29 +591,7 @@ function MobileSalesReport({
           </IconButton>
         </Toolbar>
       </AppBar>
-      <MobileReportNavigation />
       <Box sx={{ px: 1.5, pt: 1.5 }}>
-        <Button
-          fullWidth
-          variant="outlined"
-          startIcon={<CalendarMonthRoundedIcon />}
-          onClick={(event) => {
-            setDraftRange(range);
-            setDateAnchor(event.currentTarget);
-          }}
-          sx={{
-            minHeight: 38,
-            mb: 1,
-            justifyContent: "flex-start",
-            borderColor: "divider",
-            color: "text.primary",
-            textTransform: "none",
-            fontSize: 12,
-            fontWeight: 700,
-          }}
-        >
-          {rangeLabel}
-        </Button>
         <Box
           sx={{
             display: "grid",
@@ -662,7 +604,7 @@ function MobileSalesReport({
             bgcolor: "background.paper",
           }}
         >
-          {reportTabs.map((item) => (
+          {mobileReportTabs.map((item) => (
             <Button
               key={item}
               variant={tab === item ? "contained" : "text"}
@@ -673,8 +615,9 @@ function MobileSalesReport({
                 px: 0.3,
                 borderRadius: 1,
                 textTransform: "none",
-                fontSize: 9.5,
-                fontWeight: 800,
+                color: tab === item ? "common.white" : "text.primary",
+                fontSize: "clamp(8.5px, 2.55vw, 10.5px)",
+                fontWeight: tab === item ? 600 : 500,
                 whiteSpace: "nowrap",
               }}
             >
@@ -713,7 +656,6 @@ function MobileSalesReport({
                       key={stat.key}
                       {...stat}
                       metric={summary?.[stat.key]}
-                      previousRange={report.range?.previous}
                     />
                   ))}
                 </Box>
@@ -722,11 +664,12 @@ function MobileSalesReport({
                     trend={trend}
                     onTrend={setTrend}
                     entries={report.trend}
+                    mobile
                   />
                 </Box>
                 <Box sx={{ mt: 1.25 }}>
                   <MobileDonutCard
-                    title="Sales by Payment Method"
+                    title="Sale by Payment Method"
                     total={report.collectionTotal}
                     items={report.paymentCollections.map((entry) => [
                       entry.method,
@@ -759,7 +702,7 @@ function MobileSalesReport({
                 </Box>
                 <Box sx={{ mt: 1.25 }}>
                   <MobileDonutCard
-                    title="Sales by Category"
+                    title="Sale by Category"
                     total={summary.totalSales.current}
                     items={report.categories.map((entry) => [
                       entry.name,
@@ -768,7 +711,7 @@ function MobileSalesReport({
                     ])}
                   />
                 </Box>
-                <Box
+                {comparisonReport && <Box
                   ref={comparisonRef}
                   sx={{
                     mt: 1.25,
@@ -786,24 +729,21 @@ function MobileSalesReport({
                     title="Sales Comparison"
                     columns={[
                       "Metric",
-                      compactRangeLabel(report.range.from, report.range.to),
-                      compactRangeLabel(
-                        report.range.previous.from,
-                        report.range.previous.to,
-                      ),
+                      "This Month",
+                      "Last Month",
                       "Change",
                       "Growth",
                     ]}
-                    rows={report.comparison.map((row) => [
+                    rows={comparisonReport.comparison.map((row) => [
                       row.metric,
                       compactMobileAmount(row.current),
                       compactMobileAmount(row.previous),
                       `${row.change > 0 ? "+" : ""}${compactMobileAmount(row.change)}`,
                       growthText(row),
                     ])}
-                    growthMetrics={report.comparison}
+                    growthMetrics={comparisonReport.comparison}
                   />
-                </Box>
+                </Box>}
               </>
             )}
           </>
@@ -821,102 +761,18 @@ function MobileSalesReport({
   );
 }
 
-function MobileSalesStat({
-  label,
-  metric,
-  icon,
-  tone,
-  plain = false,
-  previousRange,
-}) {
-  const tones = {
-    purple: ["#f0ecff", "#7656e9"],
-    blue: ["#e9f2ff", "#4285ee"],
-    orange: ["#fff3e5", "#f49a29"],
-    amber: ["#fff5df", "#e99c20"],
-  };
-  const [bg, color] = tones[tone];
-  const arrow =
-    metric?.percentage > 0 ? "↑" : metric?.percentage < 0 ? "↓" : "";
-  const previousLabel = previousRange
-    ? compactKpiRangeLabel(previousRange.from, previousRange.to)
-    : "Previous period";
-  return (
-    <Card sx={cardSx}>
-      <CardContent sx={{ p: 1.15, "&:last-child": { pb: 1.15 } }}>
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "31px minmax(0, 1fr) auto",
-            gridTemplateRows: "auto auto",
-            columnGap: 0.8,
-            rowGap: 0.25,
-            alignItems: "center",
-          }}
-        >
-          <Box
-            sx={{
-              gridRow: "1 / span 2",
-              width: 31,
-              height: 31,
-              borderRadius: 1.25,
-              display: "grid",
-              placeItems: "center",
-              bgcolor: bg,
-              color,
-              "& .MuiSvgIcon-root": { fontSize: 18 },
-            }}
-          >
-            {icon}
-          </Box>
-          <Typography
-            color="text.secondary"
-            noWrap
-            sx={{ minWidth: 0, fontSize: 11, fontWeight: 800 }}
-          >
-            {label}
-          </Typography>
-          <Box
-            component="span"
-            sx={{
-              justifySelf: "end",
-              display: "inline-flex",
-              alignItems: "center",
-              px: 0.45,
-              py: 0.1,
-              borderRadius: 0.75,
-              fontSize: 10,
-              fontWeight: 800,
-              whiteSpace: "nowrap",
-              ...growthSx(metric),
-            }}
-          >
-            {arrow}
-            {growthText(metric)}
-          </Box>
-          <Typography
-            noWrap
-            sx={{
-              minWidth: 0,
-              fontSize: 17,
-              lineHeight: 1.25,
-              fontWeight: 800,
-            }}
-          >
-            {money(metric?.current)}
-            {plain ? "" : " ကျပ်"}
-          </Typography>
-          <Typography
-            color="text.secondary"
-            noWrap
-            sx={{ justifySelf: "end", fontSize: 9, fontWeight: 600 }}
-          >
-            {previousLabel}
-          </Typography>
-        </Box>
-      </CardContent>
-    </Card>
-  );
+function MobileSalesStat({ label, metric, plain = false }) {
+  const change = growthText(metric);
+  const arrow = metric?.percentage > 0 ? "↑" : metric?.percentage < 0 ? "↓" : "";
+  return <Card sx={cardSx}>
+    <CardContent sx={{ p: 1.35, "&:last-child": { pb: 1.35 } }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: .75 }}>
+        <Typography color="text.secondary" noWrap sx={{ minWidth: 0, fontSize: 11.5, fontWeight: 500 }}>{label}</Typography>
+        {change && <Box component="span" sx={{ flexShrink: 0, px: .55, py: .1, borderRadius: .75, fontSize: 10, fontWeight: 600, whiteSpace: "nowrap", ...growthSx(metric) }}>{arrow}{change}</Box>}
+      </Box>
+      <Typography noWrap sx={{ mt: .55, minWidth: 0, fontSize: 18, lineHeight: 1.25, fontWeight: 700 }}>{money(metric?.current)}{plain ? "" : " ကျပ်"}</Typography>
+    </CardContent>
+  </Card>;
 }
 
 function MobileDonutCard({ title, total, items }) {
@@ -941,7 +797,9 @@ function MobileDonutCard({ title, total, items }) {
   return (
     <Card sx={cardSx}>
       <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
-        <Typography sx={{ fontSize: 15, fontWeight: 800 }}>{title}</Typography>
+        <Typography sx={{ fontSize: 17, lineHeight: 1.3, fontWeight: 600 }}>
+          {title}
+        </Typography>
         <Box
           sx={{
             display: "grid",
@@ -979,10 +837,10 @@ function MobileDonutCard({ title, total, items }) {
               }}
             >
               <Box>
-                <Typography sx={{ fontSize: 13, fontWeight: 800 }}>
+                <Typography sx={{ fontSize: 14, fontWeight: 700 }}>
                   {money(total)}
                 </Typography>
-                <Typography color="text.secondary" sx={{ fontSize: 9 }}>
+                <Typography color="text.secondary" sx={{ fontSize: 10.5, fontWeight: 500 }}>
                   Total
                 </Typography>
               </Box>
@@ -1008,10 +866,10 @@ function MobileDonutCard({ title, total, items }) {
                   }}
                 />
                 <Box>
-                  <Typography sx={{ fontSize: 11, fontWeight: 800 }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 600 }}>
                     {label}
                   </Typography>
-                  <Typography color="text.secondary" sx={{ fontSize: 10 }}>
+                  <Typography color="text.secondary" sx={{ fontSize: 11.5, fontWeight: 500 }}>
                     {money(amount)} ({percentage.toFixed(1)}%)
                   </Typography>
                 </Box>
@@ -1027,19 +885,18 @@ function MobileDonutCard({ title, total, items }) {
 function MobileTable({ title, columns, rows, growthMetrics, kind }) {
   const isComparison = kind === "comparison";
   const gridTemplateColumns = isComparison
-    ? "1.08fr 1.38fr 1.38fr .82fr .88fr"
-    : "1.02fr 1.08fr .68fr .68fr 1.08fr 1.08fr";
-  const headerFontSize = isComparison ? 8.6 : 8.2;
-  const rowFontSize = isComparison ? 10.2 : 9;
+    ? "1.12fr 1fr 1fr .9fr .9fr"
+    : "1.2fr .9fr .72fr .72fr .9fr .9fr";
   return (
     <Card sx={cardSx}>
-      <CardContent sx={{ p: 1.1, "&:last-child": { pb: 1.1 } }}>
+      <CardContent sx={{ p: 0.85, "&:last-child": { pb: 0.85 } }}>
         <Typography
           sx={{
             mb: 0.8,
             px: 0.4,
-            fontSize: isComparison ? 15 : 14,
-            fontWeight: 800,
+            fontSize: 17,
+            lineHeight: 1.3,
+            fontWeight: 600,
           }}
         >
           {title}
@@ -1057,37 +914,49 @@ function MobileTable({ title, columns, rows, growthMetrics, kind }) {
             sx={{
               display: "grid",
               gridTemplateColumns,
-              columnGap: 0.3,
-              px: 0.6,
-              minHeight: isComparison ? 38 : 29,
+              columnGap: 0.1,
+              px: 0.55,
+              minHeight: isComparison ? 48 : 40,
               alignItems: "center",
               bgcolor: "#f7f9fc",
             }}
           >
-            {columns.map((column, index) => (
-              <Typography
-                key={column}
-                noWrap
-                sx={{
-                  overflow: "hidden",
-                  textOverflow: "clip",
-                  color: "text.secondary",
-                  fontSize:
-                    isComparison && index > 0 && index < 3
-                      ? 7.9
-                      : headerFontSize,
-                  lineHeight: 1.1,
-                  fontWeight: 800,
-                  textTransform:
-                    index > 0 && index < 3 && isComparison
-                      ? "none"
-                      : "uppercase",
-                  textAlign: index === 0 ? "left" : "right",
-                }}
-              >
-                {column}
-              </Typography>
-            ))}
+            {columns.map((column, index) => {
+              const rangeColumn =
+                isComparison && typeof column === "object" ? column : null;
+              return (
+                <Box
+                  key={rangeColumn ? `${rangeColumn.top}-${rangeColumn.bottom}` : column}
+                  sx={{ minWidth: 0, textAlign: index === 0 ? "left" : "right" }}
+                >
+                  <Typography
+                    sx={{
+                      overflowWrap: "anywhere",
+                      color: "text.secondary",
+                      fontSize: 11.5,
+                      lineHeight: 1.15,
+                      fontWeight: 600,
+                      textTransform: rangeColumn ? "none" : "uppercase",
+                    }}
+                  >
+                    {rangeColumn ? rangeColumn.top : column}
+                  </Typography>
+                  {rangeColumn && (
+                    <Typography
+                      sx={{
+                        mt: 0.25,
+                        color: "text.primary",
+                        fontSize: 10.5,
+                        lineHeight: 1.15,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {rangeColumn.bottom}
+                    </Typography>
+                  )}
+                </Box>
+              );
+            })}
           </Box>
           {rows.map((row, rowIndex) => (
             <Box
@@ -1095,17 +964,16 @@ function MobileTable({ title, columns, rows, growthMetrics, kind }) {
               sx={{
                 display: "grid",
                 gridTemplateColumns,
-                columnGap: 0.3,
-                px: 0.6,
-                minHeight: isComparison ? 33 : 29,
+                columnGap: 0.1,
+                px: 0.55,
+                minHeight: isComparison ? 43 : 40,
                 alignItems: "center",
                 borderTop: "1px solid",
                 borderColor: "divider",
               }}
             >
               {row.map((cell, index) =>
-                growthMetrics &&
-                (index === row.length - 2 || index === row.length - 1) ? (
+                growthMetrics && index === row.length - 1 ? (
                   <Box
                     key={`${row[0]}-${index}`}
                     sx={{
@@ -1114,37 +982,33 @@ function MobileTable({ title, columns, rows, growthMetrics, kind }) {
                       px: isComparison ? 0.3 : 0.25,
                       py: 0.05,
                       borderRadius: 0.55,
-                      fontSize: isComparison ? 9 : 8.3,
+                      fontSize: 11,
                       lineHeight: 1.15,
-                      fontWeight: 800,
+                      fontWeight: 600,
                       whiteSpace: "nowrap",
                       ...growthSx(growthMetrics[rowIndex]),
                     }}
                   >
-                    {index === row.length - 1 &&
-                      (growthMetrics[rowIndex]?.percentage > 0
-                        ? "↑ "
-                        : growthMetrics[rowIndex]?.percentage < 0
-                          ? "↓ "
-                          : "")}
+                    {growthMetrics[rowIndex]?.percentage > 0
+                      ? "↑ "
+                      : growthMetrics[rowIndex]?.percentage < 0
+                        ? "↓ "
+                        : ""}
                     {cell}
                   </Box>
                 ) : (
                   <Typography
                     key={`${row[0]}-${index}`}
-                    noWrap
                     sx={{
                       minWidth: 0,
                       overflow: "hidden",
-                      textOverflow: "clip",
-                      fontSize: rowFontSize,
-                      lineHeight: 1.1,
-                      fontWeight: isComparison
-                        ? index === 0
-                          ? 800
-                          : 700
-                        : 700,
+                      overflowWrap: index === 0 ? "break-word" : "normal",
+                      color: "text.primary",
+                      fontSize: 12.5,
+                      lineHeight: 1.18,
+                      fontWeight: index === 0 ? 600 : 500,
                       textAlign: index === 0 ? "left" : "right",
+                      whiteSpace: index === 0 ? "normal" : "nowrap",
                     }}
                   >
                     {cell}
@@ -1159,88 +1023,21 @@ function MobileTable({ title, columns, rows, growthMetrics, kind }) {
   );
 }
 
-function SalesStat({
-  label,
-  metric,
-  icon,
-  tone,
-  plain = false,
-  previousRange,
-}) {
-  const tones = {
-    purple: ["#f0ecff", "#7656e9"],
-    blue: ["#e9f2ff", "#4285ee"],
-    green: ["#eaf9f1", "#39ae71"],
-    orange: ["#fff3e5", "#f49a29"],
-    amber: ["#fff5df", "#e99c20"],
-  };
-  const [bg, color] = tones[tone];
-  const arrow =
-    metric?.percentage > 0 ? "↑" : metric?.percentage < 0 ? "↓" : "";
-  const previousLabel = previousRange
-    ? `${formatDate(previousRange.from)} – ${formatDate(previousRange.to)}`
-    : "previous period";
-  return (
-    <Card sx={cardSx}>
-      <CardContent sx={{ p: 1.75, "&:last-child": { pb: 1.75 } }}>
-        <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
-          <Box
-            sx={{
-              width: 40,
-              height: 40,
-              display: "grid",
-              placeItems: "center",
-              borderRadius: 1.5,
-              bgcolor: bg,
-              color,
-              flexShrink: 0,
-            }}
-          >
-            {icon}
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography
-              color="text.secondary"
-              sx={{ fontSize: 12, fontWeight: 700 }}
-            >
-              {label}
-            </Typography>
-            <Typography noWrap sx={{ mt: 0.45, fontSize: 20, fontWeight: 800 }}>
-              {money(metric?.current)}
-              {plain ? "" : " ကျပ်"}
-            </Typography>
-            <Box
-              component="span"
-              sx={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 0.35,
-                px: 0.7,
-                py: 0.25,
-                mt: 0.65,
-                borderRadius: 1,
-                fontSize: 11,
-                fontWeight: 800,
-                ...growthSx(metric),
-              }}
-            >
-              {arrow}
-              {growthText(metric)}
-            </Box>
-            <Typography
-              color="text.secondary"
-              sx={{ mt: 0.7, fontSize: 10.5, whiteSpace: "nowrap" }}
-            >
-              vs {previousLabel}
-            </Typography>
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
-  );
+function SalesStat({ label, metric, plain = false }) {
+  const change = growthText(metric);
+  const arrow = metric?.percentage > 0 ? "↑" : metric?.percentage < 0 ? "↓" : "";
+  return <Card sx={cardSx}>
+    <CardContent sx={{ p: 1.75, "&:last-child": { pb: 1.75 } }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+        <Typography color="text.secondary" sx={{ fontSize: 13, fontWeight: 500 }}>{label}</Typography>
+        {change && <Box component="span" sx={{ px: .7, py: .2, borderRadius: 1, fontSize: 11, fontWeight: 600, ...growthSx(metric) }}>{arrow}{change}</Box>}
+      </Box>
+      <Typography noWrap sx={{ mt: .75, fontSize: 22, lineHeight: 1.25, fontWeight: 700 }}>{money(metric?.current)}{plain ? "" : " ကျပ်"}</Typography>
+    </CardContent>
+  </Card>;
 }
 
-function SalesTrend({ trend, onTrend, entries }) {
+function SalesTrend({ trend, onTrend, entries, mobile = false }) {
   const [activeIndex, setActiveIndex] = useState(null);
   const maxSales = niceMaximum(
     Math.max(...entries.map((entry) => entry.sales), 0),
@@ -1254,6 +1051,12 @@ function SalesTrend({ trend, onTrend, entries }) {
   const top = 34;
   const chartHeight = 218;
   const count = Math.max(entries.length, 1);
+  const labelEvery = Math.max(1, Math.ceil(entries.length / 7));
+  const totalSales = entries.reduce((sum, entry) => sum + Number(entry.sales || 0), 0);
+  const totalOrders = entries.reduce((sum, entry) => sum + Number(entry.orders || 0), 0);
+  const axisColor = "#334155";
+  const axisFontSize = mobile ? 12 : 11.5;
+  const axisFontWeight = mobile ? 600 : 500;
   const x = (index) => left + ((index + 0.5) * chartWidth) / count;
   const salesY = (value) => baseline - (value / maxSales) * chartHeight;
   const ordersY = (value) => baseline - (value / maxOrders) * chartHeight;
@@ -1276,11 +1079,17 @@ function SalesTrend({ trend, onTrend, entries }) {
               onClick={() => onTrend(item)}
               sx={{
                 minWidth: 0,
-                px: 1,
+                px: mobile ? 0.55 : 1,
                 minHeight: 30,
                 textTransform: "capitalize",
-                fontSize: 11,
-                fontWeight: 700,
+                color:
+                  item === trend
+                    ? "common.white"
+                    : mobile
+                      ? "text.primary"
+                      : "primary.main",
+                fontSize: mobile ? 10.5 : 11,
+                fontWeight: item === trend ? 600 : 500,
               }}
             >
               {item}
@@ -1289,17 +1098,23 @@ function SalesTrend({ trend, onTrend, entries }) {
         </Stack>
       }
     >
-      <Stack direction="row" spacing={2} sx={{ mb: 1.25 }}>
-        <Legend color="#9579ef" label="Sales (MMK)" />
-        <Legend color="#348cf5" label="Orders" />
+      <Stack
+        direction="row"
+        spacing={{ xs: 1.5, sm: 2.5 }}
+        sx={{ mb: 1.25, justifyContent: mobile ? "space-between" : "flex-start" }}
+      >
+        <Legend color="#7c5ce7" label={mobile ? "Sale" : "Sales (MMK)"} value={compactAmount(totalSales)} />
+        <Legend color="#2563eb" label="Orders" value={money(totalOrders)} />
       </Stack>
       <Box sx={{ position: "relative" }}>
         <Box
           component="svg"
           viewBox="0 0 640 305"
+          role="img"
+          aria-label="Sales and order trend chart"
           sx={{
             width: "100%",
-            height: 305,
+            height: { xs: 238, sm: 305 },
             display: "block",
             overflow: "visible",
           }}
@@ -1310,6 +1125,9 @@ function SalesTrend({ trend, onTrend, entries }) {
               <stop offset="100%" stopColor="#bcaaf5" />
             </linearGradient>
           </defs>
+          <rect x={left} y={top} width={chartWidth} height={chartHeight} rx="8" fill="#fbfcfe" />
+          <text x="6" y="20" fill={axisColor} fontSize={axisFontSize} fontWeight={axisFontWeight}>MMK</text>
+          <text x="610" y="20" textAnchor="end" fill={axisColor} fontSize={axisFontSize} fontWeight={axisFontWeight}>Orders</text>
           <g stroke="#e5eaf2" strokeWidth="1">
             {[0, 1, 2, 3, 4, 5].map((index) => (
               <line
@@ -1334,7 +1152,7 @@ function SalesTrend({ trend, onTrend, entries }) {
                 width={barWidth}
                 height={baseline - salesY(entry.sales)}
                 rx="5"
-                fill="url(#sales-bar-gradient)"
+                fill="#7c5ce7"
                 opacity={
                   activeIndex === null || activeIndex === index ? 1 : 0.48
                 }
@@ -1346,23 +1164,15 @@ function SalesTrend({ trend, onTrend, entries }) {
                 height={chartHeight}
                 fill="transparent"
               />
-              <text
-                x={x(index)}
-                y="282"
-                textAnchor="middle"
-                fill="#6f7c92"
-                fontSize="10"
-              >
-                {label(entry.key)}
-              </text>
+              {(index % labelEvery === 0 || index === entries.length - 1) && <text x={x(index)} y="282" textAnchor="middle" fill={axisColor} fontSize={axisFontSize} fontWeight={axisFontWeight}>{label(entry.key)}</text>}
             </g>
           ))}
           {entries.length > 1 && (
             <polyline
               points={points}
               fill="none"
-              stroke="#348cf5"
-              strokeWidth="3"
+              stroke="#2563eb"
+              strokeWidth="2.5"
               strokeLinejoin="round"
               strokeLinecap="round"
             />
@@ -1374,8 +1184,8 @@ function SalesTrend({ trend, onTrend, entries }) {
               cy={ordersY(entry.orders)}
               r={activeIndex === index ? "5.5" : "4"}
               fill="#fff"
-              stroke="#348cf5"
-              strokeWidth="3"
+               stroke="#2563eb"
+               strokeWidth="2.5"
               pointerEvents="none"
             />
           ))}
@@ -1384,16 +1194,18 @@ function SalesTrend({ trend, onTrend, entries }) {
               <text
                 x="6"
                 y={baseline + 4 - index * (chartHeight / 5)}
-                fill="#6f7c92"
-                fontSize="11"
+                fill={axisColor}
+                fontSize={axisFontSize}
+                fontWeight={axisFontWeight}
               >
                 {compactAmount((maxSales / 5) * index)}
               </text>
               <text
                 x="610"
                 y={baseline + 4 - index * (chartHeight / 5)}
-                fill="#6f7c92"
-                fontSize="11"
+                fill={axisColor}
+                fontSize={axisFontSize}
+                fontWeight={axisFontWeight}
                 textAnchor="end"
               >
                 {Math.round((maxOrders / 5) * index)}
@@ -1406,7 +1218,7 @@ function SalesTrend({ trend, onTrend, entries }) {
             sx={{
               position: "absolute",
               top: 10,
-              left: `${((activeIndex + 0.5) / count) * 100}%`,
+              left: `${Math.min(84, Math.max(16, ((activeIndex + 0.5) / count) * 100))}%`,
               transform: "translateX(-50%)",
               zIndex: 1,
               minWidth: 156,
@@ -1555,6 +1367,7 @@ function SalesSummary({ rows }) {
   return (
     <ReportCard title="Sales Summary">
       <DataGrid
+        gridTemplateColumns="1.1fr 1fr .72fr .78fr 1fr 1fr"
         columns={[
           "Period",
           "Sales (MMK)",
@@ -1575,14 +1388,13 @@ function SalesSummary({ rows }) {
     </ReportCard>
   );
 }
-function ComparisonTable({ comparison, range }) {
-  const current = `${formatDate(range.from)} – ${formatDate(range.to)}`;
-  const previous = `${formatDate(range.previous.from)} – ${formatDate(range.previous.to)}`;
+function ComparisonTable({ comparison }) {
   return (
     <Box sx={{ mt: 2.25 }}>
       <ReportCard title="Sales Comparison">
         <DataGrid
-          columns={["Metric", current, previous, "Change", "Growth"]}
+          gridTemplateColumns="1.08fr 1fr 1fr .86fr .86fr"
+          columns={["Metric", "This Month", "Last Month", "Change", "Growth"]}
           rows={comparison.map((row) => [
             row.metric,
             money(row.current),
@@ -1596,7 +1408,7 @@ function ComparisonTable({ comparison, range }) {
     </Box>
   );
 }
-function DataGrid({ columns, rows, growthMetrics }) {
+function DataGrid({ columns, rows, growthMetrics, gridTemplateColumns }) {
   return (
     <Box
       sx={{
@@ -1609,11 +1421,12 @@ function DataGrid({ columns, rows, growthMetrics }) {
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))`,
-          minHeight: 37,
+          gridTemplateColumns:
+            gridTemplateColumns ?? `repeat(${columns.length}, minmax(0, 1fr))`,
+          minHeight: 42,
           alignItems: "center",
-          px: 1.25,
-          columnGap: 1,
+          px: 1,
+          columnGap: 0.45,
           bgcolor: "#f7f9fc",
         }}
       >
@@ -1622,8 +1435,9 @@ function DataGrid({ columns, rows, growthMetrics }) {
             key={column}
             sx={{
               color: "text.secondary",
-              fontSize: 10.5,
-              fontWeight: 800,
+              fontSize: 12,
+              lineHeight: 1.2,
+              fontWeight: 600,
               textTransform: "uppercase",
               textAlign: index === 0 ? "left" : "right",
             }}
@@ -1637,18 +1451,18 @@ function DataGrid({ columns, rows, growthMetrics }) {
           key={`${row[0]}-${rowIndex}`}
           sx={{
             display: "grid",
-            gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))`,
-            minHeight: 41,
+            gridTemplateColumns:
+              gridTemplateColumns ?? `repeat(${columns.length}, minmax(0, 1fr))`,
+            minHeight: 45,
             alignItems: "center",
-            px: 1.25,
-            columnGap: 1,
+            px: 1,
+            columnGap: 0.45,
             borderBottom: rowIndex === rows.length - 1 ? 0 : "1px solid",
             borderColor: "divider",
           }}
         >
           {row.map((cell, index) =>
-            growthMetrics &&
-            (index === row.length - 2 || index === row.length - 1) ? (
+            growthMetrics && index === row.length - 1 ? (
               <Box
                 key={`${row[0]}-${index}`}
                 sx={{
@@ -1658,26 +1472,27 @@ function DataGrid({ columns, rows, growthMetrics }) {
                   px: 0.65,
                   py: 0.2,
                   borderRadius: 1,
-                  fontSize: 11,
-                  fontWeight: 800,
+                  fontSize: 12,
+                  fontWeight: 600,
                   whiteSpace: "nowrap",
                   ...growthSx(growthMetrics[rowIndex]),
                 }}
               >
-                {index === row.length - 1 &&
-                  (growthMetrics[rowIndex]?.percentage > 0
-                    ? "↑ "
-                    : growthMetrics[rowIndex]?.percentage < 0
-                      ? "↓ "
-                      : "")}
+                {growthMetrics[rowIndex]?.percentage > 0
+                  ? "↑ "
+                  : growthMetrics[rowIndex]?.percentage < 0
+                    ? "↓ "
+                    : ""}
                 {cell}
               </Box>
             ) : (
               <Typography
                 key={`${row[0]}-${index}`}
                 sx={{
-                  fontSize: 12,
-                  fontWeight: index === 0 ? 700 : 600,
+                  color: "text.primary",
+                  fontSize: 13.5,
+                  lineHeight: 1.25,
+                  fontWeight: index === 0 ? 600 : 500,
                   textAlign: index === 0 ? "left" : "right",
                   whiteSpace: "nowrap",
                 }}
@@ -1704,7 +1519,7 @@ function ReportCard({ title, action, children }) {
             mb: 1.5,
           }}
         >
-          <Typography sx={{ fontSize: 17, fontWeight: 800 }}>
+          <Typography sx={{ fontSize: 17, fontWeight: 600 }}>
             {title}
           </Typography>
           {action}
@@ -1714,13 +1529,18 @@ function ReportCard({ title, action, children }) {
     </Card>
   );
 }
-function Legend({ color, label }) {
+function Legend({ color, label, value }) {
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 0.7 }}>
       <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: color }} />
-      <Typography color="text.secondary" sx={{ fontSize: 12 }}>
+      <Typography sx={{ color: "#334155", fontSize: 13, fontWeight: 500 }}>
         {label}
       </Typography>
+      {value && (
+        <Typography sx={{ color: "text.primary", fontSize: 13, fontWeight: 600 }}>
+          {value}
+        </Typography>
+      )}
     </Box>
   );
 }

@@ -69,6 +69,7 @@ export default function RecordSupplierPaymentPage() {
   const [cashName, setCashName] = useState("");
   const [cashPhone, setCashPhone] = useState("");
   const signatureRef = useRef(null);
+  const [signature, setSignature] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState([{ id: "cash", name: "Cash" }]);
   const [mobileName, setMobileName] = useState("");
   const [mobileNumber, setMobileNumber] = useState("");
@@ -178,12 +179,13 @@ export default function RecordSupplierPaymentPage() {
   const remaining = Math.max(0, activeSupplier.outstanding - numericAmount);
   const dueRequired = numericAmount > 0 && numericAmount < activeSupplier.outstanding;
   const isCash = method === "cash";
-  const valid = numericAmount > 0 && numericAmount <= activeSupplier.outstanding && (!dueRequired || dueDate) && (isCash ? cashName && cashPhone : mobileName && mobileNumber && transactionId.trim());
+  const valid = numericAmount > 0 && numericAmount <= activeSupplier.outstanding && (!dueRequired || dueDate) && (isCash ? cashName && cashPhone && signature : mobileName && mobileNumber && transactionId.trim());
   const save = async () => {
     if (saving) return;
     const nextFieldErrors = {};
     if (numericAmount <= 0) nextFieldErrors.amount = "Enter a payment amount.";
     if (numericAmount > activeSupplier.outstanding) nextFieldErrors.amount = "Payment amount cannot exceed outstanding balance.";
+    if (isCash && !signature) nextFieldErrors.signature = "Receiver signature is required.";
     if (!isCash && !transactionId.trim()) nextFieldErrors.transactionId = "Transaction ID is required for non-cash payments.";
     if (Object.keys(nextFieldErrors).length) {
       setFieldErrors(nextFieldErrors);
@@ -209,7 +211,7 @@ export default function RecordSupplierPaymentPage() {
         mobileAccountName: isCash ? undefined : mobileName,
         reference: isCash ? undefined : transactionId.trim(),
         signatureDataUrl:
-          isCash && signatureRef.current
+          isCash && signature && signatureRef.current
             ? signatureRef.current.toDataURL()
             : undefined,
         notes: dueDate ? `Due date: ${dueDate}` : undefined,
@@ -260,10 +262,13 @@ export default function RecordSupplierPaymentPage() {
     context.strokeStyle = "#1f2937";
     context.lineTo(event.clientX - rect.left, event.clientY - rect.top);
     context.stroke();
+    setSignature(true);
+    setFieldErrors((current) => ({ ...current, signature: "" }));
   };
   const clearSignature = () => {
     const canvas = signatureRef.current;
     canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    setSignature(false);
   };
   return (
     <Box
@@ -386,7 +391,7 @@ export default function RecordSupplierPaymentPage() {
                   position: "relative",
                   height: 130,
                   border: "1px dashed",
-                  borderColor: "primary.light",
+                  borderColor: fieldErrors.signature ? "error.main" : signature ? "primary.main" : "primary.light",
                   borderRadius: 1.5,
                   bgcolor: "#fafcff",
                   overflow: "hidden",
@@ -420,6 +425,11 @@ export default function RecordSupplierPaymentPage() {
                   Clear signature
                 </Button>
               </Box>
+              {fieldErrors.signature && (
+                <Typography color="error.main" sx={{ mt: 0.75, fontSize: 12.5 }}>
+                  {fieldErrors.signature}
+                </Typography>
+              )}
             </Box>
           </>
         ) : (

@@ -13,6 +13,7 @@ export const loadPricePage = () => import("./pages/Price/PricePage");
 export const loadAddPricePage = () => import("./pages/Price/AddPricePage");
 export const loadAddPromotionPage = () => import("./pages/Price/AddPromotionPage");
 export const loadPriceHistoryPage = () => import("./pages/Price/PriceHistoryPage");
+export const loadPromotionReportPage = () => import("./pages/Price/PromotionReportPage");
 export const loadReportPage = () => import("./pages/Report/ReportPage");
 export const loadProductReportPage = () => import("./pages/Report/ProductReportPage");
 export const loadSalesReportPage = () => import("./pages/Report/SalesReportPage");

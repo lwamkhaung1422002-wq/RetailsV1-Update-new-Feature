@@ -592,6 +592,7 @@ model Expense {
   amount    Int
   spentAt   DateTime @default(now())
   note      String?
+  cancelledAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)

@@ -135,7 +135,28 @@ function QuantityButton({ item, change, onQuantityChange, children, ...props }) 
   );
 }
 
-const ProductCard = memo(function ProductCard({ item, onQuantityChange }) {
+function QuantityInput({ item, onQuantitySet, sx }) {
+  const [draft, setDraft] = useState(null);
+  const value = draft ?? String(item.quantity);
+
+  const commit = () => {
+    if (draft === null || draft.trim() === "") {
+      setDraft(null);
+      return;
+    }
+    const quantity = Number(draft);
+    if (!Number.isInteger(quantity) || quantity < 0 || quantity > item.stock) {
+      setDraft(null);
+      return;
+    }
+    setDraft(null);
+    onQuantitySet(item.id, quantity);
+  };
+
+  return <Box component="input" type="text" inputMode="numeric" pattern="[0-9]*" aria-label={`Quantity for ${item.name}`} value={value} onChange={(event) => { const nextValue = event.target.value; if (/^\d*$/.test(nextValue)) setDraft(nextValue); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); event.currentTarget.blur(); } }} sx={{ width: "100%", minWidth: 0, height: "100%", p: 0, border: 0, outline: 0, bgcolor: "transparent", color: "text.primary", textAlign: "center", font: "inherit", ...sx }} />;
+}
+
+const ProductCard = memo(function ProductCard({ item, onQuantityChange, onQuantitySet }) {
   const lineTotal = item.price * item.quantity;
   const promotionText =
     item.promotion.type === "discount"
@@ -213,15 +234,7 @@ const ProductCard = memo(function ProductCard({ item, onQuantityChange }) {
                   >
                     <RemoveRoundedIcon />
                   </QuantityButton>
-                  <Typography
-                    sx={{
-                      display: "grid",
-                      placeItems: "center",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {item.quantity}
-                  </Typography>
+                  <QuantityInput item={item} onQuantitySet={onQuantitySet} sx={{ fontWeight: 600 }} />
                   <QuantityButton
                     size="small"
                     aria-label={`Increase ${item.name} quantity`}
@@ -497,10 +510,10 @@ export default function CreateOrderPage() {
     const resolved = await api.pricing.resolve({ productId: product.id, quantity });
     return toPricedCartItem(product, quantity, resolved.pricing);
   }, [api]);
-  const changeQuantity = useCallback((id, change) => {
+  const setQuantity = useCallback((id, quantity) => {
     const item = itemsRef.current.find((current) => current.id === id);
     if (!item) return;
-    const quantity = item.quantity + change;
+    if (!Number.isInteger(quantity)) return;
 
     if (quantity <= 0) {
       const nextItems = itemsRef.current.filter((entry) => entry.id !== id);
@@ -534,6 +547,10 @@ export default function CreateOrderPage() {
         setOrderError(error.message || "Promotion price could not be refreshed."),
       );
   }, [commitItems, nextPricingRevision, priceCartItem]);
+  const changeQuantity = useCallback((id, change) => {
+    const item = itemsRef.current.find((current) => current.id === id);
+    if (item) setQuantity(id, item.quantity + change);
+  }, [setQuantity]);
 
   const selectOtherPayment = (value) => {
     setPaymentMethod("other");
@@ -541,11 +558,11 @@ export default function CreateOrderPage() {
     setOtherAnchor(null);
   };
 
-  const addProductFromPicker = async (product, initialPricing) => {
+  const addProductFromPicker = async (product, initialPricing, quantityOverride) => {
     if (product.stock <= 0) return;
     const existing = itemsRef.current.find((item) => item.id === product.id);
-    const requestedQuantity = pendingQuantityRef.current.get(product.id) ?? existing?.quantity ?? 0;
-    const quantity = Math.min(product.stock, requestedQuantity + 1);
+    const requestedQuantity = quantityOverride ?? ((pendingQuantityRef.current.get(product.id) ?? existing?.quantity ?? 0) + 1);
+    const quantity = Math.min(product.stock, requestedQuantity);
     const revision = nextPricingRevision(product.id);
     try {
       if (!existing && quantity === 1 && initialPricing) {
@@ -626,6 +643,7 @@ export default function CreateOrderPage() {
         addProduct={addProductFromPicker}
         totals={totals}
         changeQuantity={changeQuantity}
+        setQuantity={setQuantity}
         paymentMethod={paymentMethod}
         setPaymentMethod={setPaymentMethod}
         amountReceived={amountReceived}
@@ -713,6 +731,7 @@ export default function CreateOrderPage() {
               key={item.id}
               item={item}
               onQuantityChange={changeQuantity}
+              onQuantitySet={setQuantity}
             />
           ))}
         </Stack>
@@ -1191,6 +1210,7 @@ export function DesktopCreateOrder({
   addProduct,
   totals,
   changeQuantity,
+  setQuantity,
   paymentMethod,
   setPaymentMethod,
   amountReceived,
@@ -1252,6 +1272,14 @@ export function DesktopCreateOrder({
     }
     if (existing) changeQuantity(id, delta);
   };
+  const setDesktopQuantity = (id, quantity) => {
+    if (items.some((item) => item.id === id)) {
+      setQuantity(id, quantity);
+      return;
+    }
+    const product = catalog.find((item) => item.id === id);
+    if (product && quantity > 0 && quantity <= product.stock) addProduct(product, undefined, quantity);
+  };
   const panelSx = {
     borderRadius: 2.5,
     bgcolor: "background.paper",
@@ -1298,7 +1326,7 @@ export function DesktopCreateOrder({
               },
             }}
           />
-          <Card sx={panelSx}>
+          {visibleItems.length > 0 && <Card sx={panelSx}>
             <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
               <Stack spacing={1}>
                 {catalogError
@@ -1331,11 +1359,12 @@ export function DesktopCreateOrder({
                         key={item.id}
                         item={item}
                         onQuantityChange={updateDesktopQuantity}
+                        onQuantitySet={setDesktopQuantity}
                       />
                     ))}
               </Stack>
             </CardContent>
-          </Card>
+          </Card>}
         </Box>
         <Box sx={{ display: "grid", gap: 1.5, alignContent: "start" }}>
           <Card sx={panelSx}>
@@ -1478,7 +1507,7 @@ export function DesktopCreateOrder({
   );
 }
 
-function DesktopOrderItem({ item, onQuantityChange }) {
+function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
   const subtotal = item.price * item.quantity;
   const promotionText =
     item.promotion.type === "discount"
@@ -1547,16 +1576,7 @@ function DesktopOrderItem({ item, onQuantityChange }) {
         >
           <RemoveRoundedIcon sx={{ fontSize: 28 }} />
         </QuantityButton>
-        <Typography
-          sx={{
-            display: "grid",
-            placeItems: "center",
-            fontSize: 26,
-            fontWeight: 700,
-          }}
-        >
-          {item.quantity}
-        </Typography>
+        <QuantityInput item={item} onQuantitySet={onQuantitySet} sx={{ fontSize: 26, fontWeight: 700 }} />
         <QuantityButton
           aria-label={`Increase ${item.name} quantity`}
           item={item}

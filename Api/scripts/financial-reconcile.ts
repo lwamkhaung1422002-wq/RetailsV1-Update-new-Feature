@@ -11,7 +11,7 @@ async function main(): Promise<void> {
     const [orders, purchases, expenses, balances] = await Promise.all([
       prisma.order.findMany({ where: { shopId: shop.id }, include: { items: true, payments: true } }),
       prisma.purchase.findMany({ where: { shopId: shop.id }, include: { items: true, payments: true, returns: true } }),
-      prisma.expense.findMany({ where: { shopId: shop.id } }),
+      prisma.expense.findMany({ where: { shopId: shop.id, cancelledAt: null } }),
       prisma.inventoryBalance.findMany({ where: { shopId: shop.id }, include: { product: true, variant: true } }),
     ]);
     const failures: string[] = [];

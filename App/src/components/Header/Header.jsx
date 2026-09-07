@@ -17,7 +17,7 @@ const pageTitles = {
   "/note": "Note",
   "/sale-record": "Sale Records",
   "/payment": "Payment",
-  "/report": "Reports & Analytics",
+  "/report": "Reports",
   "/price": "Price & Discount",
   "/suppliers": "Suppliers",
   "/settings": "Settings",
@@ -29,6 +29,7 @@ export default function Header() {
   const isMobile = useMediaQuery("(max-width:768px)");
   const isDesktopStockDetails = pathname.startsWith("/stock/") && !["/stock/add", "/stock/history", "/stock/movement/add"].includes(pathname);
   const isDesktopStockHistory = pathname === "/stock/history";
+  const isDesktopCreateOrder = pathname === "/sale/create";
   const isSupplierDetails = /^\/suppliers\/[^/]+$/.test(pathname);
   const mobileTitle = pathname === "/" ? "Dashboard" : pageTitles[pathname] ?? "POS System";
   const [sortAnchor, setSortAnchor] = useState(null);
@@ -82,8 +83,8 @@ export default function Header() {
     <AppBar position="static" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: "divider" }}>
       <Toolbar sx={{ justifyContent: "space-between", minHeight: 72, px: { md: 4, lg: 5 } }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          {(isDesktopStockDetails || isDesktopStockHistory) && <IconButton aria-label="Back to inventory" onClick={() => navigate("/stock")} sx={{ ml: -1 }}><ArrowBackRoundedIcon /></IconButton>}
-          {!isSupplierDetails && <Typography variant="h6" fontWeight={800}>{pathname === "/" ? "Dashboard" : isDesktopStockDetails ? "Stock Details" : isDesktopStockHistory ? "Stock Movement" : pathname === "/report/sales" ? "Sales Reports & Analytics" : pathname === "/report/products" ? "Product Reports & Analytics" : pathname.startsWith("/report") ? "Reports & Analytics" : pageTitles[pathname] ?? "POS System"}</Typography>}
+          {(isDesktopStockDetails || isDesktopStockHistory || isDesktopCreateOrder) && <IconButton aria-label={isDesktopCreateOrder ? "Back to orders" : "Back to inventory"} onClick={() => navigate(isDesktopCreateOrder ? "/sale" : "/stock")} sx={{ ml: -1 }}><ArrowBackRoundedIcon /></IconButton>}
+          {!isSupplierDetails && <Typography variant="h6" fontWeight={800}>{pathname === "/" ? "Dashboard" : isDesktopStockDetails ? "Stock Details" : isDesktopStockHistory ? "Stock Movement" : pathname === "/report/sales" ? "Sale Report" : pathname === "/report/products" ? "Product Report" : pathname.startsWith("/report") ? "Reports" : pageTitles[pathname] ?? "POS System"}</Typography>}
         </Box>
         <Stack direction="row" spacing={1}>
           <IconButton aria-label="Notifications" onClick={(event) => setNotificationAnchor(event.currentTarget)}><Badge color="error" variant="dot" invisible={!notifications.some((item) => !item.readAt)}><NotificationsRoundedIcon /></Badge></IconButton>

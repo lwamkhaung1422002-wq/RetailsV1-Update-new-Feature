@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { Alert, Box, Button, Chip, Dialog, DialogContent, Divider, FormControl, FormControlLabel, IconButton, InputAdornment, InputLabel, MenuItem, Paper, Radio, RadioGroup, Select, Stack, TextField, Typography, useMediaQuery } from "@mui/material";
+import { Alert, Box, Button, Chip, Dialog, DialogContent, Divider, FormControl, FormControlLabel, IconButton, InputAdornment, InputLabel, Menu, MenuItem, Paper, Radio, RadioGroup, Select, Stack, TextField, Typography, useMediaQuery } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
@@ -8,19 +8,17 @@ import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import StopCircleOutlinedIcon from "@mui/icons-material/StopCircleOutlined";
 import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
-import LocalOfferOutlinedIcon from "@mui/icons-material/LocalOfferOutlined";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import MoreVertRoundedIcon from "@mui/icons-material/MoreVertRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
-import SpaOutlinedIcon from "@mui/icons-material/SpaOutlined";
-import LocalDrinkOutlinedIcon from "@mui/icons-material/LocalDrinkOutlined";
-import Inventory2OutlinedIcon from "@mui/icons-material/Inventory2Outlined";
 import { useCategoriesQuery, useProductsQuery, usePromotionCampaignsQuery } from "../../hooks/usePosQueries";
 import { usePosApi } from "../../hooks/useApiResource";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
 import { queryKeys } from "../../lib/queryKeys";
+import PriceHistoryPage from "./PriceHistoryPage";
+import PromotionReportPage from "./PromotionReportPage";
 const yangonDateKey = (value = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Yangon", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
   const part = (type) => parts.find((item) => item.type === type)?.value || "";
@@ -82,35 +80,47 @@ export default function PricePage() {
       <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.25, mt: 1.5 }}><TabButton label="Price" active={tab === "price"} onClick={() => setTab("price")} tone="primary.main" /><TabButton label="Promotion" active={tab === "promotion"} onClick={() => setTab("promotion")} tone="success.main" /></Box>
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mt: 2.25, mb: 1.75 }}><Typography sx={{ fontSize: 16, fontWeight: 500 }}>{visible.length} {tab === "price" ? "Products" : "Promotions"}</Typography>{tab === "promotion" && <Typography sx={{ fontSize: 16, fontWeight: 700 }}>Active: {activePromotionCount}</Typography>}</Box>
       {promotionActionError && <Alert severity="error" sx={{ mb: 1.5 }}>{promotionActionError}</Alert>}
-      <Stack spacing={1.75}>{visible.map((product) => <ProductCard key={product.id} product={product} promotion={tab === "promotion"} ending={endingPromotionId === product.id} onEdit={() => navigate(tab === "price" ? `/price/add?edit=${product.id}` : `/price/promotion/add?edit=${product.id}`)} onEnd={tab === "promotion" ? () => void endPromotion(product) : undefined} />)}</Stack>
+      <Stack spacing={1.75}>{visible.map((product) => <ProductCard key={product.id} product={product} promotion={tab === "promotion"} ending={endingPromotionId === product.id} onEdit={() => navigate(tab === "price" ? `/price/add?edit=${product.id}` : `/price/promotion/add?edit=${product.id}`)} onEnd={tab === "promotion" ? () => void endPromotion(product) : undefined} onReport={tab === "promotion" ? () => navigate(`/price/promotion/${product.id}/report`) : undefined} />)}</Stack>
     </Box>
     <Paper elevation={5} sx={footerSx}><Box sx={{ display: "grid", gridTemplateColumns: "1.65fr 0.9fr", gap: 1.5 }}><Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => navigate(tab === "price" ? "/price/add" : "/price/promotion/add")} sx={footerPrimarySx}>{tab === "price" ? "Add Price" : "Add Promotion"}</Button><Button variant="outlined" startIcon={<HistoryRoundedIcon />} onClick={() => navigate("/price/history")} sx={footerSecondarySx}>History</Button></Box></Paper>
     <Dialog open={filterOpen} onClose={() => setFilterOpen(false)} fullWidth slotProps={{ paper: { sx: { m: 2.5, borderRadius: 2.5, maxWidth: 420 } } }}><DialogContent sx={{ p: 2.5 }}><Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2.5 }}><Typography sx={{ fontSize: 20, fontWeight: 600 }}>Filter {tab === "price" ? "prices" : "promotions"}</Typography><IconButton onClick={() => setFilterOpen(false)}><CloseRoundedIcon /></IconButton></Box><Typography sx={{ fontSize: 14, fontWeight: 600, color: "text.secondary" }}>Date</Typography><Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, mt: 1 }}>{[["all", "All"], ["today", "Today"], ["custom", "Custom"]].map(([value, label]) => <Button key={value} variant={dateMode === value ? "contained" : "outlined"} onClick={() => setDateMode(value)} sx={{ minHeight: 48, borderRadius: 1.5, textTransform: "none" }}>{label}</Button>)}</Box>{dateMode === "custom" && <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5, mt: 1.75 }}><TextField label="From" type="date" value={from} onChange={(event) => setFrom(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /><TextField label="To" type="date" value={to} onChange={(event) => setTo(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Box>}<Button fullWidth variant="contained" onClick={() => setFilterOpen(false)} sx={{ mt: 2.5, minHeight: 54, borderRadius: 1.5, fontSize: 16, fontWeight: 600, textTransform: "none" }}>Apply filters</Button></DialogContent></Dialog>
   </Box>;
 }
 
-function TabButton({ label, active, onClick, tone }) { return <Button onClick={onClick} startIcon={<LocalOfferOutlinedIcon />} sx={{ minHeight: 54, borderRadius: 1.25, border: "1px solid", borderColor: active ? tone : "#dfe3e8", bgcolor: active ? "#eaf3ff" : "background.paper", color: tone, fontSize: 16, fontWeight: 700, textTransform: "none" }}>{label}</Button>; }
-function ProductCard({ product, promotion, onEdit, onEnd, ending }) {
+function TabButton({ label, active, onClick, tone }) { return <Button onClick={onClick} sx={{ minHeight: 54, borderRadius: 1.25, border: "1px solid", borderColor: active ? tone : "#dfe3e8", bgcolor: active ? "#eaf3ff" : "background.paper", color: tone, fontSize: 16, fontWeight: 700, textTransform: "none" }}>{label}</Button>; }
+function ProductCard({ product, promotion, onEdit, onEnd, onReport, ending }) {
   const period = promotion ? formatPromotionPeriod(product.start, product.end) : "";
-  if (promotion && product.scope !== "PRODUCT") return <PromotionSummaryCard product={product} period={period} onEdit={onEdit} onEnd={onEnd} ending={ending} />;
-  return <Paper elevation={2} sx={{ p: { xs: 1.75, sm: 2.25 }, borderRadius: 1.75, boxShadow: "0 2px 8px rgba(15,23,42,0.12)" }}>
-    <Box sx={{ display: "grid", gridTemplateColumns: promotion ? "auto minmax(0, 1fr) auto auto auto" : "auto minmax(0, 1fr) auto", gap: { xs: 0.65, sm: 1 }, alignItems: "center" }}>
+  if (promotion && product.scope !== "PRODUCT") return <PromotionSummaryCard product={product} period={period} onEdit={onEdit} onEnd={onEnd} onReport={onReport} ending={ending} />;
+  return <Paper elevation={2} sx={{ p: { xs: 1.75, sm: 2.25 }, borderRadius: 1.75, boxShadow: "0 2px 8px rgba(15,23,42,0.12)", "@media (max-width:360px)": { p: 1.25 } }}>
+    <Box sx={{ display: "grid", gridTemplateColumns: promotion ? "auto minmax(0, 1fr) auto" : "auto minmax(0, 1fr) auto", gap: { xs: 0.65, sm: 1 }, alignItems: "center", "@media (max-width:360px)": { columnGap: .4 } }}>
       <Chip label={promotion ? (product.ended ? "End Promotion" : "Promotion") : "Price"} size="small" sx={{ height: 28, bgcolor: promotion ? (product.ended ? "#ffebee" : "#e3f5e6") : "#eaf3ff", color: promotion ? (product.ended ? "error.main" : "#168437") : "primary.main", borderRadius: 1, fontSize: 12, fontWeight: 600, "& .MuiChip-label": { px: 0.8 } }} />
       <Typography noWrap sx={{ minWidth: 0, fontSize: { xs: 16, sm: 17 }, fontWeight: 600 }}>{product.name}{promotion && <Box component="span" sx={{ ml: 0.65, color: "text.secondary", fontSize: { xs: 12, sm: 13 }, fontWeight: 500 }}>({product.scopeLabel})</Box>}</Typography>
-      {promotion && <Chip label={period} size="small" sx={{ maxWidth: { xs: 72, sm: 120 }, height: 26, borderRadius: 99, bgcolor: "#e3f5e6", color: "#168437", fontSize: 10, fontWeight: 700, "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis", px: 0.8 } }} />}
-      <Button variant="outlined" startIcon={<EditOutlinedIcon />} onClick={onEdit} sx={{ minHeight: 42, px: { xs: 0.8, sm: 1.25 }, borderRadius: 1, fontSize: 13, fontWeight: 600, textTransform: "none", whiteSpace: "nowrap", "& .MuiButton-startIcon": { mr: { xs: 0.35, sm: 0.7 } } }}>{promotion ? "Edit" : "Edit Price"}</Button>
-      {promotion && !product.ended && <IconButton aria-label={`End ${product.name}`} disabled={ending} onClick={onEnd} color="error"><StopCircleOutlinedIcon /></IconButton>}
+      {promotion ? <Box sx={{ display: "flex", alignItems: "center", gap: 0, justifySelf: "end", flexShrink: 0 }}><Chip label={period} size="small" sx={{ flexShrink: 0, height: 26, borderRadius: 99, bgcolor: "#e3f5e6", color: "#168437", fontSize: 10, fontWeight: 700, "& .MuiChip-label": { whiteSpace: "nowrap", px: 0.8 } }} /><PromotionActions product={product} onEdit={onEdit} onEnd={onEnd} onReport={onReport} ending={ending} /></Box> : <Button variant="outlined" startIcon={<EditOutlinedIcon />} onClick={onEdit} sx={{ minHeight: 42, px: { xs: 0.8, sm: 1.25 }, borderRadius: 1, fontSize: 13, fontWeight: 600, textTransform: "none", whiteSpace: "nowrap", "& .MuiButton-startIcon": { mr: { xs: 0.35, sm: 0.7 } } }}>Edit Price</Button>}
     </Box>
-    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1px 1fr", columnGap: 1.5, mt: 2 }}><Metric label="Cost Price" value={money(product.cost)} /><Box sx={{ bgcolor: "#d9dee5" }} /><Metric label="Sell Price" value={money(product.price)} caption={promotion && product.discountAmount ? `Discount ${money(product.discountAmount)} (${product.discountPercent}%)` : ""} /></Box>
+    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1px 1fr", columnGap: 1.5, mt: 2 }}>{promotion ? <Metric label="Product" value={product.scopeLabel} /> : <Metric label="Cost Price" value={money(product.cost)} />}<Box sx={{ bgcolor: "#d9dee5" }} />{promotion ? <Metric label="Discount" value={product.discountLabel} /> : <Metric label="Sell Price" value={money(product.price)} />}</Box>
   </Paper>;
 }
-function PromotionSummaryCard({ product, period, onEdit, onEnd, ending }) { const all = product.scope === "ALL"; return <Paper elevation={2} sx={{ p: { xs: 1.75, sm: 2.25 }, borderRadius: 1.75, boxShadow: "0 2px 8px rgba(15,23,42,0.12)" }}><Box sx={{ display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto auto", gap: 1, alignItems: "center" }}><Chip label={product.ended ? "End Promotion" : "Promotion"} size="small" sx={{ height: 28, bgcolor: product.ended ? "#ffebee" : "#e3f5e6", color: product.ended ? "error.main" : "#168437", borderRadius: 1, fontSize: 12, fontWeight: 600 }} /><Typography noWrap sx={{ fontSize: { xs: 16, sm: 17 }, fontWeight: 600 }}>{product.name} <Box component="span" sx={{ color: "text.secondary", fontSize: { xs: 12, sm: 13 }, fontWeight: 500 }}>({all ? "All" : "Category"})</Box></Typography><Chip label={period} size="small" sx={{ height: 26, borderRadius: 99, bgcolor: "#e3f5e6", color: "#168437", fontSize: 10, fontWeight: 700 }} /><Box sx={{ display: "flex", alignItems: "center", gap: .5 }}><Button variant="outlined" startIcon={<EditOutlinedIcon />} onClick={onEdit} sx={{ minHeight: 42, px: { xs: .8, sm: 1.25 }, textTransform: "none", fontSize: 13, fontWeight: 600 }}>Edit</Button>{!product.ended && <IconButton aria-label={`End ${product.name}`} disabled={ending} onClick={onEnd} color="error"><StopCircleOutlinedIcon /></IconButton>}</Box></Box><Box sx={{ display: "grid", gridTemplateColumns: "1fr 1px 1fr", columnGap: 1.5, mt: 2 }}><Box><Typography color="text.secondary" sx={{ fontSize: 13 }}>Applies To</Typography><Typography sx={{ mt: .5, fontSize: 17, fontWeight: 600 }}>{all ? "All Products" : product.categoryName}</Typography><Typography color="text.secondary" sx={{ mt: .25, fontSize: 13 }}>{all ? "Entire shop" : "Selected category"}</Typography></Box><Box sx={{ bgcolor: "#d9dee5" }} /><Box><Typography color="text.secondary" sx={{ fontSize: 13 }}>Discount</Typography><Typography color="success.main" sx={{ mt: .5, fontSize: 17, fontWeight: 600 }}>{product.discountLabel}</Typography><Typography color="text.secondary" sx={{ mt: .25, fontSize: 13 }}>{all ? "Applies to every product" : "Applies to products in this category"}</Typography></Box></Box></Paper>; }
+function PromotionSummaryCard({ product, period, onEdit, onEnd, onReport, ending }) { const all = product.scope === "ALL"; return <Paper elevation={2} sx={{ p: { xs: 1.75, sm: 2.25 }, borderRadius: 1.75, boxShadow: "0 2px 8px rgba(15,23,42,0.12)", "@media (max-width:360px)": { p: 1.25 } }}><Box sx={{ display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", gap: { xs: .65, sm: 1 }, alignItems: "center", "@media (max-width:360px)": { columnGap: .4 } }}><Chip label={product.ended ? "End Promotion" : "Promotion"} size="small" sx={{ height: 28, bgcolor: product.ended ? "#ffebee" : "#e3f5e6", color: product.ended ? "error.main" : "#168437", borderRadius: 1, fontSize: 12, fontWeight: 600, "& .MuiChip-label": { px: .8 } }} /><Typography noWrap sx={{ minWidth: 0, fontSize: { xs: 16, sm: 17 }, fontWeight: 600 }}>{product.name}</Typography><Box sx={{ display: "flex", alignItems: "center", gap: 0, justifySelf: "end", flexShrink: 0 }}><Chip label={period} size="small" sx={{ flexShrink: 0, height: 26, borderRadius: 99, bgcolor: "#e3f5e6", color: "#168437", fontSize: 10, fontWeight: 700, "& .MuiChip-label": { whiteSpace: "nowrap", px: .8 } }} /><PromotionActions product={product} onEdit={onEdit} onEnd={onEnd} onReport={onReport} ending={ending} /></Box></Box><Box sx={{ display: "grid", gridTemplateColumns: "1fr 1px 1fr", columnGap: 1.5, mt: 2 }}><Box sx={{ display: "flex", alignItems: "center" }}><Typography sx={{ fontSize: 17, fontWeight: 600 }}>{all ? "All Products" : `${product.categoryName} (Category)`}</Typography></Box><Box sx={{ bgcolor: "#d9dee5" }} /><Box><Typography color="text.secondary" sx={{ fontSize: 13 }}>Discount</Typography><Typography color="success.main" sx={{ mt: .5, fontSize: 17, fontWeight: 600 }}>{product.discountLabel}</Typography></Box></Box></Paper>; }
+
+function PromotionActions({ product, onEdit, onEnd, onReport, ending }) {
+  const [anchorEl, setAnchorEl] = useState(null);
+  const closeMenu = () => setAnchorEl(null);
+  return <>
+    <IconButton aria-label={`Actions for ${product.name}`} size="small" onClick={(event) => setAnchorEl(event.currentTarget)} sx={{ width: 36, height: 36, ml: -.15, mr: -.75 }}><MoreVertRoundedIcon /></IconButton>
+    <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={closeMenu} anchorOrigin={{ vertical: "bottom", horizontal: "right" }} transformOrigin={{ vertical: "top", horizontal: "right" }}>
+      <MenuItem onClick={() => { closeMenu(); onEdit(); }}><EditOutlinedIcon fontSize="small" sx={{ mr: 1.25, color: "primary.main" }} />Edit</MenuItem>
+      <MenuItem disabled={product.ended || ending} onClick={() => { closeMenu(); onEnd(); }} sx={{ color: "error.main" }}><StopCircleOutlinedIcon fontSize="small" sx={{ mr: 1.25 }} />End</MenuItem>
+      {onReport && <MenuItem onClick={() => { closeMenu(); onReport(); }}>Report</MenuItem>}
+    </Menu>
+  </>;
+}
 function formatPromotionPeriod(start, end) { const options = { timeZone: "Asia/Yangon", month: "short", day: "numeric" }; const startDate = new Date(start); const endDate = new Date(end); return Number.isNaN(startDate.valueOf()) || Number.isNaN(endDate.valueOf()) ? "—" : `${startDate.toLocaleDateString("en-US", options)}–${endDate.toLocaleDateString("en-US", options)}`; }
 function Metric({ label, value, caption }) { return <Box><Typography color="text.secondary" sx={{ fontSize: 13 }}>{label}</Typography><Typography sx={{ mt: 0.5, fontSize: 17, fontWeight: 600 }}>{value}</Typography>{caption && <Typography color="success.main" sx={{ mt: .35, fontSize: 11, fontWeight: 700 }}>{caption}</Typography>}</Box>; }
 
 function DesktopPricePromotion({ tab, setTab, search, setSearch, products: visibleProducts, catalog, categories, activePromotionCount, dateMode, setDateMode, from, setFrom, to, setTo, dialog, setDialog, onEnd, endingPromotionId }) {
   const tabLabel = tab === "price" ? "Products" : "Promotions";
-  const closeDialog = () => setDialog("");
+  const [reportCampaign, setReportCampaign] = useState(null);
+  const closeDialog = () => { setDialog(""); setReportCampaign(null); };
   return <Paper sx={desktopPricePageSx}>
     <Box sx={desktopPriceToolbarSx}>
       <TextField fullWidth value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search product by name or code" slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon sx={{ color: "text.secondary", fontSize: 22 }} /></InputAdornment> } }} sx={desktopPriceSearchSx} />
@@ -127,51 +137,59 @@ function DesktopPricePromotion({ tab, setTab, search, setSearch, products: visib
       <Typography sx={{ fontSize: 14, fontWeight: 700 }}>{visibleProducts.length} {tabLabel}</Typography>
       {tab === "promotion" && <Box sx={{ display: "flex", alignItems: "baseline", gap: 1.5 }}><Typography color="text.secondary" sx={{ fontSize: 13 }}>Active Promotions</Typography><Typography sx={{ fontSize: 20, fontWeight: 700 }}>{activePromotionCount}</Typography></Box>}
     </Box>
-    <Box sx={desktopProductGridSx}>{visibleProducts.map((product) => <DesktopProductCard key={product.id} product={product} promotion={tab === "promotion"} ending={endingPromotionId === product.id} onEnd={tab === "promotion" ? () => void onEnd(product) : undefined} onEdit={() => setDialog(tab === "promotion" ? "promotion" : "price")} />)}</Box>
+    <Box sx={desktopProductGridSx}>{visibleProducts.map((product) => <DesktopProductCard key={product.id} product={product} promotion={tab === "promotion"} ending={endingPromotionId === product.id} onEnd={tab === "promotion" ? () => void onEnd(product) : undefined} onEdit={() => setDialog(tab === "promotion" ? "promotion" : "price")} onReport={tab === "promotion" ? () => { setReportCampaign(product); setDialog("report"); } : undefined} />)}</Box>
     {!visibleProducts.length && <Typography align="center" color="text.secondary" sx={{ py: 8 }}>No {tabLabel.toLowerCase()} found.</Typography>}
-    <DesktopPriceDialog type={dialog} onClose={closeDialog} onPromotionSaved={() => { closeDialog(); setTab("promotion"); }} products={catalog} categories={categories} dateMode={dateMode} setDateMode={setDateMode} from={from} setFrom={setFrom} to={to} setTo={setTo} />
+    <DesktopPriceDialog type={dialog} reportCampaign={reportCampaign} onClose={closeDialog} onPromotionSaved={() => { closeDialog(); setTab("promotion"); }} products={catalog} categories={categories} dateMode={dateMode} setDateMode={setDateMode} from={from} setFrom={setFrom} to={to} setTo={setTo} />
   </Paper>;
 }
 
 function DesktopPriceTab({ active, label, tone, onClick }) {
-  return <Button variant="outlined" onClick={onClick} startIcon={<LocalOfferOutlinedIcon />} sx={{ minWidth: 148, minHeight: 42, borderRadius: 1.25, textTransform: "none", fontWeight: 700, borderColor: active ? tone : "divider", bgcolor: active ? "#f6faff" : "background.paper", color: tone, "&:hover": { borderColor: tone, bgcolor: active ? "#f1f7ff" : "action.hover" } }}>{label}</Button>;
+  return <Button variant="outlined" onClick={onClick} sx={{ minWidth: 148, minHeight: 42, borderRadius: 1.25, textTransform: "none", fontWeight: 700, borderColor: active ? tone : "divider", bgcolor: active ? "#f6faff" : "background.paper", color: tone, "&:hover": { borderColor: tone, bgcolor: active ? "#f1f7ff" : "action.hover" } }}>{label}</Button>;
 }
 
-function DesktopProductCard({ product, promotion, onEdit, onEnd, ending }) {
-  if (promotion && product.scope !== "PRODUCT") return <PromotionSummaryCard product={product} period={formatPromotionPeriod(product.start, product.end)} onEdit={onEdit} onEnd={onEnd} ending={ending} />;
+function DesktopProductCard({ product, promotion, onEdit, onEnd, onReport, ending }) {
+  const summaryPromotion = promotion && product.scope !== "PRODUCT";
   return <Paper variant="outlined" sx={desktopProductCardSx}>
-    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 24 }}>
-      <Chip label={promotion ? (product.ended ? "End Promotion" : "Promotion") : "Price"} size="small" sx={{ height: 22, borderRadius: 1, bgcolor: promotion ? (product.ended ? "#ffebee" : "#e5f5e8") : "#edf5ff", color: promotion ? (product.ended ? "error.main" : "#278a45") : "primary.main", fontSize: 11, fontWeight: 700, "& .MuiChip-label": { px: .75 } }} />
-      <IconButton aria-label={`Edit ${product.name}`} onClick={onEdit} size="small" sx={{ color: "text.secondary", mr: -0.75 }}><MoreVertRoundedIcon fontSize="small" /></IconButton>
+    {promotion ? <>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+        <Box sx={{ minWidth: 0, display: "flex", alignItems: "center", gap: 1 }}>
+          <Chip label={product.ended ? "End Promotion" : "Promotion"} size="small" sx={{ height: 26, flexShrink: 0, borderRadius: 1, bgcolor: product.ended ? "#ffebee" : "#e5f5e8", color: product.ended ? "error.main" : "#278a45", fontSize: 12, fontWeight: 700, "& .MuiChip-label": { px: 1 } }} />
+          <Typography noWrap color="text.secondary" sx={{ minWidth: 0, fontSize: 12.5 }}>{formatPromotionPeriod(product.start, product.end)}</Typography>
+        </Box>
+        <PromotionActions product={product} onEdit={onEdit} onEnd={onEnd} ending={ending} />
+      </Box>
+      <Box sx={{ mt: .8, pb: 1.15, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, borderBottom: "1px solid", borderColor: "divider" }}>
+        <Typography noWrap sx={{ minWidth: 0, fontSize: 17, lineHeight: 1.3, fontWeight: 700 }}>{product.name}</Typography>
+        <Chip label="Report" size="small" variant="outlined" color="primary" onClick={onReport} sx={{ height: 23, flexShrink: 0, cursor: "pointer", fontSize: 10.5, fontWeight: 700 }} />
+      </Box>
+    </> : <>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.25, minHeight: 38 }}>
+        <Chip label="Price" size="small" sx={{ height: 26, borderRadius: 1, bgcolor: "#edf5ff", color: "primary.main", fontSize: 12, fontWeight: 700, "& .MuiChip-label": { px: 1 } }} />
+        <Button variant="text" startIcon={<EditOutlinedIcon />} onClick={onEdit} sx={desktopCardEditSx}>Edit Price</Button>
+      </Box>
+      <Typography noWrap sx={{ mt: 1.1, pb: 1.25, fontSize: 17, lineHeight: 1.3, fontWeight: 700, borderBottom: "1px solid", borderColor: "divider" }}>{product.name}</Typography>
+    </>}
+    <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 1px minmax(0, 1fr)", gap: 1.5, pt: 1.4 }}>
+      {summaryPromotion ? <DesktopPriceMetric label="Applies To" value={product.scope === "ALL" ? "All Products" : product.categoryName} /> : promotion ? <DesktopPriceMetric label="Product" value={product.scopeLabel} /> : <DesktopPriceMetric label="Cost Price" value={money(product.cost)} />}
+      <Box sx={{ bgcolor: "divider" }} />
+      {summaryPromotion || promotion ? <DesktopPriceMetric label="Discount" value={product.discountLabel} /> : <DesktopPriceMetric label="Sell Price" value={money(product.price)} />}
     </Box>
-    <ProductArtwork product={product} />
-    <Typography noWrap align="center" sx={{ mt: .5, pb: 1, fontSize: 14, fontWeight: 700, borderBottom: "1px solid", borderColor: "divider" }}>{product.name}</Typography>
-    <Box sx={{ display: "grid", gridTemplateColumns: promotion ? "minmax(0, .85fr) minmax(0, 1.15fr)" : "1fr 1fr", gap: 1.25, pt: 1.25 }}>
-      <DesktopPriceMetric label="Cost Price" value={money(product.cost)} />
-      {promotion ? <Box sx={{ minWidth: 0, display: "flex", alignItems: "end", justifyContent: "space-between", gap: .45 }}><DesktopPriceMetric label="Sell Price" value={money(product.price)} /><Chip label={product.discountAmount ? `-${money(product.discountAmount)} (${product.discountPercent}%)` : formatPromotionPeriod(product.start, product.end)} size="small" sx={{ mb: .1, height: 22, maxWidth: 108, borderRadius: 1, bgcolor: "#e5f5e8", color: "#278a45", fontSize: 9.5, fontWeight: 700, "& .MuiChip-label": { px: .55 } }} /></Box> : <DesktopPriceMetric label="Sell Price" value={money(product.price)} />}
-    </Box>
-    <Typography noWrap color="text.secondary" sx={{ mt: 1.15, fontSize: 11.5 }}>{promotion ? "Name" : "Reason"}: {promotion ? product.scopeLabel : product.reason}</Typography>
-    <Button fullWidth variant="outlined" startIcon={<EditOutlinedIcon />} onClick={onEdit} sx={{ mt: 1.5, minHeight: 34, borderRadius: 1, textTransform: "none", fontWeight: 700, fontSize: 12 }}>Edit {promotion ? "Promotion" : "Price"}</Button>
-    {promotion && !product.ended && <IconButton aria-label={`End ${product.name}`} disabled={ending} onClick={onEnd} color="error" size="small"><StopCircleOutlinedIcon fontSize="small" /></IconButton>}
   </Paper>;
 }
 
-function ProductArtwork({ product }) {
-  const icon = product.icon === "water" || product.icon === "drink" ? <LocalDrinkOutlinedIcon /> : product.icon === "spa" || product.icon === "care" ? <SpaOutlinedIcon /> : <Inventory2OutlinedIcon />;
-  return <Box sx={{ height: 92, mt: 1, display: "grid", placeItems: "center" }}><Box sx={{ width: 68, height: 76, display: "grid", placeItems: "center", borderRadius: 2.5, bgcolor: product.color, color: "primary.main", boxShadow: "inset 0 0 0 1px rgba(25,118,210,.08)", "& .MuiSvgIcon-root": { fontSize: 42 } }}>{icon}</Box></Box>;
-}
+function DesktopPriceMetric({ label, value, caption }) { return <Box sx={{ minWidth: 0 }}><Typography color="text.secondary" sx={{ fontSize: 13, lineHeight: 1.25, fontWeight: 500 }}>{label}</Typography><Typography noWrap sx={{ mt: .4, fontSize: 17, lineHeight: 1.3, fontWeight: 700 }}>{value}</Typography>{caption && <Typography noWrap color="success.main" sx={{ mt: .4, fontSize: 11.5, fontWeight: 700 }}>{caption}</Typography>}</Box>; }
 
-function DesktopPriceMetric({ label, value }) { return <Box><Typography color="text.secondary" sx={{ fontSize: 11.5, lineHeight: 1.2 }}>{label}</Typography><Typography sx={{ mt: .3, fontSize: 14, lineHeight: 1.25, fontWeight: 700 }}>{value}</Typography></Box>; }
-
-function DesktopPriceDialog({ type, onClose, onPromotionSaved, products, categories, dateMode, setDateMode, from, setFrom, to, setTo }) {
+function DesktopPriceDialog({ type, reportCampaign, onClose, onPromotionSaved, products, categories, dateMode, setDateMode, from, setFrom, to, setTo }) {
   const isDate = type === "date";
   const isHistory = type === "history";
+  const isReport = type === "report";
   const isPromotion = type === "promotion";
   const isPrice = type === "price";
-  return <Dialog open={Boolean(type)} onClose={onClose} fullWidth maxWidth={isHistory ? "md" : "sm"} slotProps={{ paper: { sx: { borderRadius: 2.5, m: 2.5, maxHeight: "calc(100vh - 40px)" } } }}>
+  return <Dialog open={Boolean(type)} onClose={onClose} fullWidth maxWidth={isHistory || isReport ? false : "sm"} slotProps={{ paper: { sx: { width: isReport ? 960 : isHistory ? 720 : undefined, maxWidth: isHistory || isReport ? "calc(100% - 32px)" : undefined, borderRadius: 2, m: 2, maxHeight: isHistory || isReport ? "88vh" : "calc(100vh - 40px)" } } }}>
     {isDate && <DialogContent sx={desktopDialogContentSx}><Box sx={desktopDialogTitleSx}><Typography sx={{ fontSize: 20, fontWeight: 700 }}>Date and time</Typography><IconButton aria-label="Close date filter" onClick={onClose}><CloseRoundedIcon /></IconButton></Box><Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1.25 }}><DesktopDateChoice label="All" active={dateMode === "all"} onClick={() => setDateMode("all")} /><DesktopDateChoice label="Today" active={dateMode === "today"} onClick={() => setDateMode("today")} /><DesktopDateChoice label="Custom" active={dateMode === "custom"} onClick={() => setDateMode("custom")} /></Box>{dateMode === "custom" && <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5, mt: 2 }}><TextField label="From date" type="date" value={from} onChange={(event) => setFrom(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /><TextField label="To date" type="date" value={to} onChange={(event) => setTo(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Box>}<Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.25, mt: 3 }}><Button onClick={() => { setDateMode("all"); setFrom(""); setTo(""); }} sx={desktopTextButtonSx}>Reset</Button><Button variant="contained" onClick={onClose} sx={desktopModalButtonSx}>Apply</Button></Box></DialogContent>}
     {(isPrice || isPromotion) && <DesktopPriceForm products={products} categories={categories} promotion={isPromotion} onClose={onClose} onPromotionSaved={onPromotionSaved} />}
-    {isHistory && <DesktopPriceHistory onClose={onClose} />}
+    {isHistory && <><DialogContent sx={{ p: 0, maxHeight: "calc(84vh - 66px)" }}><PriceHistoryPage embedded /></DialogContent><Box sx={{ display: "flex", justifyContent: "flex-end", px: 2, py: 1.25, borderTop: "1px solid", borderColor: "divider" }}><Button onClick={onClose} variant="outlined" sx={desktopCancelButtonSx}>Close</Button></Box></>}
+    {isReport && reportCampaign && <><DialogContent sx={{ p: 0, maxHeight: "calc(88vh - 66px)" }}><PromotionReportPage embedded campaignId={reportCampaign.id} /></DialogContent><Box sx={{ display: "flex", justifyContent: "flex-end", px: 2, py: 1.25, borderTop: "1px solid", borderColor: "divider" }}><Button onClick={onClose} variant="outlined" sx={desktopCancelButtonSx}>Close</Button></Box></>}
   </Dialog>;
 }
 
@@ -238,11 +256,6 @@ function DesktopPriceForm({ products, categories, promotion, onClose, onPromotio
 
 function DesktopScope({ value, label }) { return <FormControlLabel value={value} control={<Radio size="small" />} label={label} sx={{ m: 0, justifyContent: "center", "& .MuiFormControlLabel-label": { fontSize: 13, fontWeight: 700 } }} />; }
 
-function DesktopPriceHistory({ onClose }) {
-  const records = [{ type: "Price", name: "Nivea Roll On", old: 6000, next: 6500, date: "11/08/2026", time: "11:20 PM", reason: "Market price increased" }, { type: "Promotion", name: "Jasmine Perfume", action: "Promotion set: 10% off", period: "01/08/2026 — 31/08/2026", date: "10/08/2026", time: "03:15 PM" }, { type: "Promotion", name: "Coca-Cola 330ml", action: "Promotion edited: 15% off", date: "09/08/2026", time: "09:45 AM" }];
-  return <DialogContent sx={{ ...desktopDialogContentSx, maxHeight: "78vh" }}><Box sx={desktopDialogTitleSx}><Typography sx={{ fontSize: 20, fontWeight: 700 }}>Price History</Typography><IconButton aria-label="Close price history" onClick={onClose}><CloseRoundedIcon /></IconButton></Box><Stack spacing={1}>{records.map((record) => <Paper key={record.name} variant="outlined" sx={{ px: 1.5, py: 1.2, borderRadius: 1.5 }}><Box sx={{ display: "grid", gridTemplateColumns: "minmax(150px, .82fr) minmax(230px, 1.4fr) 138px", gap: 2, alignItems: "center" }}><Box sx={{ minWidth: 0 }}><Chip label={record.type} size="small" sx={{ height: 22, bgcolor: record.type === "Price" ? "#2459d6" : "#168437", color: "common.white", fontWeight: 700, mb: .55 }} /><Typography noWrap sx={{ fontSize: 15, fontWeight: 700 }}>{record.name}</Typography></Box><Box sx={{ minWidth: 0 }}>{record.type === "Price" ? <><Typography noWrap sx={{ fontSize: 14, fontWeight: 700 }}>{money(record.old)} → {money(record.next)}</Typography><Typography noWrap color="text.secondary" sx={{ mt: .3, fontSize: 12.5 }}>Reason: {record.reason}</Typography></> : <><Typography noWrap sx={{ fontSize: 14, fontWeight: 700, color: "#278a45" }}>{record.action}</Typography><Typography noWrap color="text.secondary" sx={{ mt: .3, fontSize: 12.5 }}>{record.period || "Name: Anniversary"}</Typography></>}</Box><Stack spacing={.35} sx={{ color: "text.secondary", justifySelf: "end", textAlign: "right" }}><Typography sx={{ fontSize: 12.5 }}>{record.date}</Typography><Typography sx={{ fontSize: 12.5 }}>{record.time}</Typography></Stack></Box></Paper>)}</Stack></DialogContent>;
-}
-
 const barSx = { height: 68, px: 1.5, bgcolor: "primary.main", color: "common.white", display: "grid", gridTemplateColumns: "48px minmax(0, 1fr) 48px", alignItems: "center" }; const barIconSx = { width: 48, height: 48, color: "inherit" }; const searchSx = { "& .MuiOutlinedInput-root": { minHeight: 56, px: 1.5, borderRadius: 1.5, bgcolor: "#f7f8fa", fontSize: 16, "& fieldset": { borderColor: "#e3e6ea" } } }; const footerSx = { position: "fixed", left: 0, right: 0, bottom: 0, px: 2.5, py: 2, bgcolor: "background.paper", borderTop: "1px solid", borderColor: "divider", zIndex: 10 }; const footerPrimarySx = { minHeight: 58, borderRadius: 1.5, fontSize: 17, fontWeight: 700, textTransform: "none" }; const footerSecondarySx = { minHeight: 58, borderRadius: 1.5, borderColor: "divider", color: "primary.main", fontSize: 17, fontWeight: 700, textTransform: "none" };
 
 const desktopPricePageSx = { maxWidth: 1600, mx: "auto", p: 2.25, borderRadius: 2.25, border: "1px solid", borderColor: "divider", boxShadow: "0 2px 10px rgba(15,23,42,.05)", bgcolor: "background.paper" };
@@ -252,8 +265,9 @@ const desktopAddPriceSx = { minHeight: 44, px: 2.25, borderRadius: 1.25, textTra
 const desktopDateFilterSx = { minHeight: 44, px: 1.75, borderRadius: 1.25, textTransform: "none", fontWeight: 700, whiteSpace: "nowrap", color: "text.primary", borderColor: "divider" };
 const desktopHistoryTabSx = { minHeight: 42, minWidth: 126, borderRadius: 1.25, textTransform: "none", fontWeight: 700, borderColor: "divider", color: "text.primary" };
 const desktopPriceSummarySx = { display: "flex", alignItems: "center", justifyContent: "space-between", mt: 2.25, pb: 1.75, borderBottom: "1px solid", borderColor: "divider" };
-const desktopProductGridSx = { display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 1.75, pt: 1.75, "@media (max-width: 1200px)": { gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }, "@media (max-width: 1000px)": { gridTemplateColumns: "repeat(3, minmax(0, 1fr))" } };
-const desktopProductCardSx = { minWidth: 0, p: 1.5, borderRadius: 1.5, borderColor: "divider", boxShadow: "0 2px 7px rgba(15,23,42,.05)", bgcolor: "background.paper" };
+const desktopProductGridSx = { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 2, pt: 1.75, "@media (max-width: 1200px)": { gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }, "@media (max-width: 960px)": { gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } };
+const desktopProductCardSx = { minWidth: 0, minHeight: 182, p: 1.75, borderRadius: 1.75, borderColor: "divider", boxShadow: "0 3px 10px rgba(15,23,42,.08)", bgcolor: "background.paper" };
+const desktopCardEditSx = { minWidth: 0, minHeight: 34, px: .75, py: .5, color: "primary.main", fontSize: 12.5, fontWeight: 700, lineHeight: 1.1, textTransform: "none", whiteSpace: "nowrap", "& .MuiButton-startIcon": { mr: .45 }, "& .MuiSvgIcon-root": { fontSize: 18 } };
 const desktopDialogContentSx = { p: 2.5, "&:last-child": { pb: 2.5 } };
 const desktopDialogTitleSx = { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2, mb: 2.25 };
 const desktopTextButtonSx = { minHeight: 40, textTransform: "none", fontWeight: 700 };

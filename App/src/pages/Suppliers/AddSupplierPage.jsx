@@ -41,6 +41,7 @@ export default function AddSupplierPage() {
         queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "suppliers"] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.supplierDeliveries(shop?.id) }),
         queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "purchases"] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.payments(shop?.id) }),
       ]);
       navigate("/suppliers");
     } catch (error) {

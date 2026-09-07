@@ -16,7 +16,7 @@ const legacyRecords = [
 ];
 const money = (value) => `${new Intl.NumberFormat("en-US").format(value)} ကျပ်`;
 
-export default function PriceHistoryPage() {
+export default function PriceHistoryPage({ embedded = false }) {
   const navigate = useNavigate();
   const [filter] = useState("All");
   const { data: priceResult } = usePriceHistoryQuery({ page: 1, pageSize: 100 });
@@ -37,14 +37,26 @@ export default function PriceHistoryPage() {
     });
     const promotionEdits = (promotionHistoryResult?.entries || []).map((entry) => {
       const metadata = entry.metadata || {}; const at = new Date(entry.createdAt);
-      const suffix = metadata.type === "PERCENTAGE" ? "% off" : "fixed price";
-      return { type: "Promotion", promotionStatus: "edited", name: metadata.name || "Promotion", promotionName: metadata.name || "Promotion", action: `Promotion edited: ${metadata.previousValue} → ${metadata.nextValue} ${suffix}`, date: at.toLocaleDateString("en-GB"), time: at.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }), reason: metadata.reason || "", timestamp: at.valueOf() };
+      const currentCampaign = (campaignResult?.campaigns || []).find((campaign) => campaign.id === entry.entityId);
+      const previousName = metadata.previousName || metadata.name || "";
+      const nextName = metadata.nextName || currentCampaign?.name || metadata.name || "Promotion";
+      const previousValue = Number(metadata.previousValue);
+      const nextValue = Number(metadata.nextValue);
+      const previousType = metadata.previousType || metadata.type;
+      const nextType = metadata.nextType || metadata.type;
+      const nameChanged = Boolean(previousName && nextName && previousName !== nextName);
+      const discountChanged = (Number.isFinite(previousValue) && Number.isFinite(nextValue) && previousValue !== nextValue) || (previousType && nextType && previousType !== nextType);
+      const discountText = (value, type) => type === "PERCENTAGE" ? `${value}% off` : `${money(value)} fixed price`;
+      const changes = [];
+      if (nameChanged) changes.push(`Promotion name edited: ${previousName} → ${nextName}`);
+      if (discountChanged) changes.push(`Discount edited: ${discountText(previousValue, previousType)} → ${discountText(nextValue, nextType)}`);
+      return { type: "Promotion", promotionStatus: "edited", name: nextName, promotionName: nextName, action: changes.join(" · ") || "Promotion updated", date: at.toLocaleDateString("en-GB"), time: at.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }), reason: metadata.reason || "", timestamp: at.valueOf() };
     });
     return [...prices, ...promotions, ...promotionEdits].sort((left, right) => (right.timestamp || 0) - (left.timestamp || 0));
   }, [campaignResult, priceResult, promotionHistoryResult]);
-  return <Box sx={{ minHeight: "100dvh", bgcolor: "#f8fafc", fontFamily: "Inter, Roboto, 'Noto Sans Myanmar', sans-serif" }}>
-    <AppBar position="sticky" elevation={0} sx={{ bgcolor: "primary.main" }}><Toolbar sx={{ minHeight: 64, display: "grid", gridTemplateColumns: "1fr auto 1fr" }}><IconButton aria-label="Back to price and promotion" onClick={() => navigate("/price")} sx={{ justifySelf: "start", color: "common.white" }}><ArrowBackRoundedIcon /></IconButton><Typography fontWeight={700}>Price History</Typography><Box /></Toolbar></AppBar>
-    <Box sx={{ p: { xs: 2, sm: 2.5 }, maxWidth: 720, mx: "auto" }}><Typography color="text.secondary" sx={{ mb: 2, fontSize: 14 }}>{filter} price and promotion activity</Typography><Stack spacing={1.75}>{records.map((record) => <HistoryCard key={`${record.type}-${record.name}-${record.timestamp || record.date}`} record={record} />)}</Stack></Box>
+  return <Box sx={{ minHeight: embedded ? "auto" : "100dvh", bgcolor: embedded ? "transparent" : "#f8fafc", fontFamily: "Inter, Roboto, 'Noto Sans Myanmar', sans-serif" }}>
+    <AppBar position={embedded ? "static" : "sticky"} elevation={0} sx={{ bgcolor: embedded ? "transparent" : "primary.main", color: embedded ? "text.primary" : "common.white" }}><Toolbar sx={{ minHeight: embedded ? 54 : 64, display: "grid", gridTemplateColumns: "1fr auto 1fr" }}>{!embedded && <IconButton aria-label="Back to price and promotion" onClick={() => navigate("/price")} sx={{ justifySelf: "start", color: "common.white" }}><ArrowBackRoundedIcon /></IconButton>}<Typography sx={{ gridColumn: 2, fontWeight: 700 }}>Price History</Typography><Box /></Toolbar></AppBar>
+    <Box sx={{ p: embedded ? 2 : { xs: 2, sm: 2.5 }, maxWidth: embedded ? "none" : 720, mx: "auto" }}><Typography color="text.secondary" sx={{ mb: 2, fontSize: 14 }}>{filter} price and promotion activity</Typography><Stack spacing={1.75}>{records.map((record) => <HistoryCard key={`${record.type}-${record.name}-${record.timestamp || record.date}`} record={record} />)}</Stack></Box>
   </Box>;
 }
 

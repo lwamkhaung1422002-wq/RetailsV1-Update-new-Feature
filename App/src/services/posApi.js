@@ -190,6 +190,7 @@ export function createPosApi({
         shopRequest(`/promotions/${id}`, { method: "PATCH", body }),
       promotionHistory: () => shopRequest("/promotion-history"),
       promotionCampaigns: () => shopRequest("/promotion-campaigns"),
+      promotionReport: (id) => shopRequest(`/promotion-campaigns/${id}/report`),
       createPromotionCampaign: (body) =>
         shopRequest("/promotion-campaigns", { method: "POST", body }),
       updatePromotionCampaign: (id, body) =>

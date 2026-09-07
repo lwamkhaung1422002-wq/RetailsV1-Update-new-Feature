@@ -466,12 +466,101 @@ pricingRouter.get("/:shopId/promotion-campaigns", async (request, response, next
   } catch (error) { next(error); }
 });
 
+pricingRouter.get("/:shopId/promotion-campaigns/:id/report", async (request, response, next) => {
+  try {
+    const auth = getAuthUser(request); const { shopId, id } = idParams.parse(request.params); await assertUserOwnsShop(auth.id, shopId);
+    const campaign = await prisma.promotionCampaign.findFirst({
+      where: { id, shopId },
+      include: {
+        category: { select: { id: true, name: true } },
+        promotions: { select: { id: true, productId: true, name: true, type: true, value: true, startsAt: true, endsAt: true, product: { select: { name: true, sku: true, barcodes: { where: { status: "ACTIVE" }, select: { value: true } } } } } },
+      },
+    });
+    if (!campaign) throw notFound("Promotion campaign not found.");
+    const promotionById = new Map(campaign.promotions.map((promotion) => [promotion.id, promotion]));
+    const rawItems = campaign.promotions.length ? await prisma.orderItem.findMany({
+      where: {
+        promotionId: { in: campaign.promotions.map((promotion) => promotion.id) },
+        order: { shopId, fulfillmentStatus: "completed", cancelledAt: null },
+      },
+      include: { order: { select: { id: true, orderNumber: true, subtotal: true, discount: true, completedAt: true, createdAt: true } } },
+      orderBy: { createdAt: "desc" },
+    }) : [];
+    const items = rawItems.filter((item) => {
+      const promotion = item.promotionId ? promotionById.get(item.promotionId) : null;
+      const resolvedAt = item.priceResolvedAt ?? item.createdAt;
+      return Boolean(promotion && resolvedAt >= promotion.startsAt && resolvedAt <= promotion.endsAt);
+    }).map((item) => {
+      const enteredQuantity = Number(item.enteredQuantity ?? item.quantity);
+      const baseQuantity = Number(item.baseQuantity ?? item.quantity);
+      const promotionDiscount = Math.round(item.promotionDiscount * enteredQuantity);
+      const regularUnitPrice = item.regularUnitPrice ?? ((item.finalUnitPrice ?? item.unitPrice) + item.promotionDiscount);
+      const regularSales = Math.round(regularUnitPrice * enteredQuantity);
+      const orderDiscountShare = item.order.subtotal > 0 ? Math.round(item.order.discount * item.lineTotal / item.order.subtotal) : 0;
+      const netSales = Math.max(0, item.lineTotal - orderDiscountShare);
+      const costOfGoods = Math.round(item.unitCost * baseQuantity);
+      return {
+        id: item.id,
+        orderId: item.order.id,
+        orderNumber: item.order.orderNumber,
+        soldAt: item.order.completedAt ?? item.order.createdAt,
+        productId: item.productId,
+        productName: item.productName,
+        quantitySold: baseQuantity,
+        regularSales,
+        promotionDiscount,
+        orderDiscountShare,
+        netSales,
+        costOfGoods,
+        grossProfit: netSales - costOfGoods,
+      };
+    });
+    const productMap = new Map<string, {
+      productId: string; productName: string; sku: string | null; barcodes: string[]; quantitySold: number; orderIds: Set<string>;
+      regularSales: number; promotionDiscount: number; netSales: number; costOfGoods: number; grossProfit: number;
+    }>();
+    for (const promotion of campaign.promotions) {
+      if (!productMap.has(promotion.productId)) {
+        productMap.set(promotion.productId, {
+          productId: promotion.productId,
+          productName: promotion.product.name,
+          sku: promotion.product.sku ?? null,
+          barcodes: (promotion.product.barcodes ?? []).map((barcode) => barcode.value),
+          quantitySold: 0,
+          orderIds: new Set<string>(),
+          regularSales: 0,
+          promotionDiscount: 0,
+          netSales: 0,
+          costOfGoods: 0,
+          grossProfit: 0,
+        });
+      }
+    }
+    for (const item of items) {
+      const row = productMap.get(item.productId) ?? { productId: item.productId, productName: item.productName, sku: null, barcodes: [], quantitySold: 0, orderIds: new Set<string>(), regularSales: 0, promotionDiscount: 0, netSales: 0, costOfGoods: 0, grossProfit: 0 };
+      row.quantitySold += item.quantitySold; row.orderIds.add(item.orderId); row.regularSales += item.regularSales; row.promotionDiscount += item.promotionDiscount; row.netSales += item.netSales; row.costOfGoods += item.costOfGoods; row.grossProfit += item.grossProfit;
+      productMap.set(item.productId, row);
+    }
+    const products = [...productMap.values()].map(({ orderIds, ...row }) => ({ ...row, orderCount: orderIds.size })).sort((left, right) => right.netSales - left.netSales);
+    const total = (key: "quantitySold" | "regularSales" | "promotionDiscount" | "netSales" | "costOfGoods" | "grossProfit") => items.reduce((sum, item) => sum + item[key], 0);
+    const netSales = total("netSales"); const grossProfit = total("grossProfit");
+    const startsAt = campaign.promotions.reduce<Date | null>((earliest, promotion) => !earliest || promotion.startsAt < earliest ? promotion.startsAt : earliest, null);
+    const endsAt = campaign.promotions.reduce<Date | null>((latest, promotion) => !latest || promotion.endsAt > latest ? promotion.endsAt : latest, null);
+    response.json({
+      campaign: { id: campaign.id, name: campaign.name, scope: campaign.scope, state: campaign.state, category: campaign.category, startsAt, endsAt },
+      summary: { orderCount: new Set(items.map((item) => item.orderId)).size, productCount: products.filter((product) => product.quantitySold > 0).length, quantitySold: total("quantitySold"), regularSales: total("regularSales"), promotionDiscount: total("promotionDiscount"), netSales, costOfGoods: total("costOfGoods"), grossProfit, marginPercent: netSales > 0 ? Number((grossProfit / netSales * 100).toFixed(1)) : 0 },
+      products,
+      orders: items,
+    });
+  } catch (error) { next(error); }
+});
+
 pricingRouter.get("/:shopId/promotion-history", async (request, response, next) => {
   try {
     const auth = getAuthUser(request); const { shopId } = shopParams.parse(request.params); await assertUserOwnsShop(auth.id, shopId);
     const entries = await prisma.auditLog.findMany({
       where: { shopId, action: { in: ["promotion.update", "promotion.campaign.update"] } },
-      select: { id: true, action: true, metadata: true, createdAt: true },
+      select: { id: true, action: true, entityId: true, metadata: true, createdAt: true },
       orderBy: { createdAt: "desc" },
     });
     response.json({ entries: entries.filter((entry) => {
@@ -530,8 +619,12 @@ pricingRouter.patch("/:shopId/promotion-campaigns/:id", async (request, response
         entity: "PromotionCampaign",
         entityId: id,
         metadata: {
-          name: existing.name,
+          name: input.name ?? existing.name,
+          previousName: existing.name,
+          nextName: input.name ?? existing.name,
           type: input.type ?? previousPromotion?.type ?? null,
+          previousType: previousPromotion?.type ?? null,
+          nextType: input.type ?? previousPromotion?.type ?? null,
           previousValue: previousPromotion ? Number(previousPromotion.value) : null,
           nextValue: input.value ?? (previousPromotion ? Number(previousPromotion.value) : null),
           reason: input.reason ?? previousPromotion?.reason ?? null,
@@ -616,7 +709,11 @@ pricingRouter.patch("/:shopId/promotions/:id", async (request, response, next) =
         entityId: id,
         metadata: {
           name: input.name ?? existing.name,
+          previousName: existing.name,
+          nextName: input.name ?? existing.name,
           type: input.type ?? existing.type,
+          previousType: existing.type,
+          nextType: input.type ?? existing.type,
           previousValue: Number(existing.value),
           nextValue: input.value ?? Number(existing.value),
           previousState: existing.state,

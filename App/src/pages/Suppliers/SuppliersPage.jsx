@@ -43,6 +43,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
 import { queryKeys } from "../../lib/queryKeys";
 import { SupplierDetailsCards } from "./SupplierDetailsPage";
+import SupplierHistoryPage from "./SupplierHistoryPage";
+import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
 
 async function refreshSupplierRecords(queryClient, shopId, { includeSuppliers = false } = {}) {
   const critical = [
@@ -1039,6 +1041,7 @@ function DesktopSupplierDialog({ dialog, onClose, onDelete, onOpenPayment }) {
   const [cancelReason, setCancelReason] = useState("");
   if (!dialog) return null;
   const { mode, record } = dialog;
+  if (mode === "delete" && record.deliveryOnly) return <PaymentCancellationDialog key={record.apiId} kind="supplier" recordId={record.apiId} onClose={onClose} />;
   const title =
     mode === "add"
       ? "Add Supplier"
@@ -1065,7 +1068,7 @@ function DesktopSupplierDialog({ dialog, onClose, onDelete, onOpenPayment }) {
         {mode === "delete" ? (
           <><Typography color="text.secondary">Cancel <strong>{record.name}</strong>? A cancellation reason is required.</Typography><TextField autoFocus fullWidth required label="Cancel Invoice Reason" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} sx={{ mt: 2 }} /></>
         ) : mode === "history" ? (
-          <DesktopSupplierHistory />
+          <SupplierHistoryPage embedded />
         ) : mode === "details" ? (
           <DesktopSupplierDetailsContent record={record} onOpenPayment={onOpenPayment} />
         ) : mode === "pay" ? (

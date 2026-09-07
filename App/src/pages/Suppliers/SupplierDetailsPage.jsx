@@ -43,8 +43,10 @@ function supplierPaymentActivity(payments) {
     });
 }
 
-export default function SupplierDetailsPage() {
-  const { supplierId, recordId } = useParams();
+export default function SupplierDetailsPage({ embeddedSupplierId, embeddedRecordId, hideBackButton = false }) {
+  const routeParams = useParams();
+  const supplierId = embeddedSupplierId || routeParams.supplierId;
+  const recordId = embeddedRecordId || routeParams.recordId;
   const navigate = useNavigate();
   const location = useLocation();
   const api = usePosApi();
@@ -126,7 +128,7 @@ export default function SupplierDetailsPage() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: embeddedSupplierId || embeddedRecordId ? "auto" : "100vh",
         bgcolor: "background.default",
         fontFamily: "Inter, Roboto, Noto Sans Myanmar, sans-serif",
       }}
@@ -142,7 +144,7 @@ export default function SupplierDetailsPage() {
           <IconButton
             aria-label="Back to suppliers"
             onClick={() => navigate(backTo)}
-            sx={{ color: "common.white", justifySelf: "start" }}
+            sx={{ color: "common.white", justifySelf: "start", visibility: hideBackButton ? "hidden" : "visible" }}
           >
             <ArrowBackRoundedIcon />
           </IconButton>

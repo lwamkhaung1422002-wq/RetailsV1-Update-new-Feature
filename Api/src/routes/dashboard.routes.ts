@@ -21,6 +21,7 @@ const salesReportQuerySchema = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   trend: z.enum(["daily", "weekly", "monthly", "yearly"]).default("daily"),
   payment: z.string().trim().min(1).optional(),
+  comparison: z.enum(["period", "month"]).default("period"),
 });
 
 const yangonTimeZone = "Asia/Yangon";
@@ -130,17 +131,26 @@ function selectedReportRange(input: z.infer<typeof salesReportQuerySchema>) {
   const end = yangonEnd(to);
   const days = Math.max(1, Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1);
   const previousEnd = new Date(start.getTime() - 1);
-  const previousStart = new Date(previousEnd.getTime() - (days - 1) * 86_400_000);
+  const previousFrom =
+    input.comparison === "month"
+      ? previousMonthStart(from)
+      : yangonDateKey(
+          new Date(previousEnd.getTime() - (days - 1) * 86_400_000),
+        );
+  const previousTo =
+    input.comparison === "month" ? previousMonthEnd(from) : yangonDateKey(previousEnd);
+  const previousStart = yangonStart(previousFrom);
+  const normalizedPreviousEnd = yangonEnd(previousTo);
   return {
     from,
     to,
     start,
     end,
     previous: {
-      from: yangonDateKey(previousStart),
-      to: yangonDateKey(previousEnd),
+      from: previousFrom,
+      to: previousTo,
       start: previousStart,
-      end: previousEnd,
+      end: normalizedPreviousEnd,
     },
   };
 }
@@ -283,6 +293,7 @@ dashboardRouter.get("/:shopId/dashboard", requireAuth, async (request, response,
         where: {
           shopId,
           ...(expenseSpentAt ? { spentAt: expenseSpentAt } : {}),
+          cancelledAt: null,
         },
       }),
       prisma.customer.count({ where: { shopId } }),

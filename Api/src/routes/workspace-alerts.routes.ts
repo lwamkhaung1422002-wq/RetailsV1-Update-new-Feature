@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
+import { expenseHistoryRecords, expenseWorklistRecord } from "../lib/expense-payment.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
@@ -55,7 +56,7 @@ workspaceAlertsRouter.get("/:shopId/payment-history", async (request, response, 
         { id: payment.id, apiId: payment.deliveryRecordId, paymentId: payment.id, kind: "supplier-payment", name: payment.deliveryRecord.supplierName, invoice: payment.deliveryRecord.invoiceNumber, status: "Paid", amount: payment.amount, method: payment.method, transactionId: payment.reference || undefined, signatureDataUrl: payment.signatureDataUrl || undefined, signature: payment.payerName || undefined, occurredAt: payment.paidAt },
         ...(payment.reversal || payment.reversedAt ? [{ id: payment.reversal?.id || `legacy-cancel-${payment.id}`, apiId: payment.deliveryRecordId, paymentId: payment.id, kind: "supplier-payment-cancelled", name: payment.deliveryRecord.supplierName, invoice: payment.deliveryRecord.invoiceNumber, status: "Cancelled", amount: payment.amount, method: payment.method, transactionId: payment.reference || undefined, signatureDataUrl: payment.signatureDataUrl || undefined, signature: payment.payerName || undefined, occurredAt: payment.reversal?.reversedAt || payment.reversedAt, reason: payment.reversal?.reason || payment.reversalReason || "Supplier payment cancelled" }] : []),
       ]),
-      ...expenses.map((expense) => ({ id: expense.id, apiId: expense.id, kind: String(expense.category || "").toLowerCase() === "income" ? "income" : "expense", name: expense.title, invoice: "", status: "Paid", amount: expense.amount, method: expense.method || "Cash", occurredAt: expense.createdAt, reason: expense.note || undefined })),
+      ...expenses.flatMap(expenseHistoryRecords),
     ].sort((left, right) => Number(new Date(right.occurredAt || 0)) - Number(new Date(left.occurredAt || 0)));
     response.json({ records }); return;
   }
@@ -86,13 +87,13 @@ workspaceAlertsRouter.get("/:shopId/payment-history", async (request, response, 
     }),
     prisma.expense.findMany({
       where: { shopId },
-      select: { id: true, title: true, category: true, amount: true, method: true, spentAt: true, createdAt: true },
+      select: { id: true, title: true, category: true, amount: true, method: true, spentAt: true, createdAt: true, cancelledAt: true },
     }),
   ]);
   const latest = <T extends { paidAt?: Date; createdAt?: Date }>(items: T[]) => [...items].sort((a, b) => Number(new Date(b.paidAt ?? b.createdAt ?? 0)) - Number(new Date(a.paidAt ?? a.createdAt ?? 0)))[0];
   const activeOrderPayments = (order: typeof orders[number]) => order.payments.filter((payment) => payment.amount > 0 && !order.payments.some((reversal) => reversal.amount < 0 && reversal.originalPaymentId === payment.id));
   const sales = orders.map((order) => { const payments = activeOrderPayments(order); const paid = payments.reduce((sum, payment) => sum + payment.amount, 0); const remainingAmount = Math.max(0, order.total - paid); const last = latest(payments); const status = order.fulfillmentStatus === "cancelled" ? "Cancel" : paid >= order.total ? "Paid" : paid > 0 ? "Partial" : "Unpaid"; const customerName = (order.customer as { name?: string | null } | null)?.name; return { id: order.orderNumber || order.id, apiId: order.id, kind: "sale", name: "Sale", status, amount: order.total, remainingAmount, method: last?.method || "", occurredAt: last?.paidAt || order.createdAt, buyer: customerName || "Sale", qty: order.items.reduce((sum, item) => sum + item.quantity, 0), hasPaymentRecord: payments.length > 0, activePaymentRecordCount: payments.length, paymentOptions: payments.map((payment) => ({ id: payment.id, amount: payment.amount, method: payment.method || "Cash", paidAt: payment.paidAt || payment.createdAt })) }; });
   const deliveryEntries = deliveries.map((record) => { const payments = record.payments.filter((payment) => !payment.reversedAt && !payment.reversal); const activePaid = payments.reduce((sum, payment) => sum + payment.amount, 0); const remainingAmount = Math.max(0, record.amount - activePaid); const last = latest(payments); const status = record.status === "cancelled" ? "Cancelled" : remainingAmount === 0 ? "Paid" : "Credit"; const activePaymentRecordCount = payments.length; return { id: record.invoiceNumber, apiId: record.id, supplierId: record.supplierId, kind: "supplier-delivery", name: record.supplierName, status, amount: record.amount, activePaid, remainingAmount, activePaymentRecordCount, paymentOptions: payments.map((payment) => ({ id: payment.id, amount: payment.amount, method: payment.method, paidAt: payment.paidAt })), method: last?.method || "", occurredAt: last?.paidAt || record.receivedAt, receivedAt: record.receivedAt, deliveryOnly: true, cancelReason: record.cancelReason, cancelledAt: record.cancelledAt, allowedActions: { pay: status === "Credit" && remainingAmount > 0, edit: status === "Credit" && activePaymentRecordCount === 0, cancelInvoice: status === "Credit" && activePaymentRecordCount === 0, cancelPayment: status !== "Cancelled" && activePaymentRecordCount > 0 } }; });
-  const expenseEntries = expenses.map((expense) => ({ id: expense.id, apiId: expense.id, kind: "expense", name: expense.title, status: "Paid", amount: expense.amount, remainingAmount: 0, method: expense.method, occurredAt: expense.spentAt || expense.createdAt }));
+  const expenseEntries = expenses.map(expenseWorklistRecord);
   response.json({ records: [...sales, ...deliveryEntries, ...expenseEntries].sort((a, b) => Number(new Date(b.occurredAt)) - Number(new Date(a.occurredAt))) });
 } catch (error) { next(error); } });

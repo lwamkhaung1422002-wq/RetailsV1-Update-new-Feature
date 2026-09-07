@@ -47,7 +47,7 @@ expensesRouter.get("/:shopId/expenses", async (request, response, next) => {
     await assertUserOwnsShop(authUser.id, shopId);
 
     const expenses = await prisma.expense.findMany({
-      where: { shopId },
+      where: { shopId, cancelledAt: null },
       orderBy: { spentAt: "desc" },
     });
 
@@ -105,7 +105,7 @@ expensesRouter.patch("/:shopId/expenses/:expenseId", async (request, response, n
     await assertUserOwnsShop(authUser.id, shopId);
 
     const existingExpense = await prisma.expense.findFirst({
-      where: { id: expenseId, shopId },
+      where: { id: expenseId, shopId, cancelledAt: null },
       select: { id: true },
     });
 
@@ -123,7 +123,7 @@ expensesRouter.patch("/:shopId/expenses/:expenseId", async (request, response, n
 
     const expense = await prisma.$transaction(async (tx) => {
       const updatedExpense = await tx.expense.update({
-        where: { id: expenseId },
+        where: { id: expenseId, cancelledAt: null },
         data,
       });
       await writeAuditLog(tx, {
@@ -158,11 +158,15 @@ expensesRouter.delete("/:shopId/expenses/:expenseId", async (request, response, 
     if (!existingExpense) throw notFound("Expense not found.");
 
     await prisma.$transaction(async (tx) => {
-      await tx.expense.delete({ where: { id: expenseId } });
+      const cancelled = await tx.expense.updateMany({
+        where: { id: expenseId, shopId, cancelledAt: null },
+        data: { cancelledAt: new Date() },
+      });
+      if (!cancelled.count) return;
       await writeAuditLog(tx, {
         shopId,
         actorId: authUser.id,
-        action: "expense.delete",
+        action: "expense.cancel",
         entity: "Expense",
         entityId: expenseId,
       });

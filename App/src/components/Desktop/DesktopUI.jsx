@@ -2,15 +2,15 @@ import { Box, Button, Card, CardContent, TextField, Typography } from "@mui/mate
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 
-export function DesktopPage({ title, subtitle, actionLabel, onAction, children, actionIcon = <AddRoundedIcon />, actionDisabled = false }) {
+export function DesktopPage({ title, subtitle, actionLabel, onAction, children, actionIcon = <AddRoundedIcon />, actionDisabled = false, actionAfter, headerMarginBottom = 4 }) {
   return (
     <Box sx={{ maxWidth: 1440, mx: "auto", py: 1 }}>
-      <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 3, mb: 4 }}>
+      <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 3, mb: headerMarginBottom }}>
         <Box>
           <Typography sx={{ fontSize: 30, lineHeight: 1.2, fontWeight: 700 }}>{title}</Typography>
           {subtitle && <Typography color="text.secondary" sx={{ mt: 0.75, fontSize: 15 }}>{subtitle}</Typography>}
         </Box>
-        {actionLabel && <Button variant="contained" startIcon={actionIcon} onClick={onAction} disabled={actionDisabled} sx={{ minHeight: 44, px: 2.25, borderRadius: 2, textTransform: "none", fontWeight: 700, whiteSpace: "nowrap" }}>{actionLabel}</Button>}
+        {(actionLabel || actionAfter) && <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", justifyContent: "flex-end" }}>{actionLabel && <Button variant="contained" startIcon={actionIcon} onClick={onAction} disabled={actionDisabled} sx={{ minHeight: 44, px: 2.25, borderRadius: 2, textTransform: "none", fontWeight: 700, whiteSpace: "nowrap" }}>{actionLabel}</Button>}{actionAfter}</Box>}
       </Box>
       {children}
     </Box>

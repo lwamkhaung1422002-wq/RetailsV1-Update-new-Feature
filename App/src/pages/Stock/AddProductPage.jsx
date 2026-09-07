@@ -24,7 +24,6 @@ import {
   useMediaQuery,
 } from "@mui/material";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
-import AddPhotoAlternateRoundedIcon from "@mui/icons-material/AddPhotoAlternateRounded";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import CategoryRoundedIcon from "@mui/icons-material/CategoryRounded";
@@ -34,7 +33,6 @@ import DocumentScannerRoundedIcon from "@mui/icons-material/DocumentScannerRound
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
 import KeyboardArrowDownRoundedIcon from "@mui/icons-material/KeyboardArrowDownRounded";
 import NumbersRoundedIcon from "@mui/icons-material/NumbersRounded";
-import PhotoCameraRoundedIcon from "@mui/icons-material/PhotoCameraRounded";
 import QrCode2RoundedIcon from "@mui/icons-material/QrCode2Rounded";
 import QrCodeScannerRoundedIcon from "@mui/icons-material/QrCodeScannerRounded";
 import SellRoundedIcon from "@mui/icons-material/SellRounded";
@@ -70,7 +68,9 @@ function inferSymbology(value) {
 }
 
 export default function AddProductPage() {
-  const isMobile = useMediaQuery("(max-width:768px)");
+  // Phones keep the existing full-page workflow. Tablets and larger screens
+  // use the same dialog workflow, with an internally responsive form.
+  const isMobile = useMediaQuery("(max-width:600px)");
   const navigate = useNavigate();
   const api = usePosApi();
   const { shop } = useAuth();
@@ -429,31 +429,6 @@ export default function AddProductPage() {
         </Toolbar>
       </AppBar>
       <Box sx={{ px: 3, py: 2.25 }}>
-        <Stack
-          spacing={1.25}
-          sx={{ width: "100%", mb: 3, alignItems: "center" }}
-        >
-          <Box
-            sx={{
-              display: "grid",
-              placeItems: "center",
-              width: 176,
-              height: 176,
-              border: "2px solid #bdbdbd",
-              borderRadius: 2.5,
-              color: "#757575",
-              bgcolor: "#f4f4f4",
-            }}
-          >
-            <AddPhotoAlternateRoundedIcon sx={{ fontSize: 48 }} />
-          </Box>
-          <Button
-            startIcon={<PhotoCameraRoundedIcon />}
-            sx={{ color: "primary.main", textTransform: "none", fontSize: 16, fontWeight: 600 }}
-          >
-            Add Product Image
-          </Button>
-        </Stack>
         <ProductFields {...props} />
         <CategorySelector
           value={selectedCategory?.name}
@@ -553,9 +528,9 @@ function ProductFields({
         onChange={update("description")}
         icon={<DocumentScannerRoundedIcon />}
         multiline
-        minRows={3}
+        minRows={2}
       />
-      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
         <Field
           label="SKU (Optional)"
         placeholder="Enter..."
@@ -679,49 +654,28 @@ function DesktopAddProduct(props) {
     hasSaleHistory,
   } = props;
   return (
-    <Dialog open fullWidth maxWidth="md" onClose={() => navigate("/stock")} slotProps={{ paper: { sx: { maxWidth: 980, borderRadius: 3, maxHeight: "88vh" } } }}>
+    <Dialog open fullWidth maxWidth="md" onClose={() => navigate("/stock")} slotProps={{ paper: { sx: { width: "calc(100% - 32px)", maxWidth: 760, borderRadius: 3, maxHeight: "88vh" } } }}>
       <DialogTitle sx={{ px: 2.5, py: 1.5, borderBottom: "1px solid", borderColor: "divider" }}>
         <Typography sx={{ fontSize: 21, fontWeight: 800 }}>
           {isEditMode ? "Edit Product" : "Create Product"}
         </Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.2, fontSize: 13 }}>
-          Product details, pricing, and stock information.
-        </Typography>
       </DialogTitle>
       <DialogContent dividers sx={{ p: 2.5 }}>
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.25fr) minmax(220px, .75fr)",
-            gap: 2,
-          }}
-        >
-          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.25, alignContent: "start" }}>
-            <ProductFields {...props} />
-            <CategorySelector
-              value={selectedCategory?.name}
-              onClick={() => setCategoryDialogOpen(true)}
-            />
-            <Box sx={{ gridColumn: "1 / -1" }}><PricingFields form={form} update={update} /></Box>
-            <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.25, gridColumn: "1 / -1" }}><Field label="Stock Quantity" value={form.stock} onChange={update("stock")} icon={<Inventory2RoundedIcon />} disabled={isEditMode && hasSaleHistory} helperText={isEditMode && hasSaleHistory ? "Locked after sale history." : undefined} /><UnitField form={form} update={update} units={units} /></Box>
-            <Box sx={{ gridColumn: "1 / -1" }}><Field
-              label="Minimum Stock Alert Level (Optional)"
-              value={form.minimum}
-              onChange={update("minimum")}
-              icon={<WarningAmberRoundedIcon />}
-            /></Box>
-          </Box>
-          <Box><Typography sx={{ fontSize: 15, fontWeight: 700, mb: 1 }}>Product image</Typography><Box sx={{ height: 170, display: "grid", placeItems: "center", border: "1px dashed", borderColor: "divider", borderRadius: 2, bgcolor: "#f8fafc", color: "text.secondary" }}>
-            <Stack sx={{ alignItems: "center", gap: 0.5 }}>
-              <AddPhotoAlternateRoundedIcon sx={{ fontSize: 42 }} />
-              <Button
-                startIcon={<PhotoCameraRoundedIcon />}
-                sx={{ textTransform: "none" }}
-              >
-                Upload image
-              </Button>
-            </Stack>
-          </Box></Box>
+        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1.25, alignContent: "start" }}>
+          <Box sx={{ gridColumn: "1 / -1" }}><ProductFields {...props} /></Box>
+          <Box sx={{ gridColumn: "1 / -1" }}><CategorySelector
+            value={selectedCategory?.name}
+            onClick={() => setCategoryDialogOpen(true)}
+          /></Box>
+          <Box sx={{ gridColumn: "1 / -1" }}><PricingFields form={form} update={update} /></Box>
+          <Field label="Stock Quantity" value={form.stock} onChange={update("stock")} icon={<Inventory2RoundedIcon />} disabled={isEditMode && hasSaleHistory} helperText={isEditMode && hasSaleHistory ? "Locked after sale history." : undefined} />
+          <UnitField form={form} update={update} units={units} />
+          <Box sx={{ gridColumn: "1 / -1" }}><Field
+            label="Minimum Stock Alert Level (Optional)"
+            value={form.minimum}
+            onChange={update("minimum")}
+            icon={<WarningAmberRoundedIcon />}
+          /></Box>
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 2.5, py: 1.25, borderTop: "1px solid", borderColor: "divider" }}>
@@ -800,7 +754,7 @@ function SharedDialogs({
 }
 function CategorySelector({ value, onClick }) {
   return (
-    <Box sx={{ mb: { xs: 2, md: 1.25 } }}>
+    <Box sx={{ minWidth: 0, mb: { xs: 2, md: 1.25 } }}>
       <Typography fontSize={16} fontWeight={700} sx={{ mb: 0.75 }}>
         Category (Optional)
       </Typography>
@@ -881,9 +835,9 @@ function Field({
         direction="row"
         alignItems="center"
         justifyContent="space-between"
-        sx={{ mb: 0.75 }}
+        sx={{ minWidth: 0, minHeight: 32, mb: 0.75 }}
       >
-        <Typography fontSize={16} fontWeight={700}>
+        <Typography noWrap fontSize={16} fontWeight={700}>
           {label}
         </Typography>
         {labelAction}

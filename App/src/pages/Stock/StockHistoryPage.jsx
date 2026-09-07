@@ -165,10 +165,7 @@ function HistoryCard({ record }) {
   return (
     <Card sx={{ borderRadius: 3, bgcolor: "background.paper", boxShadow: "0 4px 12px rgba(15,23,42,0.14)" }}>
       <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
-        <Box sx={{ display: "grid", gridTemplateColumns: "84px minmax(0, 1fr) auto", columnGap: 1.75, alignItems: "start" }}>
-          <Box sx={{ display: "grid", placeItems: "center", width: 84, height: 106, borderRadius: 2.5, color: isIn ? "#38a5dd" : "#5b5b5b", bgcolor: isIn ? "#e8f6fb" : "transparent", "& .MuiSvgIcon-root": { fontSize: 42 } }}>
-            {record.icon}
-          </Box>
+        <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", columnGap: 1.75, alignItems: "start" }}>
           <Box sx={{ minWidth: 0 }}>
             <Typography color="text.primary" sx={{ fontSize: 22, fontWeight: 700, lineHeight: 1.25 }}>{record.product}</Typography>
             <Box sx={{ display: "flex", alignItems: "center", gap: 3.25, mt: 2.5 }}>

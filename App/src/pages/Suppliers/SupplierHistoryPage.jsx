@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import {
   Box,
+  Alert,
   Button,
   Chip,
   Dialog,
@@ -13,7 +14,9 @@ import {
   Stack,
   TextField,
   Typography,
+  useMediaQuery,
 } from "@mui/material";
+import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import CalendarTodayOutlinedIcon from "@mui/icons-material/CalendarTodayOutlined";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
@@ -144,6 +147,7 @@ function DetailRow({ icon, label, value }) {
 }
 
 function PaymentCard({ record }) {
+  const isMobile = useMediaQuery("(max-width:768px)");
   const cancelled = record.status === "Cancelled";
   const methodLabel = cancelled ? "Cancelled" : record.method;
   const showSignature =
@@ -177,12 +181,17 @@ function PaymentCard({ record }) {
           p: 2.25,
           pb: 1.875,
           display: "grid",
-          gridTemplateColumns: "76px minmax(0, 1fr) auto",
+          gridTemplateColumns: isMobile ? "24px minmax(0, 1fr) minmax(0, 1fr)" : "76px minmax(0, 1fr) auto",
           columnGap: 1.25,
+          rowGap: isMobile ? 1 : 0,
           alignItems: "start",
         }}
       >
-        <Chip
+        {isMobile ? (
+          <Box role="img" aria-label={cancelled ? "Cancelled" : "Paid"} sx={{ pt: 0.15, color: cancelled ? "#d14343" : "#168437", display: "flex" }}>
+            {cancelled ? <CloseRoundedIcon /> : <CheckRoundedIcon />}
+          </Box>
+        ) : <Chip
           label={record.status || "Paid"}
           variant="outlined"
           sx={{
@@ -195,11 +204,11 @@ function PaymentCard({ record }) {
             bgcolor: cancelled ? "#fff1f0" : "#f6fff8",
             "& .MuiChip-label": { px: 1.4, fontSize: 14, fontWeight: 600 },
           }}
-        />
+        />}
         <Box sx={{ minWidth: 0, pt: 0.15 }}>
           <Typography
-            noWrap
-            sx={{ fontSize: 17.5, lineHeight: 1.3, fontWeight: 600 }}
+            noWrap={!isMobile}
+            sx={{ fontSize: 17.5, lineHeight: 1.3, fontWeight: 600, overflowWrap: isMobile ? "anywhere" : undefined }}
           >
             {record.supplier}
           </Typography>
@@ -211,15 +220,16 @@ function PaymentCard({ record }) {
                 lineHeight: 1.2,
                 color: "text.secondary",
                 fontWeight: 400,
+                overflowWrap: isMobile ? "anywhere" : undefined,
               }}
             >
               Invoice: {record.invoice}
             </Typography>
           )}
         </Box>
-        <Stack alignItems="flex-end" spacing={0.25} sx={{ whiteSpace: "nowrap" }}>
-          <Stack direction="row" spacing={0.75} alignItems="center">
-            <Typography
+        <Stack alignItems="flex-end" spacing={0.25} sx={{ whiteSpace: isMobile ? "normal" : "nowrap", ...(isMobile && { minWidth: 0, textAlign: "right" }) }}>
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={isMobile ? { flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "100%", rowGap: 0.5 } : undefined}>
+            {!(isMobile && cancelled) && <Typography
               sx={{
                 color: cancelled ? "#d14343" : record.method === "Cash" ? "#d87816" : "#238a3a",
                 fontSize: 18,
@@ -228,10 +238,10 @@ function PaymentCard({ record }) {
               }}
             >
               {methodLabel}
-            </Typography>
+            </Typography>}
             <Typography
-              noWrap
-              sx={{ fontSize: 18, lineHeight: 1.28, fontWeight: 600 }}
+              noWrap={!isMobile}
+              sx={{ fontSize: 18, lineHeight: 1.28, fontWeight: 600, ...(isMobile && { overflowWrap: "anywhere", minWidth: 0, textAlign: "right" }) }}
             >
               {money(record.amount)}
             </Typography>
@@ -338,7 +348,7 @@ function PaymentCard({ record }) {
   );
 }
 
-export default function SupplierHistoryPage() {
+export default function SupplierHistoryPage({ embedded = false }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [search, setSearch] = useState("");
@@ -349,6 +359,7 @@ export default function SupplierHistoryPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [canonicalRecords, setCanonicalRecords] = useState([]);
+  const [historyError, setHistoryError] = useState("");
   const api = usePosApi();
   useEffect(() => {
     let active = true;
@@ -361,7 +372,7 @@ export default function SupplierHistoryPage() {
               const paidAt = new Date(record.occurredAt);
               const method = record.method || "Cash";
               return {
-                id: record.paymentId || record.id,
+                id: record.id,
                 transactionId: record.transactionId || "",
                 signatureDataUrl: record.signatureDataUrl || "",
                 signature: record.signature || "",
@@ -382,8 +393,8 @@ export default function SupplierHistoryPage() {
             }),
           );
       })
-      .catch(() => {
-        if (active) setCanonicalRecords([]);
+      .catch((error) => {
+        if (active) setHistoryError(error.message || "Payment history could not be loaded.");
       });
     return () => {
       active = false;
@@ -437,9 +448,9 @@ export default function SupplierHistoryPage() {
   return (
     <Box
       sx={{
-        minHeight: "100dvh",
+        minHeight: embedded ? "auto" : "100dvh",
         pb: 3,
-        bgcolor: "#f8fafc",
+        bgcolor: embedded ? "transparent" : "#f8fafc",
         fontFamily: "Inter, Roboto, 'Noto Sans Myanmar', sans-serif",
       }}
     >
@@ -447,12 +458,12 @@ export default function SupplierHistoryPage() {
         sx={{
           height: 68,
           px: 1.5,
-          bgcolor: "primary.main",
-          color: "common.white",
+          bgcolor: embedded ? "transparent" : "primary.main",
+          color: embedded ? "text.primary" : "common.white",
           display: "grid",
           gridTemplateColumns: "48px minmax(0, 1fr) 48px",
           alignItems: "center",
-          boxShadow: "0 2px 5px rgba(0,0,0,0.16)",
+          boxShadow: embedded ? "none" : "0 2px 5px rgba(0,0,0,0.16)",
         }}
       >
         <IconButton
@@ -462,7 +473,7 @@ export default function SupplierHistoryPage() {
               pathname.startsWith("/payment") ? "/payment" : "/suppliers",
             )
           }
-          sx={{ width: 48, height: 48, color: "inherit" }}
+          sx={{ width: 48, height: 48, color: "inherit", visibility: embedded ? "hidden" : "visible" }}
         >
           <ArrowBackRoundedIcon sx={{ fontSize: 31 }} />
         </IconButton>
@@ -508,10 +519,11 @@ export default function SupplierHistoryPage() {
           }}
         />
         <Stack spacing={2} sx={{ mt: 2 }}>
+          {historyError && <Alert severity="error">{historyError}</Alert>}
           {visibleRecords.map((record) => (
             <PaymentCard key={record.id} record={record} />
           ))}
-          {!visibleRecords.length && (
+          {!historyError && !visibleRecords.length && (
             <Typography align="center" sx={{ py: 6, color: "text.secondary" }}>
               No payment records found.
             </Typography>
