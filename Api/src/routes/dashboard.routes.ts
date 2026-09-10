@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import {
   calculateFinancialMetrics,
-  costOfGoodsSold,
-  recognizedSalesBeforeRefunds,
+  isFinancialRefund,
+  normalizedRefundAmount,
 } from "../lib/financial-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
@@ -165,16 +165,19 @@ function isDateWithin(value: Date | null, start: Date, end: Date): boolean {
   return Boolean(value && value >= start && value <= end);
 }
 
-function reportMetrics(orders: SalesOrder[]): SalesMetrics {
-  const totalSales = recognizedSalesBeforeRefunds(orders);
+function reportMetrics(orders: SalesOrder[], payments: ReportPayment[]): SalesMetrics {
+  const financialMetrics = calculateFinancialMetrics({
+    recognizedOrders: orders,
+    payments,
+    expenses: [],
+  });
   const itemsSold = orders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0);
-  const totalCostPrice = costOfGoodsSold(orders);
   return {
-    totalSales,
+    totalSales: financialMetrics.recognizedSalesBeforeRefunds,
     orders: orders.length,
     itemsSold,
-    totalCostPrice,
-    grossProfit: totalSales - totalCostPrice,
+    totalCostPrice: financialMetrics.costOfGoods,
+    grossProfit: financialMetrics.grossProfit,
   };
 }
 
@@ -515,8 +518,16 @@ export async function salesReportHandler(request: Parameters<typeof dashboardRou
     );
     const currentOrders = selectOrders(range.start, range.end);
     const previousOrders = selectOrders(range.previous.start, range.previous.end);
-    const currentMetrics = reportMetrics(currentOrders);
-    const previousMetrics = reportMetrics(previousOrders);
+    const reportPayments = (start: Date, end: Date) => payments.filter((payment) => {
+      if (payment.scope === "cod-settlement-void" || !isDateWithin(payment.paidAt, start, end)) return false;
+      const linkedOrderIds = paymentOrderIds(payment).filter((orderId) => completedOrderIds.has(orderId));
+      const method = isFinancialRefund(payment)
+        ? paymentById.get(payment.originalPaymentId ?? "")?.method ?? payment.method
+        : payment.method;
+      return linkedOrderIds.length > 0 && (!query.payment || method === query.payment);
+    });
+    const currentMetrics = reportMetrics(currentOrders, reportPayments(range.start, range.end));
+    const previousMetrics = reportMetrics(previousOrders, reportPayments(range.previous.start, range.previous.end));
 
     const trendKey = (date: Date): string => {
       const key = yangonDateKey(date);
@@ -544,16 +555,15 @@ export async function salesReportHandler(request: Parameters<typeof dashboardRou
       .map(([name, amount]) => ({ name, amount, percentage: currentMetrics.totalSales === 0 ? 0 : Number(((amount / currentMetrics.totalSales) * 100).toFixed(1)) }))
       .sort((left, right) => right.amount - left.amount);
 
-    const paymentCollections = [...payments.reduce((groups, payment) => {
-      if (payment.scope === "cod-settlement-void" || !isDateWithin(payment.paidAt, range.start, range.end)) return groups;
-      const linkedOrderIds = paymentOrderIds(payment as ReportPayment).filter((orderId) => completedOrderIds.has(orderId));
-      const method = payment.type === "refund"
+    const paymentCollections = [...reportPayments(range.start, range.end).reduce((groups, payment) => {
+      const method = isFinancialRefund(payment)
         ? paymentById.get(payment.originalPaymentId ?? "")?.method ?? payment.method
         : payment.method;
-      if (!linkedOrderIds.length || (query.payment && method !== query.payment)) return groups;
-      const sign = payment.type === "refund" ? -1 : payment.type === "payment" ? 1 : 0;
-      if (sign === 0) return groups;
-      groups.set(method, (groups.get(method) ?? 0) + sign * payment.amount);
+      const collectionAmount = isFinancialRefund(payment)
+        ? -normalizedRefundAmount(payment)
+        : payment.type === "payment" ? payment.amount : 0;
+      if (collectionAmount === 0) return groups;
+      groups.set(method, (groups.get(method) ?? 0) + collectionAmount);
       return groups;
     }, new Map<string, number>()).entries()]
       .filter(([, amount]) => amount !== 0)
@@ -570,7 +580,10 @@ export async function salesReportHandler(request: Parameters<typeof dashboardRou
     const lastMonthEnd = previousMonthEnd(todayKey);
     const summaryRange = (label: string, from: string, to: string) => ({
       label,
-      ...reportMetrics(selectOrders(yangonStart(from), yangonEnd(to))),
+      ...reportMetrics(
+        selectOrders(yangonStart(from), yangonEnd(to)),
+        reportPayments(yangonStart(from), yangonEnd(to)),
+      ),
     });
     const salesSummary = [
       summaryRange("Today", todayKey, todayKey),
