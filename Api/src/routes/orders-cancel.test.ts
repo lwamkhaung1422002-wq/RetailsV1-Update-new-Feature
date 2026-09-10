@@ -6,6 +6,11 @@ const mocks = vi.hoisted(() => ({ findFirst: vi.fn(), update: vi.fn(), audit: vi
 vi.mock("../lib/prisma.js", () => ({ prisma: { $transaction: async (run: (tx: unknown) => unknown) => run({ order: { findFirst: mocks.findFirst, update: mocks.update } }) } }));
 vi.mock("../lib/audit-log.js", () => ({ writeAuditLog: mocks.audit }));
 vi.mock("../lib/shop-access.js", () => ({ assertUserOwnsShop: vi.fn() }));
+vi.mock("../lib/manager-approval.js", () => ({
+  approvalAccessToken: () => undefined,
+  approvalAuditMetadata: () => ({}),
+  authorizeSensitiveAction: vi.fn().mockResolvedValue({ actorRole: "OWNER", authorizationMode: "direct" }),
+}));
 vi.mock("../middleware/auth.middleware.js", () => ({ requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(), getAuthUser: () => ({ id: "user-1" }) }));
 import { ordersRouter } from "./orders.routes.js";
 const app = express();

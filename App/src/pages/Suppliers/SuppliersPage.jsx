@@ -41,6 +41,7 @@ import { usePurchasesQuery, useShopSettingsQuery, useSupplierDeliveriesQuery, us
 import { usePosApi } from "../../hooks/useApiResource";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
+import { useManagerApproval } from "../../context/approval-context";
 import { queryKeys } from "../../lib/queryKeys";
 import { SupplierDetailsCards } from "./SupplierDetailsPage";
 import SupplierHistoryPage from "./SupplierHistoryPage";
@@ -230,6 +231,7 @@ export default function SuppliersPage() {
   const [archiveError, setArchiveError] = useState("");
   const [archiving, setArchiving] = useState(false);
   const api = usePosApi();
+  const { runWithApproval } = useManagerApproval();
   const queryClient = useQueryClient();
   const { shop } = useAuth();
   const { data: purchasesResult } = usePurchasesQuery({ page: 1, pageSize: 100 });
@@ -629,7 +631,7 @@ export default function SuppliersPage() {
       <Dialog open={Boolean(paymentCancelTarget)} onClose={archiving ? undefined : () => { setPaymentCancelTarget(null); setPaymentCancelReason(""); setArchiveError(""); }} fullWidth slotProps={{ paper: { sx: { m: 2.5, borderRadius: 2.5, maxWidth: 420 } } }}>
         <DialogTitle>Cancel Payment</DialogTitle>
         <DialogContent><Typography color="text.secondary">Choose the supplier payment to cancel.</Typography><TextField select fullWidth label="Payment" value={selectedPaymentId} onChange={(event) => setSelectedPaymentId(event.target.value)} sx={{ mt: 2 }}>{(paymentCancelTarget?.deliveryRecord?.payments || []).filter((payment) => !payment.reversedAt && !payment.reversal).map((payment) => <MenuItem key={payment.id} value={payment.id}>{payment.method} · {money(payment.amount)} · {supplierDate(payment.paidAt)}</MenuItem>)}</TextField><TextField required fullWidth label="Cancel Payment Reason" value={paymentCancelReason} onChange={(event) => setPaymentCancelReason(event.target.value)} sx={{ mt: 1.5 }} />{archiveError && <Typography color="error" sx={{ mt: 1 }}>{archiveError}</Typography>}</DialogContent>
-        <DialogActions><Button onClick={() => { setPaymentCancelTarget(null); setPaymentCancelReason(""); setArchiveError(""); }} disabled={archiving}>Back</Button><Button color="error" variant="contained" disabled={archiving || !selectedPaymentId || !paymentCancelReason.trim()} onClick={async () => { setArchiving(true); setArchiveError(""); try { await api.suppliers.reverseDeliveryPayment(paymentCancelTarget.apiId, selectedPaymentId, { reason: paymentCancelReason.trim() }); await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.supplierDeliveries(shop?.id) }), queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "purchases"] }), queryClient.invalidateQueries({ queryKey: queryKeys.payments(shop?.id) }), queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(shop?.id) }), queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "reports"] })]); setPaymentCancelTarget(null); } catch (error) { setArchiveError(error.message || "Payment could not be cancelled."); } finally { setArchiving(false); } }}>{archiving ? "Cancelling…" : "Cancel Payment"}</Button></DialogActions>
+        <DialogActions><Button onClick={() => { setPaymentCancelTarget(null); setPaymentCancelReason(""); setArchiveError(""); }} disabled={archiving}>Back</Button><Button color="error" variant="contained" disabled={archiving || !selectedPaymentId || !paymentCancelReason.trim()} onClick={async () => { setArchiving(true); setArchiveError(""); try { await runWithApproval({ permission: "supplier.pay", action: "supplier.payment.reverse", actionLabel: "Reverse supplier payment", targetId: selectedPaymentId, targetLabel: paymentCancelTarget.name, initialReason: paymentCancelReason.trim() }, (approvalToken) => api.suppliers.reverseDeliveryPayment(paymentCancelTarget.apiId, selectedPaymentId, { reason: paymentCancelReason.trim() }, approvalToken)); await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.supplierDeliveries(shop?.id) }), queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "purchases"] }), queryClient.invalidateQueries({ queryKey: queryKeys.payments(shop?.id) }), queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(shop?.id) }), queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "reports"] })]); setPaymentCancelTarget(null); } catch (error) { if (!error.approvalCancelled) setArchiveError(error.message || "Payment could not be cancelled."); } finally { setArchiving(false); } }}>{archiving ? "Cancelling…" : "Cancel Payment"}</Button></DialogActions>
       </Dialog>
       <Dialog open={Boolean(archiveTarget)} onClose={archiving ? undefined : () => { setArchiveTarget(null); setArchiveError(""); }} fullWidth slotProps={{ paper: { sx: { m: 2.5, borderRadius: 2.5, maxWidth: 420 } } }}>
         <DialogTitle>Cancel Invoice</DialogTitle>

@@ -9,7 +9,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiRequest(path, { token, method = "GET", body, signal, responseType } = {}) {
+export async function apiRequest(path, { token, method = "GET", body, signal, responseType, headers } = {}) {
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -19,6 +19,7 @@ export async function apiRequest(path, { token, method = "GET", body, signal, re
       Accept: "application/json",
       ...(body !== undefined && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
     },
     ...(body !== undefined ? { body: isFormData ? body : JSON.stringify(body) } : {}),
   });

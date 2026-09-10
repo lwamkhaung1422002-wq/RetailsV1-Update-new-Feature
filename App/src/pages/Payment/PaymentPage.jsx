@@ -40,6 +40,7 @@ import { usePosApi } from "../../hooks/useApiResource";
 import { usePaymentWorklistQuery, useShopSettingsQuery } from "../../hooks/usePosQueries";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
+import { useManagerApproval } from "../../context/approval-context";
 import { queryKeys } from "../../lib/queryKeys";
 
 const payments = [
@@ -292,6 +293,7 @@ export default function PaymentPage() {
   const api = usePosApi();
   const queryClient = useQueryClient();
   const { shop } = useAuth();
+  const { runWithApproval } = useManagerApproval();
   const { data: paymentRecords = [] } = usePaymentWorklistQuery();
   const { data: settingsResult } = useShopSettingsQuery();
   const [status, setStatus] = useState("All");
@@ -874,11 +876,11 @@ export default function PaymentPage() {
                 "Cancel later payment records from Payment before cancelling this order.",
               );
             if (order.fulfillmentStatus !== "cancelled")
-              await api.orders.cancel(order.id, { reason });
+              await runWithApproval({ permission: "order.cancel", action: "order.cancel", actionLabel: "Cancel paid sale", targetId: order.id, targetLabel: record.name, initialReason: reason }, (approvalToken) => api.orders.cancel(order.id, { reason }, approvalToken));
             await invalidatePaymentData(queryClient, paymentRefreshKeys.order(shop?.id));
             setMobileDialog(null);
           } catch (error) {
-            setPaymentError(error.message || "Order could not be deleted.");
+            if (!error.approvalCancelled) setPaymentError(error.message || "Order could not be deleted.");
           } finally {
             setSavingPayment(false);
           }
@@ -917,16 +919,16 @@ export default function PaymentPage() {
               : activePayments.at(-1);
             if (!selectedPayment)
               throw new Error("This payment has already been cancelled.");
-            await api.payments.refundOrder(order.id, {
+            await runWithApproval({ permission: "payment.refund", action: "payment.refund", actionLabel: "Refund", targetId: order.id, targetLabel: record.name, amountLabel: `${Number(selectedPayment.amount || 0).toLocaleString()} MMK`, initialReason: reason }, (approvalToken) => api.payments.refundOrder(order.id, {
               method: selectedPayment.method || "Cash",
               amount: Number(selectedPayment.amount || 0),
               originalPaymentId: selectedPayment.id,
               note: reason,
-            });
+            }, approvalToken));
             await invalidatePaymentData(queryClient, paymentRefreshKeys.order(shop?.id));
             setMobileDialog(null);
           } catch (error) {
-            setPaymentError(error.message || "Payment could not be cancelled.");
+            if (!error.approvalCancelled) setPaymentError(error.message || "Payment could not be cancelled.");
           } finally {
             setSavingPayment(false);
           }
@@ -935,11 +937,11 @@ export default function PaymentPage() {
           setSavingPayment(true);
           setPaymentError("");
           try {
-            await api.suppliers.reverseDeliveryPayment(record.apiId, paymentId, { reason });
+            await runWithApproval({ permission: "supplier.pay", action: "supplier.payment.reverse", actionLabel: "Reverse supplier payment", targetId: paymentId, targetLabel: record.name, initialReason: reason }, (approvalToken) => api.suppliers.reverseDeliveryPayment(record.apiId, paymentId, { reason }, approvalToken));
             await invalidatePaymentData(queryClient, paymentRefreshKeys.supplier(shop?.id));
             setMobileDialog(null);
           } catch (error) {
-            setPaymentError(error.message || "Payment could not be cancelled.");
+            if (!error.approvalCancelled) setPaymentError(error.message || "Payment could not be cancelled.");
           } finally {
             setSavingPayment(false);
           }

@@ -6,6 +6,7 @@ import { Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography }
 import AppRouter from "./AppRouter";
 import { AppPreferenceContext } from "./context/AppPreferenceContext";
 import { AuthContext } from "./context/AuthContext";
+import { ApprovalProvider } from "./context/ApprovalContext";
 import { apiRequest } from "./lib/api";
 import { accessTokenRefreshDelay, requestAccessTokenRefresh } from "./lib/auth-refresh";
 import { queryClient } from "./lib/queryClient";
@@ -154,5 +155,5 @@ export default function AppProvider() {
       setRegistrationPromptOpen(true);
     }
   };
-  return <QueryClientProvider client={queryClient}><AppPreferenceContext.Provider value={preferences}><AuthContext.Provider value={auth}><ThemeProvider theme={theme}><CssBaseline /><div onClickCapture={guardGuestAction}><AppRouter /></div><Dialog open={registrationPromptOpen} onClose={() => setRegistrationPromptOpen(false)} fullWidth maxWidth="xs"><DialogTitle fontWeight={800}>{t("Create an account to save")}</DialogTitle><DialogContent><Typography color="text.secondary">{t("Guest mode lets you explore General POS. Create an account before saving stock, orders, payments, or other business records.")}</Typography></DialogContent><DialogActions sx={{ px: 3, py: 2 }}><Button onClick={() => setRegistrationPromptOpen(false)}>{t("Continue exploring")}</Button><Button variant="contained" onClick={() => { window.location.assign("/register"); }}>{t("Create account")}</Button></DialogActions></Dialog></ThemeProvider></AuthContext.Provider></AppPreferenceContext.Provider></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><AppPreferenceContext.Provider value={preferences}><AuthContext.Provider value={auth}><ThemeProvider theme={theme}><CssBaseline /><ApprovalProvider><div onClickCapture={guardGuestAction}><AppRouter /></div></ApprovalProvider><Dialog open={registrationPromptOpen} onClose={() => setRegistrationPromptOpen(false)} fullWidth maxWidth="xs"><DialogTitle fontWeight={800}>{t("Create an account to save")}</DialogTitle><DialogContent><Typography color="text.secondary">{t("Guest mode lets you explore General POS. Create an account before saving stock, orders, payments, or other business records.")}</Typography></DialogContent><DialogActions sx={{ px: 3, py: 2 }}><Button onClick={() => setRegistrationPromptOpen(false)}>{t("Continue exploring")}</Button><Button variant="contained" onClick={() => { window.location.assign("/register"); }}>{t("Create account")}</Button></DialogActions></Dialog></ThemeProvider></AuthContext.Provider></AppPreferenceContext.Provider></QueryClientProvider>;
 }

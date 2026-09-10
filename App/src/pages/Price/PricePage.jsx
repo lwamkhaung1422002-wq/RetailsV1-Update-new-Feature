@@ -16,6 +16,7 @@ import { useCategoriesQuery, useProductsQuery, usePromotionCampaignsQuery } from
 import { usePosApi } from "../../hooks/useApiResource";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
+import { useManagerApproval } from "../../context/approval-context";
 import { queryKeys } from "../../lib/queryKeys";
 import PriceHistoryPage from "./PriceHistoryPage";
 import PromotionReportPage from "./PromotionReportPage";
@@ -197,6 +198,7 @@ function DesktopDateChoice({ label, active, onClick }) { return <Button onClick=
 
 function DesktopPriceForm({ products, categories, promotion, onClose, onPromotionSaved }) {
   const api = usePosApi();
+  const { runWithApproval } = useManagerApproval();
   const { shop } = useAuth();
   const queryClient = useQueryClient();
   const [scope, setScope] = useState("all");
@@ -228,7 +230,7 @@ function DesktopPriceForm({ products, categories, promotion, onClose, onPromotio
       if (promotion) {
         await api.pricing.createPromotionCampaign({ name: promotionName.trim(), scope: scope === "individual" ? "PRODUCT" : scope.toUpperCase(), ...(scope === "individual" ? { productId: selectedId } : scope === "category" ? { categoryId: category } : {}), type: "PERCENTAGE", value: Number(percentage), startsAt: new Date(`${start}T00:00:00+06:30`).toISOString(), endsAt: new Date(`${end}T23:59:59+06:30`).toISOString(), state: "SCHEDULED", reason: reason.trim(), timeZone: "Asia/Yangon" });
       } else if (scope === "individual") {
-        await api.pricing.createPrice({ productId: selectedId, unitPrice: Number(shownPrice), effectiveFrom: new Date().toISOString(), reason: reason.trim() });
+        await runWithApproval({ permission: "price.edit", action: "price.override", actionLabel: "Price override", targetId: selectedId, targetLabel: selected?.name, amountLabel: money(Number(shownPrice)), initialReason: reason.trim() }, (approvalToken) => api.pricing.createPrice({ productId: selectedId, unitPrice: Number(shownPrice), effectiveFrom: new Date().toISOString(), reason: reason.trim() }, approvalToken));
       } else {
         await api.pricing.bulkPrices({ scope: scope.toUpperCase(), ...(scope === "category" ? { categoryId: category } : {}), marginPercent: Number(percentage), reason: reason.trim() });
       }
@@ -238,7 +240,7 @@ function DesktopPriceForm({ products, categories, promotion, onClose, onPromotio
         queryClient.invalidateQueries({ queryKey: queryKeys.promotionCampaigns(shop?.id) }),
       ]);
       if (promotion) onPromotionSaved(); else onClose();
-    } catch (error) { setSubmitError(error.message || "Unable to save pricing."); } finally { setSaving(false); }
+    } catch (error) { if (!error.approvalCancelled) setSubmitError(error.message || "Unable to save pricing."); } finally { setSaving(false); }
   };
   return <DialogContent sx={desktopDialogContentSx}>
     <Box sx={desktopDialogTitleSx}><Box><Typography sx={{ fontSize: 20, fontWeight: 700 }}>{promotion ? "Add Promotion" : "Add Price"}</Typography><Typography color="text.secondary" sx={{ mt: .35, fontSize: 13 }}>{promotion ? "Set a discount price and promotion period." : "Set a selling price and margin."}</Typography></Box><IconButton aria-label="Close dialog" onClick={onClose}><CloseRoundedIcon /></IconButton></Box>

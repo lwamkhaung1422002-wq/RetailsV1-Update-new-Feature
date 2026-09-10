@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction } from "../lib/manager-approval.js";
 import { recordInventoryMovement } from "../lib/inventory-domain.js";
 import { refreshProductWeightedCost } from "../lib/costing.js";
 import { prisma } from "../lib/prisma.js";
@@ -307,6 +308,7 @@ inventoryRouter.post("/:shopId/inventory/adjustments/by-cost", async (request, r
     const authUser = getAuthUser(request);
     const { shopId } = paramsSchema.parse(request.params);
     const input = costPriceDecreaseSchema.parse(request.body);
+    const authorization = await authorizeSensitiveAction({ requesterId: authUser.id, shopId, action: "stock.adjust", targetId: input.productId, approvalToken: approvalAccessToken(request.headers) });
     await assertUserOwnsShop(authUser.id, shopId);
     await assertProductBelongsToShop(input.productId, shopId);
     await assertVariantBelongsToProduct(input.variantId, input.productId);
@@ -353,7 +355,7 @@ inventoryRouter.post("/:shopId/inventory/adjustments/by-cost", async (request, r
       }
       await writeAuditLog(tx, {
         shopId, actorId: authUser.id, action: "inventory.adjust", entity: "StockAdjustment", entityId: adjustment.id,
-        metadata: { productId: input.productId, unitCost: input.unitCost, quantity: input.quantity, availableQuantity, allocations: deductions.map(({ batch, quantity }) => ({ inventoryBatchId: batch.id, quantity })), reason: input.reason, staffName: input.staffName },
+        metadata: { productId: input.productId, unitCost: input.unitCost, quantity: input.quantity, availableQuantity, allocations: deductions.map(({ batch, quantity }) => ({ inventoryBatchId: batch.id, quantity })), reason: input.reason, staffName: input.staffName, ...approvalAuditMetadata(authorization) },
       });
       const averageCost = await refreshProductWeightedCost(tx, shopId, input.productId);
       await Promise.all(movements.map((movement) => tx.inventoryMovement.update({ where: { id: movement.id }, data: { averageCostAfter: averageCost } })));
@@ -373,8 +375,9 @@ inventoryRouter.post(
       await assertUserOwnsShop(authUser.id, shopId);
       // Resolve the scoped resource before validating its mutation payload so a
       // foreign-shop batch cannot leak validation details.
-      const scopedBatch = await prisma.inventoryBatch.findFirst({ where: { id: inventoryBatchId, shopId }, select: { id: true } });
+      const scopedBatch = await prisma.inventoryBatch.findFirst({ where: { id: inventoryBatchId, shopId }, select: { id: true, productId: true } });
       if (!scopedBatch) throw notFound("Inventory batch not found.");
+      const authorization = await authorizeSensitiveAction({ requesterId: authUser.id, shopId, action: "stock.adjust", targetId: scopedBatch.productId, approvalToken: approvalAccessToken(request.headers) });
       const input = adjustmentSchema.parse(request.body);
 
       if (input.action !== "SET" && input.quantity < 1) {
@@ -429,6 +432,7 @@ inventoryRouter.post(
             afterQuantity,
             reason: input.reason,
             staffName: input.staffName,
+            ...approvalAuditMetadata(authorization),
           },
         });
 

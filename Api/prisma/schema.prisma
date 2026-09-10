@@ -46,6 +46,7 @@ model Shop {
   logoUrl             String?
   logoPublicId        String?
   ownerId             String
+  approvalPinHash     String?
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
   owner               User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
@@ -102,6 +103,7 @@ model ShopMember {
   userId    String
   role      String
   active    Boolean  @default(true)
+  approvalPinHash String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)

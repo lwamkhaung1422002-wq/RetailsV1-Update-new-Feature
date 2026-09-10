@@ -35,6 +35,7 @@ import { useAllActiveProductsQuery, useInventoryQuery } from "../../hooks/usePos
 import BarcodeScannerDialog from "../../components/BarcodeScanner/BarcodeScannerDialog";
 import { queryKeys } from "../../lib/queryKeys";
 import { useAuth } from "../../context/AuthContext";
+import { useManagerApproval } from "../../context/approval-context";
 
 const money = (amount) => `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2 }).format(amount)} ကျပ်`;
 const fieldSx = {
@@ -50,6 +51,7 @@ export default function AddStockMovementPage() {
   const navigate = useNavigate();
   const api = usePosApi();
   const { shop } = useAuth();
+  const { runWithApproval } = useManagerApproval();
   const queryClient = useQueryClient();
   const isMobile = useMediaQuery("(max-width:768px)");
   const [movementType, setMovementType] = useState("in");
@@ -151,7 +153,7 @@ export default function AddStockMovementPage() {
     };
     setErrors(nextErrors);
     if (Object.values(nextErrors).some(Boolean)) return;
-    try { if (movementType === "in") await api.inventory.create({ productId: product.id, quantity: Number(quantity), unitCost: Number(cost), note: notes.trim() }); else if (adjustmentType === "decrease") await api.inventory.adjustByCost({ productId: product.id, unitCost: Number(adjustmentCost), quantity: Number(quantity), reason: notes.trim(), staffName: adjustedBy.trim() }); else { const batch = batches.find((item) => item.productId === product.id); if (!batch) throw new Error("Add stock before recording an adjustment."); await api.inventory.adjust(batch.id, { action: "ADD", quantity: Number(quantity), reason: notes.trim(), staffName: adjustedBy.trim() }); }
+    try { if (movementType === "in") await api.inventory.create({ productId: product.id, quantity: Number(quantity), unitCost: Number(cost), note: notes.trim() }); else if (adjustmentType === "decrease") await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: product.id, targetLabel: product.name, initialReason: notes.trim() }, (approvalToken) => api.inventory.adjustByCost({ productId: product.id, unitCost: Number(adjustmentCost), quantity: Number(quantity), reason: notes.trim(), staffName: adjustedBy.trim() }, approvalToken)); else { const batch = batches.find((item) => item.productId === product.id); if (!batch) throw new Error("Add stock before recording an adjustment."); await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: product.id, targetLabel: product.name, initialReason: notes.trim() }, (approvalToken) => api.inventory.adjust(batch.id, { action: "ADD", quantity: Number(quantity), reason: notes.trim(), staffName: adjustedBy.trim() }, approvalToken)); }
       // Stock History is the next screen, so its movement feed stays critical.
       // Catalog, pricing and analytical summaries refresh without delaying navigation.
       await queryClient.invalidateQueries({ queryKey: queryKeys.movements(shop?.id) });
@@ -163,7 +165,7 @@ export default function AddStockMovementPage() {
         queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "reports"] }),
       ]);
       navigate("/stock/history");
-    } catch (error) { setErrors((current) => ({ ...current, submit: error.message || "Unable to save stock movement." })); }
+    } catch (error) { if (!error.approvalCancelled) setErrors((current) => ({ ...current, submit: error.message || "Unable to save stock movement." })); }
   };
 
   if (!isMobile) return <><DesktopAddStockMovement movementType={movementType} setMovementType={setMovementType} adjustmentType={adjustmentType} setAdjustmentType={setAdjustmentType} query={query} filteredProducts={filteredProducts} activeProductCount={products.length} product={product} selectProduct={selectProduct} findProduct={findProduct} onProductInputChange={handleProductInputChange} onSearchKeyDown={handleSearchKeyDown} productsLoading={productsLoading} productsError={productsError} quantity={quantity} setQuantity={setQuantity} cost={cost} setCost={setCost} adjustmentCost={adjustmentCost} setAdjustmentCost={setAdjustmentCost} availableCostBuckets={availableCostBuckets} notes={notes} setNotes={setNotes} adjustedBy={adjustedBy} setAdjustedBy={setAdjustedBy} errors={errors} onClose={() => navigate("/stock")} onSave={saveMovement} /><BarcodeScannerDialog open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={handleScan} /></>;

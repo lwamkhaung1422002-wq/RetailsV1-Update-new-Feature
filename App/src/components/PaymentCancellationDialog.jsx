@@ -4,6 +4,7 @@ import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePosApi } from "../hooks/useApiResource";
 import { useAuth } from "../context/AuthContext";
+import { useManagerApproval } from "../context/approval-context";
 
 const activeSalePayments = (payments = []) => payments.filter((payment) =>
   Number(payment.amount) > 0 && !payments.some((reversal) => Number(reversal.amount) < 0 && reversal.originalPaymentId === payment.id));
@@ -11,6 +12,7 @@ const activeSalePayments = (payments = []) => payments.filter((payment) =>
 export default function PaymentCancellationDialog({ kind, recordId, onClose, onSaved }) {
   const api = usePosApi();
   const { shop } = useAuth();
+  const { runWithApproval } = useManagerApproval();
   const queryClient = useQueryClient();
   const [record, setRecord] = useState(null);
   const [selected, setSelected] = useState("");
@@ -53,16 +55,16 @@ export default function PaymentCancellationDialog({ kind, recordId, onClose, onS
       if (mustCancelPayment) {
         const payment = active.find((item) => item.id === selected);
         if (!payment) throw new Error(selected ? "This payment has already been cancelled. Reopen the dialog to refresh." : "Cancel active payments before cancelling this record. Reopen the dialog to refresh.");
-        if (supplier) await api.suppliers.reverseDeliveryPayment(recordId, selected, { reason: reason.trim() });
-        else await api.payments.refundOrder(recordId, { originalPaymentId: selected, amount: Number(payment.amount), method: payment.method || "Cash", note: reason.trim() });
+        if (supplier) await runWithApproval({ permission: "supplier.pay", action: "supplier.payment.reverse", actionLabel: "Reverse supplier payment", targetId: selected, targetLabel: title, amountLabel: `${Number(payment.amount).toLocaleString()} MMK`, initialReason: reason.trim() }, (approvalToken) => approvalToken ? api.suppliers.reverseDeliveryPayment(recordId, selected, { reason: reason.trim() }, approvalToken) : api.suppliers.reverseDeliveryPayment(recordId, selected, { reason: reason.trim() }));
+        else await runWithApproval({ permission: "payment.refund", action: "payment.refund", actionLabel: "Refund", targetId: recordId, targetLabel: title, amountLabel: `${Number(payment.amount).toLocaleString()} MMK`, initialReason: reason.trim() }, (approvalToken) => approvalToken ? api.payments.refundOrder(recordId, { originalPaymentId: selected, amount: Number(payment.amount), method: payment.method || "Cash", note: reason.trim() }, approvalToken) : api.payments.refundOrder(recordId, { originalPaymentId: selected, amount: Number(payment.amount), method: payment.method || "Cash", note: reason.trim() }));
       } else {
         if (supplier) await api.suppliers.cancelDeliveryRecord(recordId, { reason: reason.trim() });
-        else await api.orders.cancel(recordId, { reason: reason.trim() });
+        else await runWithApproval({ permission: "order.cancel", action: "order.cancel", actionLabel: "Cancel paid sale", targetId: recordId, targetLabel: title, initialReason: reason.trim() }, (approvalToken) => approvalToken ? api.orders.cancel(recordId, { reason: reason.trim() }, approvalToken) : api.orders.cancel(recordId, { reason: reason.trim() }));
       }
       await Promise.all((supplier ? ["supplier-deliveries", "suppliers", "purchases", "payments", "dashboard", "reports"] : ["orders", "payments", "products", "inventory", "movements", "dashboard", "reports"]).map((resource) => queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, resource] })));
       onSaved?.();
       onClose();
-    } catch (failure) { setError(failure.message || "Cancellation failed."); }
+    } catch (failure) { if (!failure.approvalCancelled) setError(failure.message || "Cancellation failed."); }
     finally { setSaving(false); }
   };
   return <Dialog open onClose={saving ? undefined : onClose} fullWidth maxWidth="xs">

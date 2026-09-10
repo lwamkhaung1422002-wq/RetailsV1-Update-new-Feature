@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction } from "../lib/manager-approval.js";
 import { recordInventoryMovement, setInventoryReservation } from "../lib/inventory-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { resolvePrice } from "../lib/pricing-domain.js";
@@ -1071,6 +1072,8 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
     const orderId = z.string().min(1).parse(request.params.orderId);
     const input = cancelOrderSchema.parse(request.body);
 
+    const authorization = await authorizeSensitiveAction({ requesterId: authUser.id, shopId, action: "order.cancel", targetId: orderId, approvalToken: approvalAccessToken(request.headers) });
+
     await assertUserOwnsShop(authUser.id, shopId);
 
     const transactionStartedAt = Date.now();
@@ -1191,7 +1194,7 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
         action: "order.cancel",
         entity: "Order",
         entityId: orderId,
-        metadata: { reason: input.reason },
+        metadata: { reason: input.reason, ...approvalAuditMetadata(authorization) },
       });
 
       return cancelledOrder;

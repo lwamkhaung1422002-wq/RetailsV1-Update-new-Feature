@@ -10,6 +10,7 @@ import { Alert } from "@mui/material";
 import { usePosApi } from "../../hooks/useApiResource";
 import { useCategoriesQuery, useProductsQuery } from "../../hooks/usePosQueries";
 import { useAuth } from "../../context/AuthContext";
+import { useManagerApproval } from "../../context/approval-context";
 import { queryKeys } from "../../lib/queryKeys";
 
 const money = (value) => `${new Intl.NumberFormat("en-US").format(value)} ကျပ်`;
@@ -20,6 +21,7 @@ export default function AddPricePage() {
   const api = usePosApi();
   const queryClient = useQueryClient();
   const { shop } = useAuth();
+  const { runWithApproval } = useManagerApproval();
   const [params] = useSearchParams();
   const editing = Boolean(params.get("edit"));
   const [scope, setScope] = useState(editing ? "individual" : "all");
@@ -45,7 +47,7 @@ export default function AddPricePage() {
   const updateManualPrice = (value) => { setNewSellPrice(value.replace(/[^0-9]/g, "")); setMargin(""); };
 
   const loadError = productsError || categoriesError;
-  const save = async () => { const normalizedReason = reason.trim(); if (normalizedReason.length < 3) { setError("Reason must contain at least 3 characters."); return; } if (scope === "individual" && !selectedProduct) { setError("Select a product."); return; } if (scope === "category" && !category) { setError("Select a category."); return; } const price = Number(newSellPrice || calculatedPrice); if (scope === "individual" && (!Number.isInteger(price) || price < 0)) { setError("Enter a valid selling price."); return; } if (scope !== "individual" && !Number.isFinite(Number(margin))) { setError("Enter a valid margin percentage."); return; } setSaving(true); setError(""); try { if (scope === "individual") await api.pricing.createPrice({ productId: selectedProduct.id, unitPrice: price, effectiveFrom: new Date().toISOString(), reason: normalizedReason }); else await api.pricing.bulkPrices({ scope: scope.toUpperCase(), ...(scope === "category" ? { categoryId: category } : {}), marginPercent: Number(margin), reason: normalizedReason }); await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.products(shop?.id) }), queryClient.invalidateQueries({ queryKey: queryKeys.pricing(shop?.id) })]); void Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(shop?.id) }), queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "reports"] })]); navigate("/price"); } catch (err) { setError(apiErrorMessage(err)); } finally { setSaving(false); } };
+  const save = async () => { const normalizedReason = reason.trim(); if (normalizedReason.length < 3) { setError("Reason must contain at least 3 characters."); return; } if (scope === "individual" && !selectedProduct) { setError("Select a product."); return; } if (scope === "category" && !category) { setError("Select a category."); return; } const price = Number(newSellPrice || calculatedPrice); if (scope === "individual" && (!Number.isInteger(price) || price < 0)) { setError("Enter a valid selling price."); return; } if (scope !== "individual" && !Number.isFinite(Number(margin))) { setError("Enter a valid margin percentage."); return; } setSaving(true); setError(""); try { if (scope === "individual") await runWithApproval({ permission: "price.edit", action: "price.override", actionLabel: "Price override", targetId: selectedProduct.id, targetLabel: selectedProduct.name, amountLabel: money(price), initialReason: normalizedReason }, (approvalToken) => api.pricing.createPrice({ productId: selectedProduct.id, unitPrice: price, effectiveFrom: new Date().toISOString(), reason: normalizedReason }, approvalToken)); else await api.pricing.bulkPrices({ scope: scope.toUpperCase(), ...(scope === "category" ? { categoryId: category } : {}), marginPercent: Number(margin), reason: normalizedReason }); await Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.products(shop?.id) }), queryClient.invalidateQueries({ queryKey: queryKeys.pricing(shop?.id) })]); void Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(shop?.id) }), queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "reports"] })]); navigate("/price"); } catch (err) { if (!err.approvalCancelled) setError(apiErrorMessage(err)); } finally { setSaving(false); } };
   return <Box sx={{ minHeight: "100dvh", bgcolor: "#f8fafc", pb: 12, fontFamily: "Inter, Roboto, 'Noto Sans Myanmar', sans-serif" }}>
     <AppBar position="sticky" elevation={0} sx={{ bgcolor: "primary.main" }}><Toolbar sx={{ minHeight: 64, display: "grid", gridTemplateColumns: "1fr auto 1fr" }}><IconButton aria-label="Back to price and promotion" onClick={() => navigate("/price")} sx={{ color: "common.white", justifySelf: "start" }}><ArrowBackRoundedIcon /></IconButton><Typography fontWeight={700}>{editing ? "Edit Price" : "Add Price"}</Typography><Box /></Toolbar></AppBar>
     <Box sx={{ p: 2.5, maxWidth: 620, mx: "auto" }}>

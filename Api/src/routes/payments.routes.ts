@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { writeAuditLog } from "../lib/audit-log.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction } from "../lib/manager-approval.js";
 import { prisma } from "../lib/prisma.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -450,6 +451,8 @@ paymentsRouter.post("/:shopId/orders/:orderId/refunds", async (request, response
     const orderId = z.string().min(1).parse(request.params.orderId);
     const input = refundPaymentSchema.parse(request.body);
 
+    const authorization = await authorizeSensitiveAction({ requesterId: authUser.id, shopId, action: "payment.refund", targetId: orderId, approvalToken: approvalAccessToken(request.headers) });
+
     await assertUserOwnsShop(authUser.id, shopId);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -509,7 +512,7 @@ paymentsRouter.post("/:shopId/orders/:orderId/refunds", async (request, response
         action: "payment.refund",
         entity: "Payment",
         entityId: refund.id,
-        metadata: { orderId: order.id, refundAmount, method: input.method, restoredStock: false },
+        metadata: { orderId: order.id, refundAmount, method: input.method, restoredStock: false, ...approvalAuditMetadata(authorization) },
       });
 
       return { refund: serializePayment(refund), order: updatedOrder };

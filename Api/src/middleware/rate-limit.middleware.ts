@@ -17,11 +17,27 @@ const limiter = hasUpstashConfiguration
   })
   : null;
 const developmentBuckets = new Map<string, { count: number; resetAt: number }>();
+const approvalBuckets = new Map<string, { count: number; resetAt: number }>();
 
 function normalizedEmail(value: unknown): string {
   return typeof value === "object" && value !== null && "email" in value && typeof value.email === "string"
     ? value.email.trim().toLowerCase()
     : "unknown";
+}
+
+export function approvalRateLimit(request: Request, response: Response, next: NextFunction): void {
+  const approverId = typeof request.body?.approverId === "string" ? request.body.approverId : "unknown";
+  const key = `${request.ip}:${approverId}`;
+  const now = Date.now();
+  const current = approvalBuckets.get(key);
+  const bucket = !current || current.resetAt <= now ? { count: 0, resetAt: now + 60_000 } : current;
+  bucket.count += 1;
+  approvalBuckets.set(key, bucket);
+  if (bucket.count > 5) {
+    response.status(429).json({ message: "Too many approval attempts. Try again later." });
+    return;
+  }
+  next();
 }
 
 export async function authRateLimit(request: Request, response: Response, next: NextFunction): Promise<void> {

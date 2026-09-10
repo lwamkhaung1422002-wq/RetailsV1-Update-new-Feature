@@ -5,6 +5,7 @@ import { getAuthUser } from "./auth.middleware.js";
 
 export function permissionForRequest(method: string, path: string): ShopPermission | null {
   const write = method !== "GET" && method !== "HEAD";
+  if (path === "approvers" || path === "approval-pin" || path === "approvals") return null;
   if (path === "staff" || path.startsWith("staff/") || path === "role-policies" || path.startsWith("role-policies/")) return "staff.manage";
   if (path === "audit-logs" || path.startsWith("audit-logs/") || path === "operations") return "audit.view";
   if (path === "dashboard" || path === "reports/sales" || path === "product-report") return "report.viewSales";
@@ -44,6 +45,14 @@ export function permissionForRequest(method: string, path: string): ShopPermissi
   return "settings.manage";
 }
 
+function isManagerApprovableRequest(method: string, path: string): boolean {
+  if (method === "POST" && /^orders\/[^/]+\/(refunds|cancel)$/.test(path)) return true;
+  if (method === "POST" && (path === "inventory/adjustments/by-cost" || /^inventory\/[^/]+\/adjustments$/.test(path))) return true;
+  if (method === "POST" && /^purchases\/[^/]+\/payments\/[^/]+\/reverse$/.test(path)) return true;
+  if (method === "POST" && /^supplier-delivery-records\/[^/]+\/payments\/[^/]+\/reverse$/.test(path)) return true;
+  return method === "POST" && path === "prices";
+}
+
 export async function enforceShopPermission(request: Request, _response: Response, next: NextFunction): Promise<void> {
   try {
     const segments = request.path.split("/").filter(Boolean);
@@ -57,8 +66,10 @@ export async function enforceShopPermission(request: Request, _response: Respons
       return;
     }
     const auth = getAuthUser(request);
-    const permission = permissionForRequest(request.method, resourceSegments.join("/"));
-    if (permission) await assertShopPermission(auth.id, shopId, permission);
+    const resourcePath = resourceSegments.join("/");
+    const permission = permissionForRequest(request.method, resourcePath);
+    if (isManagerApprovableRequest(request.method, resourcePath)) await assertShopAccess(auth.id, shopId);
+    else if (permission) await assertShopPermission(auth.id, shopId, permission);
     else await assertShopAccess(auth.id, shopId);
     next();
   } catch (error) {

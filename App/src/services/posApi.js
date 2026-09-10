@@ -84,12 +84,13 @@ export function createPosApi({
     inventory: {
       list: (query) => shopRequest(`/inventory${queryString(query)}`),
       create: (body) => shopRequest("/inventory", { method: "POST", body }),
-      adjust: (inventoryBatchId, body) =>
+      adjust: (inventoryBatchId, body, approvalToken) =>
         shopRequest(`/inventory/${inventoryBatchId}/adjustments`, {
           method: "POST",
           body,
+          ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}),
         }),
-      adjustByCost: (body) => shopRequest("/inventory/adjustments/by-cost", { method: "POST", body }),
+      adjustByCost: (body, approvalToken) => shopRequest("/inventory/adjustments/by-cost", { method: "POST", body, ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}) }),
       adjustments: (query) =>
         shopRequest(`/inventory-adjustments${queryString(query)}`),
       movements: (query) =>
@@ -118,10 +119,10 @@ export function createPosApi({
           method: "POST",
           body,
         }),
-      reverseDeliveryPayment: (recordId, paymentId, body) =>
+      reverseDeliveryPayment: (recordId, paymentId, body, approvalToken) =>
         shopRequest(
           `/supplier-delivery-records/${recordId}/payments/${paymentId}/reverse`,
-          { method: "POST", body },
+          { method: "POST", body, ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}) },
         ),
       update: (id, body) =>
         shopRequest(`/suppliers/${id}`, { method: "PATCH", body }),
@@ -137,10 +138,11 @@ export function createPosApi({
       create: (body) => shopRequest("/purchases", { method: "POST", body }),
       pay: (id, body) =>
         shopRequest(`/purchases/${id}/payments`, { method: "POST", body }),
-      reversePayment: (purchaseId, paymentId, body) =>
+      reversePayment: (purchaseId, paymentId, body, approvalToken) =>
         shopRequest(`/purchases/${purchaseId}/payments/${paymentId}/reverse`, {
           method: "POST",
           body,
+          ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}),
         }),
     },
     payments: {
@@ -148,8 +150,8 @@ export function createPosApi({
       list: (query) => shopRequest(`/payments${queryString(query)}`),
       addToOrder: (orderId, body) =>
         shopRequest(`/orders/${orderId}/payments`, { method: "POST", body }),
-      refundOrder: (orderId, body) =>
-        shopRequest(`/orders/${orderId}/refunds`, { method: "POST", body }),
+      refundOrder: (orderId, body, approvalToken) =>
+        shopRequest(`/orders/${orderId}/refunds`, { method: "POST", body, ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}) }),
       createCodSettlement: (body) =>
         shopRequest("/payments/cod-settlements", { method: "POST", body }),
       void: (paymentId, body) =>
@@ -170,8 +172,8 @@ export function createPosApi({
       fulfill: (id) => shopRequest(`/orders/${id}/fulfill`, { method: "POST" }),
       updateStatus: (id, body) =>
         shopRequest(`/orders/${id}/status`, { method: "PATCH", body }),
-      cancel: (id, body) =>
-        shopRequest(`/orders/${id}/cancel`, { method: "POST", body }),
+      cancel: (id, body, approvalToken) =>
+        shopRequest(`/orders/${id}/cancel`, { method: "POST", body, ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}) }),
       remove: (id) => shopRequest(`/orders/${id}`, { method: "DELETE" }),
     },
     pricing: {
@@ -180,7 +182,7 @@ export function createPosApi({
       resolve: (body) =>
         shopRequest("/pricing/resolve", { method: "POST", body }),
       prices: (query) => shopRequest(`/prices${queryString(query)}`),
-      createPrice: (body) => shopRequest("/prices", { method: "POST", body }),
+      createPrice: (body, approvalToken) => shopRequest("/prices", { method: "POST", body, ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}) }),
       bulkPrices: (body) =>
         shopRequest("/prices/bulk", { method: "POST", body }),
       promotions: (query) => shopRequest(`/promotions${queryString(query)}`),
@@ -237,6 +239,11 @@ export function createPosApi({
       update: (id, body) => shopRequest(`/staff/${id}`, { method: "PATCH", body }),
       policies: () => shopRequest("/role-policies"),
       updatePolicy: (role, permissions) => shopRequest(`/role-policies/${role}`, { method: "PUT", body: { permissions } }),
+    },
+    approvals: {
+      approvers: () => shopRequest("/approvers"),
+      create: (body) => shopRequest("/approvals", { method: "POST", body }),
+      setPin: (body) => shopRequest("/approval-pin", { method: "PUT", body }),
     },
     audit: (query) => shopRequest(`/audit-logs${queryString(query)}`),
     notifications: {

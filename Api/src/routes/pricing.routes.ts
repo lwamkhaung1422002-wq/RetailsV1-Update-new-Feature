@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction } from "../lib/manager-approval.js";
 import {
   activateDuePriceEntries,
   assertPricingTarget,
@@ -387,6 +388,7 @@ pricingRouter.get("/:shopId/prices", async (request, response, next) => {
 pricingRouter.post("/:shopId/prices", async (request, response, next) => {
   try {
     const auth = getAuthUser(request); const { shopId } = shopParams.parse(request.params); const input = priceChangeInput.parse(request.body); await assertUserOwnsShop(auth.id, shopId);
+    const authorization = await authorizeSensitiveAction({ requesterId: auth.id, shopId, action: "price.override", targetId: input.productId, approvalToken: approvalAccessToken(request.headers) });
     if (input.effectiveTo && input.effectiveTo <= input.effectiveFrom) throw badRequest("Price end time must be after its start time.");
     const entry = await prisma.$transaction(async (tx) => {
       const target = await assertPricingTarget(tx, shopId, input); assertPriceAtOrAboveCost(input.unitPrice, target.product.cost); const book = await ensureDefaultPriceBook(tx, shopId); const now = new Date();
@@ -401,7 +403,7 @@ pricingRouter.post("/:shopId/prices", async (request, response, next) => {
         if (target.variant) await tx.productVariant.update({ where: { id: target.variant.id }, data: { price: input.unitPrice } });
         else await tx.product.update({ where: { id: target.product.id }, data: { price: input.unitPrice, version: { increment: 1 } } });
       }
-      await writeAuditLog(tx, { shopId, actorId: auth.id, action: "price.change", entity: "PriceEntry", entityId: created.id, metadata: { targetKey, unitPrice: input.unitPrice, reason: input.reason } });
+      await writeAuditLog(tx, { shopId, actorId: auth.id, action: "price.change", entity: "PriceEntry", entityId: created.id, metadata: { targetKey, unitPrice: input.unitPrice, reason: input.reason, ...approvalAuditMetadata(authorization) } });
       return created;
     });
     response.status(201).json({ entry });

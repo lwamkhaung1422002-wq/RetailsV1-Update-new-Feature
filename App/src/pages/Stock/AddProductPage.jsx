@@ -45,6 +45,7 @@ import { usePosApi } from "../../hooks/useApiResource";
 import { normalizeBarcode } from "../../lib/barcodeScanner";
 import { queryKeys } from "../../lib/queryKeys";
 import { useAuth } from "../../context/AuthContext";
+import { useManagerApproval } from "../../context/approval-context";
 
 const emptyForm = {
   name: "",
@@ -74,6 +75,7 @@ export default function AddProductPage() {
   const navigate = useNavigate();
   const api = usePosApi();
   const { shop } = useAuth();
+  const { runWithApproval } = useManagerApproval();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const productId = searchParams.get("edit");
@@ -279,33 +281,28 @@ export default function AddProductPage() {
         if (delta !== 0 && hasSaleHistory) {
           throw new Error("Stock quantity cannot be edited after this product has sale history.");
         }
-        await api.products.update(productId, payload);
-        if (delta !== 0) {
-          const batch = inventoryBatches[0];
-          if (delta > 0 && batch)
-            await api.inventory.adjust(batch.id, {
-              action: "ADD",
-              quantity: delta,
-              reason: "Product edit stock quantity.",
-            });
-          else if (delta > 0)
-            await api.inventory.create({
-              productId,
-              quantity: delta,
-              unitCost: Number(form.cost),
-              note: "Stock quantity set during product edit.",
-            });
-          else {
-            let remaining = Math.abs(delta);
-            for (const currentBatch of inventoryBatches) {
-              if (remaining <= 0) break;
-              const quantity = Math.min(remaining, Number(currentBatch.quantity || 0));
-              if (quantity > 0) await api.inventory.adjust(currentBatch.id, { action: "SUB", quantity, reason: "Product edit stock quantity." });
-              remaining -= quantity;
+        const persistEdit = async (approvalToken) => {
+          await api.products.update(productId, payload);
+          if (delta !== 0) {
+            const batch = inventoryBatches[0];
+            if (delta > 0 && batch)
+              await api.inventory.adjust(batch.id, { action: "ADD", quantity: delta, reason: "Product edit stock quantity." }, approvalToken);
+            else if (delta > 0)
+              await api.inventory.create({ productId, quantity: delta, unitCost: Number(form.cost), note: "Stock quantity set during product edit." });
+            else {
+              let remaining = Math.abs(delta);
+              for (const currentBatch of inventoryBatches) {
+                if (remaining <= 0) break;
+                const quantity = Math.min(remaining, Number(currentBatch.quantity || 0));
+                if (quantity > 0) await api.inventory.adjust(currentBatch.id, { action: "SUB", quantity, reason: "Product edit stock quantity." }, approvalToken);
+                remaining -= quantity;
+              }
+              if (remaining > 0) throw new Error("Stock quantity cannot be negative.");
             }
-            if (remaining > 0) throw new Error("Stock quantity cannot be negative.");
           }
-        }
+        };
+        if (delta !== 0 && (delta < 0 || inventoryBatches.length > 0)) await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: productId, targetLabel: form.name.trim(), initialReason: "Product edit stock quantity." }, persistEdit);
+        else await persistEdit();
         setMessage({
           severity: "success",
           text: "Product updated successfully.",
@@ -360,6 +357,7 @@ export default function AddProductPage() {
       await invalidateProductData(queryClient, shop?.id);
       window.setTimeout(() => navigate("/stock"), 900);
     } catch (error) {
+      if (error.approvalCancelled) return;
       setMessage({
         severity: "error",
         text: error.message || "Unable to save product.",

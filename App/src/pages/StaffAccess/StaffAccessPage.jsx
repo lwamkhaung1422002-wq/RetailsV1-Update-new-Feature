@@ -51,6 +51,8 @@ const emptyForm = { name: "", email: "", password: "", role: "CASHIER" };
 export default function StaffAccessPage() {
   const api = usePosApi();
   const { shop } = useAuth();
+  const isOwner = Boolean(shop?.isOwner);
+  const canSetPin = isOwner || shop?.role === "MANAGER";
   const isMobile = useMediaQuery("(max-width:768px)");
   const [tab, setTab] = useState(0);
   const [dialog, setDialog] = useState(null);
@@ -58,8 +60,10 @@ export default function StaffAccessPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [selectedRole, setSelectedRole] = useState("MANAGER");
-  const loadStaff = useCallback(() => api.staff.list(), [api]);
-  const loadPolicies = useCallback(() => api.staff.policies(), [api]);
+  const [pinDialog, setPinDialog] = useState(false);
+  const [pinForm, setPinForm] = useState({ currentPin: "", pin: "", confirmPin: "" });
+  const loadStaff = useCallback(() => isOwner ? api.staff.list() : Promise.resolve({ staff: [] }), [api, isOwner]);
+  const loadPolicies = useCallback(() => isOwner ? api.staff.policies() : Promise.resolve({ policies: [] }), [api, isOwner]);
   const staffResource = useApiResource(loadStaff);
   const policyResource = useApiResource(loadPolicies);
   const staff = staffResource.data?.staff ?? [];
@@ -94,12 +98,31 @@ export default function StaffAccessPage() {
       setSaveError(error.message || "Unable to update permissions.");
     }
   };
+  const savePin = async () => {
+    if (pinForm.pin.length !== 6 || pinForm.pin !== pinForm.confirmPin) {
+      setSaveError("Enter matching 6-digit PINs.");
+      return;
+    }
+    setSaving(true);
+    setSaveError("");
+    try {
+      await api.approvals.setPin({ pin: pinForm.pin, ...(pinForm.currentPin ? { currentPin: pinForm.currentPin } : {}) });
+      setPinDialog(false);
+      setPinForm({ currentPin: "", pin: "", confirmPin: "" });
+    } catch (error) {
+      setSaveError(error.message || "Unable to save approval PIN.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
-  if (!shop?.isOwner) return <Box sx={{ p: 3 }}><Alert severity="error">Owner access required.</Alert></Box>;
+  if (!canSetPin) return <Box sx={{ p: 3 }}><Alert severity="error">Manager or owner access required.</Alert></Box>;
   const loading = staffResource.loading || policyResource.loading;
   const error = staffResource.error || policyResource.error;
   const content = loading ? <LoadingState /> : error ? <ErrorState error={error} onRetry={() => { void staffResource.reload(); void policyResource.reload(); }} /> : (
     <>
+      {!isOwner ? <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography fontWeight={700}>Manager approval PIN</Typography><Typography color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>Use this PIN to approve sensitive actions in this branch.</Typography><Button variant="contained" onClick={() => { setSaveError(""); setPinDialog(true); }}>Set or change PIN</Button></Paper> : <>
+      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1.5 }}><Button variant="outlined" onClick={() => { setSaveError(""); setPinDialog(true); }}>Set or change PIN</Button></Box>
       <Tabs value={tab} onChange={(_event, value) => setTab(value)} sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
         <Tab label="Staff" />
         <Tab label="Permissions" />
@@ -117,6 +140,7 @@ export default function StaffAccessPage() {
           <Stack spacing={2}>{permissionGroups.map(([group, entries]) => <Paper key={group} variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography fontWeight={700} sx={{ mb: 1 }}>{group}</Typography><Stack>{entries.map(([key, label]) => <FormControlLabel key={key} label={label} labelPlacement="start" sx={{ m: 0, minHeight: 42, justifyContent: "space-between" }} control={<Switch checked={selectedPolicy?.permissions?.includes(key) ?? false} onChange={(event) => void togglePermission(key, event.target.checked)} />} />)}</Stack></Paper>)}</Stack>
         </Box>
       )}
+      </>}
     </>
   );
 
@@ -126,6 +150,11 @@ export default function StaffAccessPage() {
       <DialogTitle fontWeight={800}>{dialog?.mode === "add" ? "Add Staff" : "Edit Staff"}</DialogTitle>
       <DialogContent dividers><Stack spacing={2}>{saveError && <Alert severity="error">{saveError}</Alert>}<TextField label="Name" value={form.name} disabled={dialog?.mode === "edit"} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /><TextField label="Email" type="email" value={form.email} disabled={dialog?.mode === "edit"} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />{dialog?.mode === "add" && <TextField label="Password for new account" type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} helperText="Not needed when the email already has an account." />}<FormControl fullWidth><InputLabel>Role</InputLabel><Select label="Role" value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}>{roles.map((role) => <MenuItem key={role} value={role}>{roleLabels[role]}</MenuItem>)}</Select></FormControl>{dialog?.mode === "edit" && <FormControlLabel control={<Switch checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />} label={form.active ? "Active" : "Inactive"} />}</Stack></DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}><Button onClick={closeDialog}>Cancel</Button><Button variant="contained" disabled={saving || !form.name.trim() || !form.email.trim()} onClick={() => void saveStaff()}>{saving ? "Saving…" : "Save"}</Button></DialogActions>
+    </Dialog>
+    <Dialog open={pinDialog} onClose={saving ? undefined : () => setPinDialog(false)} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: 2.5 } } }}>
+      <DialogTitle fontWeight={800}>Approval</DialogTitle>
+      <DialogContent dividers><Stack spacing={2}>{saveError && <Alert severity="error">{saveError}</Alert>}<TextField label="Current PIN" type="password" inputMode="numeric" value={pinForm.currentPin} onChange={(event) => setPinForm((current) => ({ ...current, currentPin: event.target.value.replace(/\D/g, "").slice(0, 6) }))} helperText="Required when changing an existing PIN." /><TextField label="New 6-digit PIN" type="password" inputMode="numeric" value={pinForm.pin} onChange={(event) => setPinForm((current) => ({ ...current, pin: event.target.value.replace(/\D/g, "").slice(0, 6) }))} /><TextField label="Confirm PIN" type="password" inputMode="numeric" value={pinForm.confirmPin} onChange={(event) => setPinForm((current) => ({ ...current, confirmPin: event.target.value.replace(/\D/g, "").slice(0, 6) }))} /></Stack></DialogContent>
+      <DialogActions sx={{ px: 3, py: 2 }}><Button onClick={() => setPinDialog(false)} disabled={saving}>Cancel</Button><Button variant="contained" onClick={() => void savePin()} disabled={saving || pinForm.pin.length !== 6 || pinForm.confirmPin.length !== 6}>{saving ? "Saving…" : "Save"}</Button></DialogActions>
     </Dialog>
   </>;
 }
