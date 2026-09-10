@@ -12,8 +12,15 @@ import { accessTokenRefreshDelay, requestAccessTokenRefresh } from "./lib/auth-r
 import { queryClient } from "./lib/queryClient";
 import { readStoredJson } from "./lib/storage";
 import { localeToUiLanguage, translateUi } from "./lib/uiLanguage";
+import { selectAccessibleShop } from "./lib/active-shop";
 
 const defaultShop = { name: "POS System", address: "", logo: "" };
+const activeShopStorageKey = "pos-active-shop-id";
+
+function preferredShop(shops, fallback) {
+  const storedId = localStorage.getItem(activeShopStorageKey);
+  return selectAccessibleShop(shops, storedId, fallback);
+}
 
 export default function AppProvider() {
   const [shop, setShopState] = useState(() => readStoredJson("pos-shop-details", defaultShop));
@@ -31,6 +38,7 @@ export default function AppProvider() {
     setAccessToken(nextAccessToken);
     setSessionExpired(false);
     if (nextSession.shop) {
+      localStorage.setItem(activeShopStorageKey, nextSession.shop.id);
       setShop({ name: nextSession.shop.name, address: nextSession.shop.address || "", logo: nextSession.shop.logoUrl || "" });
       setUiLanguage(localeToUiLanguage(nextSession.shop.setting?.locale));
     }
@@ -56,7 +64,7 @@ export default function AppProvider() {
   }, []);
   const authenticate = useCallback(async (path, body) => {
     const result = await apiRequest(path, { method: "POST", body });
-    const selectedShop = result.shop || result.user?.shops?.[0];
+    const selectedShop = path === "/auth/register" ? result.shop : preferredShop(result.user?.shops, result.shop);
     if (!result.accessToken || !selectedShop) throw new Error("Your account does not have a shop yet.");
     saveSession({ user: result.user, shop: selectedShop }, result.accessToken);
     return result;
@@ -101,7 +109,7 @@ export default function AppProvider() {
       try {
         const refresh = await requestAccessTokenRefresh();
         const result = await apiRequest("/auth/me", { token: refresh.accessToken });
-        const selectedShop = result.user?.shops?.[0];
+        const selectedShop = preferredShop(result.user?.shops);
         if (!selectedShop) throw new Error("No shop found.");
         if (active) saveSession({ user: result.user, shop: selectedShop }, refresh.accessToken);
       } catch {
@@ -143,8 +151,16 @@ export default function AppProvider() {
   const preferences = useMemo(() => ({ shop, setShop, uiLanguage, setUiLanguage, t }), [shop, setShop, uiLanguage, setUiLanguage, t]);
   const requestRegistration = useCallback(() => setRegistrationPromptOpen(true), []);
   const selectShop = useCallback((nextShop) => saveSession({ ...session, shop: nextShop }, accessToken), [accessToken, saveSession, session]);
+  const reloadShops = useCallback(async () => {
+    if (!accessToken || !session?.user) return [];
+    const result = await apiRequest("/shops", { token: accessToken });
+    const shops = result.shops || [];
+    const selectedShop = shops.find((entry) => entry.id === session.shop?.id) || preferredShop(shops);
+    if (selectedShop) saveSession({ ...session, user: { ...session.user, shops }, shop: selectedShop }, accessToken);
+    return shops;
+  }, [accessToken, saveSession, session]);
   const hasPermission = useCallback((permission) => Boolean(session?.mode === "guest" || session?.shop?.isOwner || session?.shop?.permissions?.includes(permission)), [session?.mode, session?.shop]);
-  const auth = useMemo(() => ({ session, user: session?.user || null, shop: session?.shop || null, token: accessToken, isGuest: session?.mode === "guest", isAuthenticated: Boolean(accessToken || session?.mode === "guest"), authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, hasPermission, refreshAccessToken, expireSession }), [session, accessToken, authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, hasPermission, refreshAccessToken, expireSession]);
+  const auth = useMemo(() => ({ session, user: session?.user || null, shop: session?.shop || null, token: accessToken, isGuest: session?.mode === "guest", isAuthenticated: Boolean(accessToken || session?.mode === "guest"), authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, reloadShops, hasPermission, refreshAccessToken, expireSession }), [session, accessToken, authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, reloadShops, hasPermission, refreshAccessToken, expireSession]);
   const guardGuestAction = (event) => {
     if (session?.mode !== "guest") return;
     const button = event.target.closest("button");

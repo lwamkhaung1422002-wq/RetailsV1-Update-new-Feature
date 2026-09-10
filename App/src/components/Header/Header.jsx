@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { AppBar, Avatar, Badge, Box, IconButton, Menu, MenuItem, Stack, Toolbar, Typography, useMediaQuery } from "@mui/material";
+import { AppBar, Avatar, Badge, Box, Button, Divider, IconButton, Menu, MenuItem, Stack, Toolbar, Typography, useMediaQuery } from "@mui/material";
 import FilterListRoundedIcon from "@mui/icons-material/FilterListRounded";
 import NotificationsRoundedIcon from "@mui/icons-material/NotificationsRounded";
 import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import StorefrontRoundedIcon from "@mui/icons-material/StorefrontRounded";
+import KeyboardArrowDownRoundedIcon from "@mui/icons-material/KeyboardArrowDownRounded";
 import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "../../context/AuthContext";
 import { usePosApi } from "../../hooks/useApiResource";
@@ -22,6 +23,7 @@ const pageTitles = {
   "/price": "Price & Discount",
   "/suppliers": "Suppliers",
   "/settings": "Settings",
+  "/branches": "Branches",
 };
 
 export default function Header() {
@@ -35,14 +37,22 @@ export default function Header() {
   const mobileTitle = pathname === "/" ? "Dashboard" : pageTitles[pathname] ?? "POS System";
   const [sortAnchor, setSortAnchor] = useState(null);
   const [notificationAnchor, setNotificationAnchor] = useState(null);
+  const [shopAnchor, setShopAnchor] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const api = usePosApi();
   const { t } = useAppPreferences();
-  const { shop } = useAuth();
+  const { shop, user, selectShop } = useAuth();
+  const accessibleShops = user?.shops || [];
+  const hasBranchSelector = accessibleShops.length > 1;
+  const branchMenu = <Menu anchorEl={shopAnchor} open={Boolean(shopAnchor)} onClose={() => setShopAnchor(null)} PaperProps={{ sx: { minWidth: 220, mt: 1 } }}>
+    <MenuItem onClick={() => { setShopAnchor(null); navigate("/branches"); }}>All branches</MenuItem>
+    <Divider />
+    {accessibleShops.map((entry) => <MenuItem key={entry.id} selected={entry.id === shop?.id} onClick={() => { selectShop(entry); setShopAnchor(null); }}>{entry.name}</MenuItem>)}
+  </Menu>;
   useEffect(() => { let active = true; if (!shop?.id) return undefined; api.notifications.list().then((result) => { if (active) setNotifications(result.notifications || []); }).catch(() => {}); return () => { active = false; }; }, [api, shop?.id]);
 
   if (isMobile) {
-    const mobileShopHeader = ["/", "/sale", "/stock", "/settings"].includes(pathname);
+    const mobileShopHeader = ["/", "/sale", "/stock", "/settings", "/branches"].includes(pathname);
     if (!mobileShopHeader && (pathname.startsWith("/sale/") || pathname.startsWith("/stock/") || pathname === "/suppliers" || pathname.startsWith("/suppliers/") || pathname.startsWith("/supplier-delivery/") || pathname === "/payment" || pathname.startsWith("/payment/") || pathname === "/price" || pathname.startsWith("/price/") || pathname.startsWith("/settings/") || pathname.startsWith("/report/"))) return null;
     const action = pathname === "/stock"
       ? { label: "Sort inventory", icon: <FilterListRoundedIcon />, event: "inventory-sort" }
@@ -55,15 +65,17 @@ export default function Header() {
     if (mobileShopHeader) return (
       <AppBar position="sticky" elevation={0} sx={{ bgcolor: "#1976d2", borderBottom: 0 }}>
         <Toolbar sx={{ minHeight: 64, px: 2, display: "flex", justifyContent: "space-between", gap: 1.5 }}>
-          <Stack direction="row" alignItems="center" spacing={1.15} sx={{ minWidth: 0 }}>
+          <Stack direction="row" alignItems="center" spacing={1.15} onClick={hasBranchSelector ? (event) => setShopAnchor(event.currentTarget) : undefined} sx={{ minWidth: 0, cursor: hasBranchSelector ? "pointer" : "default" }}>
             <Avatar src={shop?.logoUrl || undefined} alt={shop?.name || "Shop"} sx={{ width: 34, height: 34, bgcolor: "common.white", color: "primary.main", border: "1px solid rgba(255,255,255,.55)" }}><StorefrontRoundedIcon fontSize="small" /></Avatar>
             <Typography noWrap sx={{ minWidth: 0, color: "common.white", fontSize: 17, fontWeight: 750 }}>{shop?.name || "POS System"}</Typography>
+            {hasBranchSelector && <KeyboardArrowDownRoundedIcon sx={{ color: "common.white", flexShrink: 0 }} />}
           </Stack>
           {action ? <IconButton aria-label={action.label} onClick={(event) => action.event === "inventory-sort" ? setSortAnchor(event.currentTarget) : window.dispatchEvent(new Event(action.event))} sx={{ flexShrink: 0, color: "common.white" }}>{action.icon}</IconButton> : <Box sx={{ width: 40, flexShrink: 0 }} />}
         </Toolbar>
         <Menu anchorEl={sortAnchor} open={Boolean(sortAnchor)} onClose={() => setSortAnchor(null)} PaperProps={{ sx: { minWidth: 268, borderRadius: 1, mt: 1 } }}>
           {[ ["recent", "Recently Added"], ["name", "Name (A-Z)"], ["price", "Price (High to Low)"], ["stock", "Stock (Low to High)"] ].map(([value, label]) => <MenuItem key={value} onClick={() => { window.dispatchEvent(new CustomEvent("inventory-sort", { detail: value })); setSortAnchor(null); }} sx={{ minHeight: 60, fontSize: 17 }}>{t(label)}</MenuItem>)}
         </Menu>
+        {branchMenu}
       </AppBar>
     );
 
@@ -77,6 +89,7 @@ export default function Header() {
         <Menu anchorEl={sortAnchor} open={Boolean(sortAnchor)} onClose={() => setSortAnchor(null)} PaperProps={{ sx: { minWidth: 268, borderRadius: 1, mt: 1 } }}>
           {[ ["recent", "Recently Added"], ["name", "Name (A-Z)"], ["price", "Price (High to Low)"], ["stock", "Stock (Low to High)"] ].map(([value, label]) => <MenuItem key={value} onClick={() => { window.dispatchEvent(new CustomEvent("inventory-sort", { detail: value })); setSortAnchor(null); }} sx={{ minHeight: 60, fontSize: 17 }}>{t(label)}</MenuItem>)}
         </Menu>
+        {branchMenu}
       </AppBar>
     );
   }
@@ -89,6 +102,7 @@ export default function Header() {
           {!isSupplierDetails && <Typography variant="h6" fontWeight={800}>{t(pathname === "/" ? "Dashboard" : isDesktopStockDetails ? "Stock Details" : isDesktopStockHistory ? "Stock Movement" : pathname === "/report/sales" ? "Sale Report" : pathname === "/report/products" ? "Product Report" : pathname.startsWith("/report") ? "Reports" : pageTitles[pathname] ?? "POS System")}</Typography>}
         </Box>
         <Stack direction="row" spacing={1}>
+          {hasBranchSelector && <Button color="inherit" onClick={(event) => setShopAnchor(event.currentTarget)} endIcon={<KeyboardArrowDownRoundedIcon />} sx={{ textTransform: "none", fontWeight: 700 }}>{shop?.name}</Button>}
           <IconButton aria-label="Notifications" onClick={(event) => setNotificationAnchor(event.currentTarget)}><Badge color="error" variant="dot" invisible={!notifications.some((item) => !item.readAt)}><NotificationsRoundedIcon /></Badge></IconButton>
           <IconButton aria-label="Account"><AccountCircleRoundedIcon /></IconButton>
         </Stack>
@@ -97,6 +111,7 @@ export default function Header() {
         {!notifications.length && <MenuItem disabled>{t("No notifications")}</MenuItem>}
         {notifications.map((item) => <MenuItem key={item.id} onClick={async () => { if (!item.readAt) { await api.notifications.markRead(item.id); setNotifications((current) => current.map((entry) => entry.id === item.id ? { ...entry, readAt: new Date().toISOString() } : entry)); } }} sx={{ whiteSpace: "normal", alignItems: "flex-start", opacity: item.readAt ? .65 : 1 }}><Box><Typography fontWeight={700} variant="body2">{item.title}</Typography><Typography variant="caption" color="text.secondary">{item.message}</Typography></Box></MenuItem>)}
       </Menu>
+      {branchMenu}
     </AppBar>
   );
 }

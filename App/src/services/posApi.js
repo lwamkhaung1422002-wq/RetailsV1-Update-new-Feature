@@ -245,6 +245,12 @@ export function createPosApi({
       create: (body) => shopRequest("/approvals", { method: "POST", body }),
       setPin: (body) => shopRequest("/approval-pin", { method: "PUT", body }),
     },
+    branches: {
+      overview: () => shopRequest("/branches"),
+      inventory: () => shopRequest("/branches/inventory"),
+      create: (body) => shopRequest("/branches", { method: "POST", body }),
+      update: (branchId, body) => shopRequest(`/branches/${branchId}`, { method: "PATCH", body }),
+    },
     audit: (query) => shopRequest(`/audit-logs${queryString(query)}`),
     notifications: {
       list: () => shopRequest("/notifications"),

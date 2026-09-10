@@ -32,4 +32,16 @@ describe("authenticated POS requests", () => {
     await expect(api.orders.list()).rejects.toEqual({ status: 401 });
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps every request scoped to the selected branch", async () => {
+    apiRequest.mockResolvedValue({ inventory: [] });
+    const main = createPosApi({ token: "token", shopId: "main" });
+    const branch = createPosApi({ token: "token", shopId: "hledan" });
+
+    await main.inventory.list();
+    await branch.inventory.list();
+
+    expect(apiRequest).toHaveBeenNthCalledWith(1, "/shops/main/inventory", { token: "token" });
+    expect(apiRequest).toHaveBeenNthCalledWith(2, "/shops/hledan/inventory", { token: "token" });
+  });
 });

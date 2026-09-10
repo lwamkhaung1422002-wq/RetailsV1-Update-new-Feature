@@ -6,6 +6,7 @@ import { getAuthUser } from "./auth.middleware.js";
 export function permissionForRequest(method: string, path: string): ShopPermission | null {
   const write = method !== "GET" && method !== "HEAD";
   if (path === "approvers" || path === "approval-pin" || path === "approvals") return null;
+  if (path === "branches" || path.startsWith("branches/")) return write ? "branch.manage" : null;
   if (path === "staff" || path.startsWith("staff/") || path === "role-policies" || path.startsWith("role-policies/")) return "staff.manage";
   if (path === "audit-logs" || path.startsWith("audit-logs/") || path === "operations") return "audit.view";
   if (path === "dashboard" || path === "reports/sales" || path === "product-report") return "report.viewSales";

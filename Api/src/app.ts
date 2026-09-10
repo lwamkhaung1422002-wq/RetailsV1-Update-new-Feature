@@ -31,6 +31,7 @@ import { enforceShopPermission } from "./middleware/shop-permission.middleware.j
 import { workspaceAlertsRouter } from "./routes/workspace-alerts.routes.js";
 import { staffAccessRouter } from "./routes/staff-access.routes.js";
 import { managerApprovalRouter } from "./routes/manager-approval.routes.js";
+import { branchesRouter } from "./routes/branches.routes.js";
 
 export const app = express();
 app.set("trust proxy", 1);
@@ -107,6 +108,7 @@ app.use("/shops", requireAuth, enforceShopPermission);
 app.use("/shops", shopsRouter);
 app.use("/shops", staffAccessRouter);
 app.use("/shops", managerApprovalRouter);
+app.use("/shops", branchesRouter);
 app.use("/shops", storeConfigRouter);
 app.use("/shops", capabilityInventoryRouter);
 app.use("/shops", advancedCapabilitiesRouter);

@@ -28,6 +28,7 @@ export const loadCategoryManagementPage = () => import("./pages/Settings/Categor
 export const loadPaymentMethodManagementPage = () => import("./pages/Settings/PaymentMethodManagementPage");
 export const loadShopDetailsPage = () => import("./pages/Settings/ShopDetailsPage");
 export const loadStaffAccessPage = () => import("./pages/StaffAccess/StaffAccessPage");
+export const loadBranchesPage = () => import("./pages/Branches/BranchesPage");
 export const loadCreateOrderPage = () => import("./pages/CreateOrder/CreateOrderPage");
 export const loadOrderDetailsPage = () => import("./pages/Sale/OrderDetailsPage");
 
