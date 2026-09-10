@@ -6,7 +6,7 @@ import { removeShopLogo, uploadShopLogo } from "../lib/cloudinary.js";
 import { prisma } from "../lib/prisma.js";
 import { applyTemplateDefaults } from "../lib/store-capabilities.js";
 import { writeAuditLog } from "../lib/audit-log.js";
-import { assertUserOwnsShop } from "../lib/shop-access.js";
+import { assertShopAccess, assertShopOwner, getAccessibleShops } from "../lib/shop-access.js";
 import { getAuthUser, type AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
 
 export const shopsRouter = Router();
@@ -33,11 +33,7 @@ shopsRouter.get("/", async (request, response, next) => {
   try {
     const authRequest = request as AuthenticatedRequest;
 
-    const shops = await prisma.shop.findMany({
-      where: { ownerId: authRequest.user.id },
-      include: { setting: true },
-      orderBy: { createdAt: "desc" },
-    });
+    const shops = await getAccessibleShops(authRequest.user.id);
 
     response.status(200).json({ shops });
   } catch (error) {
@@ -76,9 +72,9 @@ shopsRouter.get("/:shopId", async (request, response, next) => {
   try {
     const authUser = getAuthUser(request);
     const { shopId } = shopParamsSchema.parse(request.params);
-    await assertUserOwnsShop(authUser.id, shopId);
+    const access = await assertShopAccess(authUser.id, shopId);
     const shop = await prisma.shop.findUniqueOrThrow({ where: { id: shopId }, include: { setting: true } });
-    response.json({ shop });
+    response.json({ shop: { ...shop, role: access.role, permissions: access.permissions, isOwner: access.isOwner } });
   } catch (error) {
     next(error);
   }
@@ -89,7 +85,7 @@ shopsRouter.patch("/:shopId", async (request, response, next) => {
     const authUser = getAuthUser(request);
     const { shopId } = shopParamsSchema.parse(request.params);
     const input = updateShopSchema.parse(request.body);
-    await assertUserOwnsShop(authUser.id, shopId);
+    await assertShopOwner(authUser.id, shopId);
     const shop = await prisma.$transaction(async (tx) => {
       const updated = await tx.shop.update({
         where: { id: shopId },
@@ -119,7 +115,7 @@ shopsRouter.post("/:shopId/logo", (request, response, next) => {
   try {
     const authUser = getAuthUser(request);
     const { shopId } = shopParamsSchema.parse(request.params);
-    await assertUserOwnsShop(authUser.id, shopId);
+    await assertShopOwner(authUser.id, shopId);
     if (!request.file) throw Object.assign(new Error("Choose a JPEG, PNG, or WebP logo image."), { name: "BadRequestError" });
     if (!["image/jpeg", "image/png", "image/webp"].includes(request.file.mimetype)) throw Object.assign(new Error("Choose a JPEG, PNG, or WebP logo image."), { name: "BadRequestError" });
 
@@ -144,7 +140,7 @@ shopsRouter.delete("/:shopId/logo", async (request, response, next) => {
   try {
     const authUser = getAuthUser(request);
     const { shopId } = shopParamsSchema.parse(request.params);
-    await assertUserOwnsShop(authUser.id, shopId);
+    await assertShopOwner(authUser.id, shopId);
     const current = await prisma.shop.findUniqueOrThrow({ where: { id: shopId }, select: { logoPublicId: true } });
     const shop = await prisma.$transaction(async (tx) => {
       const updated = await tx.shop.update({ where: { id: shopId }, data: { logoUrl: null, logoPublicId: null }, include: { setting: true } });

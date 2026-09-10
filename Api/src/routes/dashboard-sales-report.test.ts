@@ -9,7 +9,11 @@ vi.mock("../lib/prisma.js", () => ({
     payment: { findMany: mocks.payments },
   },
 }));
-vi.mock("../lib/shop-access.js", () => ({ assertUserOwnsShop: vi.fn() }));
+vi.mock("../lib/shop-access.js", () => ({
+  SHOP_PERMISSIONS: [],
+  assertShopAccess: vi.fn().mockResolvedValue({ shopId: "shop-1", role: "OWNER", permissions: [], isOwner: true }),
+  hasShopPermission: vi.fn().mockReturnValue(true),
+}));
 vi.mock("../middleware/auth.middleware.js", () => ({
   requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(),
   getAuthUser: () => ({ id: "user-1" }),

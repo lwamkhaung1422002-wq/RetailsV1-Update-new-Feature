@@ -29,31 +29,31 @@ import {
 
 const menuItems = [
   { label: "Home", path: "/", icon: <HomeIcon /> },
-  { label: "Orders", path: "/sale", icon: <SaleIcon /> },
-  { label: "Inventory", path: "/stock", icon: <InventoryIcon /> },
+  { label: "Orders", path: "/sale", icon: <SaleIcon />, permission: "order.view" },
+  { label: "Inventory", path: "/stock", icon: <InventoryIcon />, permission: "stock.view" },
   {
     label: "Suppliers",
     path: "/suppliers",
-    icon: <SuppliersIcon />,
+    icon: <SuppliersIcon />, permission: "supplier.view",
   },
   {
     label: "Price & Discount",
     path: "/price",
-    icon: <PriceIcon />,
+    icon: <PriceIcon />, permission: "price.view",
   },
 
   {
     label: "Payment",
     path: "/payment",
-    icon: <PaymentIcon />,
+    icon: <PaymentIcon />, permission: "payment.view",
   },
-  { label: "Sale Report", path: "/report/sales", icon: <ReportIcon /> },
+  { label: "Sale Report", path: "/report/sales", icon: <ReportIcon />, permission: "report.viewSales" },
   {
     label: "Product Report",
     path: "/report/products",
-    icon: <InventoryIcon />,
+    icon: <InventoryIcon />, permission: "report.viewSales",
   },
-  { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon /> },
+  { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, permission: "settings.manage" },
 ];
 
 export default function AppDrawer({ expanded, setExpanded }) {
@@ -61,7 +61,7 @@ export default function AppDrawer({ expanded, setExpanded }) {
   const navigate = useNavigate();
   const isMobile = useMediaQuery("(max-width:768px)");
   const { t } = useAppPreferences();
-  const { logout, shop } = useAuth();
+  const { logout, shop, hasPermission } = useAuth();
   if (isMobile) return null;
 
   const drawerWidth = expanded ? 220 : 76;
@@ -74,7 +74,7 @@ export default function AppDrawer({ expanded, setExpanded }) {
       <Avatar sx={{ width: 40, height: 40, bgcolor: "#fff", color: "#1471d5", boxShadow: "0 3px 10px rgba(0,0,0,.12)" }}><StoreIcon /></Avatar>
       <Typography fontWeight={700} sx={{ ...textSx, fontSize: 17 }}>{shop?.name || "Belle Store"}</Typography>
     </Toolbar>
-    <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.75, flexGrow: 1 }}>{menuItems.map(listItem)}</List>
+    <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.75, flexGrow: 1 }}>{menuItems.filter((item) => !item.permission || hasPermission(item.permission)).map(listItem)}</List>
     <Divider sx={{ borderColor: "rgba(255,255,255,0.18)", mx: expanded ? 2.25 : 1.25 }} />
     <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.5 }}>{listItem({ label: "Logout", icon: <LogoutIcon /> })}</List>
   </Drawer>;

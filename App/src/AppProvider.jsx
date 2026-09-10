@@ -142,7 +142,8 @@ export default function AppProvider() {
   const preferences = useMemo(() => ({ shop, setShop, uiLanguage, setUiLanguage, t }), [shop, setShop, uiLanguage, setUiLanguage, t]);
   const requestRegistration = useCallback(() => setRegistrationPromptOpen(true), []);
   const selectShop = useCallback((nextShop) => saveSession({ ...session, shop: nextShop }, accessToken), [accessToken, saveSession, session]);
-  const auth = useMemo(() => ({ session, user: session?.user || null, shop: session?.shop || null, token: accessToken, isGuest: session?.mode === "guest", isAuthenticated: Boolean(accessToken || session?.mode === "guest"), authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, refreshAccessToken, expireSession }), [session, accessToken, authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, refreshAccessToken, expireSession]);
+  const hasPermission = useCallback((permission) => Boolean(session?.mode === "guest" || session?.shop?.isOwner || session?.shop?.permissions?.includes(permission)), [session?.mode, session?.shop]);
+  const auth = useMemo(() => ({ session, user: session?.user || null, shop: session?.shop || null, token: accessToken, isGuest: session?.mode === "guest", isAuthenticated: Boolean(accessToken || session?.mode === "guest"), authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, hasPermission, refreshAccessToken, expireSession }), [session, accessToken, authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, hasPermission, refreshAccessToken, expireSession]);
   const guardGuestAction = (event) => {
     if (session?.mode !== "guest") return;
     const button = event.target.closest("button");

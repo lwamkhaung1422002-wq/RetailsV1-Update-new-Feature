@@ -7,7 +7,7 @@ import {
   normalizedRefundAmount,
 } from "../lib/financial-domain.js";
 import { prisma } from "../lib/prisma.js";
-import { assertUserOwnsShop } from "../lib/shop-access.js";
+import { assertShopAccess, hasShopPermission, SHOP_PERMISSIONS, type ShopAccess } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
 export const dashboardRouter = Router();
@@ -277,7 +277,7 @@ dashboardRouter.get("/:shopId/dashboard", requireAuth, async (request, response,
     const { shopId } = paramsSchema.parse(request.params);
     const query = querySchema.parse(request.query);
 
-    await assertUserOwnsShop(authUser.id, shopId);
+    const access = await assertShopAccess(authUser.id, shopId);
 
     // The home screen is explicitly a *today* dashboard. Keep the date
     // boundary on the server so every client gets the same Yangon business day
@@ -435,11 +435,8 @@ dashboardRouter.get("/:shopId/dashboard", requireAuth, async (request, response,
       summary: {
         revenue,
         todaySales,
-        todayProfit,
-        costOfGoods,
-        grossProfit,
-        operatingExpenses,
-        netProfit,
+        ...(hasShopPermission(access, "report.viewCost") ? { costOfGoods, inventoryValuation } : {}),
+        ...(hasShopPermission(access, "report.viewProfit") ? { grossProfit, operatingExpenses, netProfit, todayProfit } : {}),
         unpaidTotal,
         customerReceivables: unpaidTotal,
         supplierPayables: supplierPayable,
@@ -448,7 +445,6 @@ dashboardRouter.get("/:shopId/dashboard", requireAuth, async (request, response,
         refunds,
         cashOut,
         cashBalance,
-        inventoryValuation,
         salesCount: recognizedOrders.length,
         ordersCount: orders.length,
         customersCount,
@@ -475,7 +471,7 @@ export async function salesReportHandler(request: Parameters<typeof dashboardRou
 
     if (!isLocalDemoRequest) {
       const authUser = getAuthUser(request);
-      await assertUserOwnsShop(authUser.id, shopId);
+      await assertShopAccess(authUser.id, shopId);
     }
 
     const range = selectedReportRange(query);
@@ -518,6 +514,9 @@ export async function salesReportHandler(request: Parameters<typeof dashboardRou
     );
     const currentOrders = selectOrders(range.start, range.end);
     const previousOrders = selectOrders(range.previous.start, range.previous.end);
+    const access: ShopAccess = isLocalDemoRequest
+      ? { shopId, role: "OWNER", permissions: [...SHOP_PERMISSIONS], isOwner: true }
+      : await assertShopAccess(getAuthUser(request).id, shopId);
     const reportPayments = (start: Date, end: Date) => payments.filter((payment) => {
       if (payment.scope === "cod-settlement-void" || !isDateWithin(payment.paidAt, start, end)) return false;
       const linkedOrderIds = paymentOrderIds(payment).filter((orderId) => completedOrderIds.has(orderId));
@@ -603,13 +602,16 @@ export async function salesReportHandler(request: Parameters<typeof dashboardRou
       ...growth(current as number, previous as number),
     }));
 
+    const visibleMetric = (key: keyof SalesMetrics) => key !== "totalCostPrice" || hasShopPermission(access, "report.viewCost")
+      ? key !== "grossProfit" || hasShopPermission(access, "report.viewProfit")
+      : false;
     response.status(200).json({
       range: {
         from: range.from,
         to: range.to,
         previous: { from: range.previous.from, to: range.previous.to },
       },
-      summary: Object.fromEntries(Object.entries(currentMetrics).map(([key, value]) => [key, growth(value, previousMetrics[key as keyof SalesMetrics])])),
+      summary: Object.fromEntries(Object.entries(currentMetrics).filter(([key]) => visibleMetric(key as keyof SalesMetrics)).map(([key, value]) => [key, growth(value, previousMetrics[key as keyof SalesMetrics])])),
       trend,
       categories,
       paymentCollections: paymentCollections.map((entry) => ({
@@ -617,8 +619,8 @@ export async function salesReportHandler(request: Parameters<typeof dashboardRou
         percentage: collectionTotal === 0 ? 0 : Number(((entry.amount / collectionTotal) * 100).toFixed(1)),
       })),
       collectionTotal,
-      salesSummary,
-      comparison,
+      salesSummary: salesSummary.map((entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => key === "label" || visibleMetric(key as keyof SalesMetrics)))),
+      comparison: comparison.filter((entry) => entry.metric !== "Total Cost Price" || hasShopPermission(access, "report.viewCost")).filter((entry) => entry.metric !== "Gross Profit" || hasShopPermission(access, "report.viewProfit")),
     });
   } catch (error) {
     next(error);

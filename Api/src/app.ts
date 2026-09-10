@@ -5,6 +5,7 @@ import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
 import { errorHandler } from "./middleware/error.middleware.js";
+import { requireAuth } from "./middleware/auth.middleware.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { categoriesRouter } from "./routes/categories.routes.js";
 import { customersRouter } from "./routes/customers.routes.js";
@@ -26,7 +27,9 @@ import { auditRouter } from "./routes/audit.routes.js";
 import { pricingRouter } from "./routes/pricing.routes.js";
 import { productReportsRouter } from "./routes/product-reports.routes.js";
 import { requestContext } from "./middleware/request-context.middleware.js";
+import { enforceShopPermission } from "./middleware/shop-permission.middleware.js";
 import { workspaceAlertsRouter } from "./routes/workspace-alerts.routes.js";
+import { staffAccessRouter } from "./routes/staff-access.routes.js";
 
 export const app = express();
 app.set("trust proxy", 1);
@@ -99,7 +102,9 @@ app.get("/", (_req, res) => {
 app.use("/health", healthRouter);
 app.use("/auth", authRouter);
 app.use("/shops", publicDemoRouter);
+app.use("/shops", requireAuth, enforceShopPermission);
 app.use("/shops", shopsRouter);
+app.use("/shops", staffAccessRouter);
 app.use("/shops", storeConfigRouter);
 app.use("/shops", capabilityInventoryRouter);
 app.use("/shops", advancedCapabilitiesRouter);

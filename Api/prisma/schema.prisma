@@ -19,6 +19,7 @@ model User {
   updatedAt DateTime @updatedAt
   shops     Shop[]
   sessions  AuthSession[]
+  shopMemberships ShopMember[]
 }
 
 model AuthSession {
@@ -89,8 +90,39 @@ model Shop {
   promotionCampaigns  PromotionCampaign[]
   saleSequence        Int                    @default(0)
   notifications       Notification[]
+  members             ShopMember[]
+  rolePolicies        ShopRolePolicy[]
 
   @@index([ownerId])
+}
+
+model ShopMember {
+  id        String   @id @default(cuid())
+  shopId    String
+  userId    String
+  role      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, userId])
+  @@index([shopId, active])
+  @@index([userId, active])
+}
+
+model ShopRolePolicy {
+  id          String   @id @default(cuid())
+  shopId      String
+  role        String
+  permissions Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, role])
+  @@index([shopId])
 }
 
 model ShopSetting {

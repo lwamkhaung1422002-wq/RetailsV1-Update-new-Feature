@@ -12,7 +12,7 @@ import {
   loadPricePage, loadProductDetailsPage, loadProductReportPage, loadRecordSupplierPaymentPage,
   loadReportPage, loadSalePage, loadSaleRecordPage, loadSalesReportPage, loadSettingsPage,
   loadShopDetailsPage, loadStockHistoryPage, loadStockPage, loadSupplierDetailsPage,
-  loadSupplierHistoryPage, loadSuppliersPage, loadAddSupplierPage,
+  loadSupplierHistoryPage, loadSuppliersPage, loadAddSupplierPage, loadStaffAccessPage,
 } from "./routeChunks";
 
 const AuthPage = lazy(loadAuthPage);
@@ -42,6 +42,7 @@ const Settings = lazy(loadSettingsPage);
 const CategoryManagement = lazy(loadCategoryManagementPage);
 const PaymentMethodManagement = lazy(loadPaymentMethodManagementPage);
 const ShopDetailsPage = lazy(loadShopDetailsPage);
+const StaffAccessPage = lazy(loadStaffAccessPage);
 const CreateOrder = lazy(loadCreateOrderPage);
 const OrderDetails = lazy(loadOrderDetailsPage);
 
@@ -104,6 +105,7 @@ const router = createBrowserRouter([
       { path: "settings/categories", element: <RouteContent><CategoryManagement /></RouteContent> },
       { path: "settings/payment-methods", element: <RouteContent><PaymentMethodManagement /></RouteContent> },
       { path: "settings/shop-details", element: <RouteContent><ShopDetailsPage /></RouteContent> },
+      { path: "settings/staff-access", element: <RouteContent><StaffAccessPage /></RouteContent> },
     ],
   },
 ]);

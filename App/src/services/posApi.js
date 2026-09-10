@@ -231,6 +231,13 @@ export function createPosApi({
           responseType: "text",
         }),
     },
+    staff: {
+      list: () => shopRequest("/staff"),
+      add: (body) => shopRequest("/staff", { method: "POST", body }),
+      update: (id, body) => shopRequest(`/staff/${id}`, { method: "PATCH", body }),
+      policies: () => shopRequest("/role-policies"),
+      updatePolicy: (role, permissions) => shopRequest(`/role-policies/${role}`, { method: "PUT", body: { permissions } }),
+    },
     audit: (query) => shopRequest(`/audit-logs${queryString(query)}`),
     notifications: {
       list: () => shopRequest("/notifications"),

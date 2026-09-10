@@ -5,6 +5,7 @@ import { z } from "zod";
 import { clearRefreshCookie, createRefreshToken, hashRefreshToken, readCookie, refreshCookieName, refreshExpiresAt, setRefreshCookie } from "../lib/auth-session.js";
 import { signAccessToken } from "../lib/jwt.js";
 import { prisma } from "../lib/prisma.js";
+import { getAccessibleShops, SHOP_PERMISSIONS } from "../lib/shop-access.js";
 import { applyTemplateDefaults } from "../lib/store-capabilities.js";
 import { type AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
 import { authRateLimit } from "../middleware/rate-limit.middleware.js";
@@ -103,7 +104,8 @@ authRouter.post("/register", authRateLimit, async (request, response, next) => {
 
     const accessToken = await issueSession(user, response);
 
-    response.status(201).json({ user: { ...user, shops: [shop] }, shop, accessToken });
+    const accessibleShop = { ...shop, role: "OWNER", permissions: [...SHOP_PERMISSIONS], isOwner: true };
+    response.status(201).json({ user: { ...user, shops: [accessibleShop] }, shop: accessibleShop, accessToken });
   } catch (error) {
     next(error);
   }
@@ -131,11 +133,7 @@ authRouter.post("/login", authRateLimit, async (request, response, next) => {
 
     const accessToken = await issueSession(user, response);
 
-    const shops = await prisma.shop.findMany({
-      where: { ownerId: user.id },
-      include: { setting: true },
-      orderBy: { createdAt: "desc" },
-    });
+    const shops = await getAccessibleShops(user.id);
 
     response.status(200).json({
       user: {
@@ -214,10 +212,6 @@ authRouter.get("/me", requireAuth, async (request, response, next) => {
         email: true,
         createdAt: true,
         updatedAt: true,
-        shops: {
-          orderBy: { createdAt: "desc" },
-          include: { setting: true },
-        },
       },
     });
 
@@ -226,7 +220,8 @@ authRouter.get("/me", requireAuth, async (request, response, next) => {
       return;
     }
 
-    response.status(200).json({ user });
+    const shops = await getAccessibleShops(user.id);
+    response.status(200).json({ user: { ...user, shops } });
   } catch (error) {
     next(error);
   }
