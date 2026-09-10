@@ -10,6 +10,7 @@ export function permissionForRequest(method: string, path: string): ShopPermissi
   if (path === "staff" || path.startsWith("staff/") || path === "role-policies" || path.startsWith("role-policies/")) return "staff.manage";
   if (path === "audit-logs" || path.startsWith("audit-logs/") || path === "operations") return "audit.view";
   if (path === "dashboard" || path === "reports/sales" || path === "product-report") return "report.viewSales";
+  if (path === "reports/payments") return "report.viewSales";
   if (path === "settings") return write ? "settings.manage" : null;
   if (path.startsWith("orders")) {
     if (!write) return "order.view";

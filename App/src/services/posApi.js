@@ -50,6 +50,7 @@ export function createPosApi({
     reports: {
       sales: (query) => shopRequest(`/reports/sales${queryString(query)}`),
       products: (query) => shopRequest(`/product-report${queryString(query)}`),
+      payments: (query) => shopRequest(`/reports/payments${queryString(query)}`),
     },
     shop: {
       get: () => shopRequest(""),

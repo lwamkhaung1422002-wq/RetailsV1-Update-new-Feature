@@ -24,6 +24,7 @@ const pageTitles = {
   "/suppliers": "Suppliers",
   "/settings": "Settings",
   "/branches": "Branches",
+  "/report/payments": "Payment Report",
 };
 
 export default function Header() {
