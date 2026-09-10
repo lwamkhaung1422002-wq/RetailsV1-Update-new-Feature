@@ -6,7 +6,7 @@ import { removeShopLogo, uploadShopLogo } from "../lib/cloudinary.js";
 import { prisma } from "../lib/prisma.js";
 import { applyTemplateDefaults } from "../lib/store-capabilities.js";
 import { writeAuditLog } from "../lib/audit-log.js";
-import { assertShopAccess, assertShopOwner, getAccessibleShops } from "../lib/shop-access.js";
+import { assertShopAccess, assertShopOwner, getAccessibleShops, publicShop } from "../lib/shop-access.js";
 import { getAuthUser, type AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
 
 export const shopsRouter = Router();
@@ -62,7 +62,7 @@ shopsRouter.post("/", async (request, response, next) => {
       return created;
     });
 
-    response.status(201).json({ shop });
+    response.status(201).json({ shop: publicShop(shop) });
   } catch (error) {
     next(error);
   }
@@ -74,7 +74,7 @@ shopsRouter.get("/:shopId", async (request, response, next) => {
     const { shopId } = shopParamsSchema.parse(request.params);
     const access = await assertShopAccess(authUser.id, shopId);
     const shop = await prisma.shop.findUniqueOrThrow({ where: { id: shopId }, include: { setting: true } });
-    response.json({ shop: { ...shop, role: access.role, permissions: access.permissions, isOwner: access.isOwner } });
+    response.json({ shop: { ...publicShop(shop), role: access.role, permissions: access.permissions, isOwner: access.isOwner } });
   } catch (error) {
     next(error);
   }
@@ -99,7 +99,7 @@ shopsRouter.patch("/:shopId", async (request, response, next) => {
       await writeAuditLog(tx, { shopId, actorId: authUser.id, action: "shop.update", entity: "Shop", entityId: shopId, metadata: input });
       return updated;
     });
-    response.json({ shop });
+    response.json({ shop: publicShop(shop) });
   } catch (error) {
     next(error);
   }
@@ -129,7 +129,7 @@ shopsRouter.post("/:shopId/logo", (request, response, next) => {
     });
     uploadedPublicId = undefined;
     await removeShopLogo(current.logoPublicId).catch(() => {});
-    response.status(201).json({ shop });
+    response.status(201).json({ shop: publicShop(shop) });
   } catch (error) {
     if (uploadedPublicId) await removeShopLogo(uploadedPublicId).catch(() => {});
     next(error);
@@ -148,7 +148,7 @@ shopsRouter.delete("/:shopId/logo", async (request, response, next) => {
       return updated;
     });
     await removeShopLogo(current.logoPublicId).catch(() => {});
-    response.json({ shop });
+    response.json({ shop: publicShop(shop) });
   } catch (error) {
     next(error);
   }

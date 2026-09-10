@@ -73,6 +73,12 @@ export type ShopAccess = {
   isOwner: boolean;
 };
 
+export function publicShop<T extends { approvalPinHash?: unknown }>(shop: T): Omit<T, "approvalPinHash"> {
+  const { approvalPinHash, ...details } = shop;
+  void approvalPinHash;
+  return details;
+}
+
 function notFound(): Error {
   return Object.assign(new Error("Shop not found."), { name: "NotFoundError" });
 }
@@ -107,7 +113,8 @@ export async function getAccessibleShops(userId: string) {
   });
 
   return shops.map((shop) => {
-    const { members, rolePolicies, ...details } = shop;
+    const { members, rolePolicies, ...privateDetails } = shop;
+    const details = publicShop(privateDetails);
     if (shop.ownerId === userId) {
       return { ...details, role: "OWNER" as const, permissions: [...SHOP_PERMISSIONS], isOwner: true };
     }

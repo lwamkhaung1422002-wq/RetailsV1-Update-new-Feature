@@ -23,6 +23,7 @@ import {
   SHOP_PERMISSIONS,
   assertShopAccess,
   assertShopPermission,
+  getAccessibleShops,
   getShopAccess,
 } from "./shop-access.js";
 
@@ -44,6 +45,22 @@ describe("shop access", () => {
       isOwner: true,
     });
     expect(mocks.memberFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("never exposes the approval PIN hash in accessible Shop responses", async () => {
+    mocks.shopFindMany.mockResolvedValue([{
+      id: "shop-1",
+      name: "Main Store",
+      ownerId: "owner-1",
+      approvalPinHash: "secret-hash",
+      members: [],
+      rolePolicies: [],
+    }]);
+
+    const [shop] = await getAccessibleShops("owner-1");
+
+    expect(shop).toMatchObject({ id: "shop-1", role: "OWNER", isOwner: true });
+    expect(shop).not.toHaveProperty("approvalPinHash");
   });
 
   it("allows an active assigned member using the Shop role policy", async () => {

@@ -19,8 +19,8 @@ export default function MobileBottomNavigation() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { t } = useAppPreferences();
-  const { hasPermission } = useAuth();
-  const visibleItems = navigationItems.filter((item) => !item.permission || hasPermission(item.permission));
+  const { hasPermission, shop } = useAuth();
+  const visibleItems = navigationItems.filter((item) => !item.permission || hasPermission(item.permission) || (item.label === "Settings" && shop?.role === "MANAGER"));
 
   if (!isMobile) return null;
 

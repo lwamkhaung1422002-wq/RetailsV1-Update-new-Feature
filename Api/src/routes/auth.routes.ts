@@ -5,7 +5,7 @@ import { z } from "zod";
 import { clearRefreshCookie, createRefreshToken, hashRefreshToken, readCookie, refreshCookieName, refreshExpiresAt, setRefreshCookie } from "../lib/auth-session.js";
 import { signAccessToken } from "../lib/jwt.js";
 import { prisma } from "../lib/prisma.js";
-import { getAccessibleShops, SHOP_PERMISSIONS } from "../lib/shop-access.js";
+import { getAccessibleShops, publicShop, SHOP_PERMISSIONS } from "../lib/shop-access.js";
 import { applyTemplateDefaults } from "../lib/store-capabilities.js";
 import { type AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
 import { authRateLimit } from "../middleware/rate-limit.middleware.js";
@@ -104,7 +104,7 @@ authRouter.post("/register", authRateLimit, async (request, response, next) => {
 
     const accessToken = await issueSession(user, response);
 
-    const accessibleShop = { ...shop, role: "OWNER", permissions: [...SHOP_PERMISSIONS], isOwner: true };
+    const accessibleShop = { ...publicShop(shop), role: "OWNER", permissions: [...SHOP_PERMISSIONS], isOwner: true };
     response.status(201).json({ user: { ...user, shops: [accessibleShop] }, shop: accessibleShop, accessToken });
   } catch (error) {
     next(error);

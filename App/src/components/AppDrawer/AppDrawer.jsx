@@ -74,7 +74,7 @@ export default function AppDrawer({ expanded, setExpanded }) {
       <Avatar sx={{ width: 40, height: 40, bgcolor: "#fff", color: "#1471d5", boxShadow: "0 3px 10px rgba(0,0,0,.12)" }}><StoreIcon /></Avatar>
       <Typography fontWeight={700} sx={{ ...textSx, fontSize: 17 }}>{shop?.name || "Belle Store"}</Typography>
     </Toolbar>
-    <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.75, flexGrow: 1 }}>{menuItems.filter((item) => !item.permission || hasPermission(item.permission)).map(listItem)}</List>
+    <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.75, flexGrow: 1 }}>{menuItems.filter((item) => !item.permission || hasPermission(item.permission) || (item.label === "Settings" && shop?.role === "MANAGER")).map(listItem)}</List>
     <Divider sx={{ borderColor: "rgba(255,255,255,0.18)", mx: expanded ? 2.25 : 1.25 }} />
     <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.5 }}>{listItem({ label: "Logout", icon: <LogoutIcon /> })}</List>
   </Drawer>;

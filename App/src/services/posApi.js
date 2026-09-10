@@ -236,11 +236,11 @@ export function createPosApi({
         }),
     },
     staff: {
-      list: () => shopRequest("/staff"),
-      add: (body) => shopRequest("/staff", { method: "POST", body }),
-      update: (id, body) => shopRequest(`/staff/${id}`, { method: "PATCH", body }),
-      policies: () => shopRequest("/role-policies"),
-      updatePolicy: (role, permissions) => shopRequest(`/role-policies/${role}`, { method: "PUT", body: { permissions } }),
+      list: (branchId = shopId) => request(shopPath(branchId, "/staff")),
+      add: (body, branchId = shopId) => request(shopPath(branchId, "/staff"), { method: "POST", body }),
+      update: (id, body, branchId = shopId) => request(shopPath(branchId, `/staff/${id}`), { method: "PATCH", body }),
+      policies: (branchId = shopId) => request(shopPath(branchId, "/role-policies")),
+      updatePolicy: (role, permissions, branchId = shopId) => request(shopPath(branchId, `/role-policies/${role}`), { method: "PUT", body: { permissions } }),
     },
     approvals: {
       approvers: () => shopRequest("/approvers"),

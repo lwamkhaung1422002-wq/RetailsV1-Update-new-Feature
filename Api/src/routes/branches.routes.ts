@@ -5,7 +5,7 @@ import { summarizeBranchInventory } from "../lib/branch-domain.js";
 import { writeAuditLog } from "../lib/audit-log.js";
 import { prisma } from "../lib/prisma.js";
 import { applyTemplateDefaults } from "../lib/store-capabilities.js";
-import { assertShopAccess, assertShopOwner, getAccessibleShops, getShopAccess, hasShopPermission } from "../lib/shop-access.js";
+import { assertShopAccess, assertShopOwner, getAccessibleShops, getShopAccess, hasShopPermission, publicShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
 export const branchesRouter = Router();
@@ -84,7 +84,7 @@ branchesRouter.post("/:shopId/branches", async (request, response, next) => {
       await writeAuditLog(tx, { shopId, actorId: auth.id, action: "branch.add", entity: "Shop", entityId: created.id, metadata: { name: created.name } });
       return created;
     });
-    response.status(201).json({ branch: { ...branch, role: "OWNER", permissions: [], isOwner: true } });
+    response.status(201).json({ branch: { ...publicShop(branch), role: "OWNER", permissions: [], isOwner: true } });
   } catch (error) { next(error); }
 });
 
@@ -101,6 +101,6 @@ branchesRouter.patch("/:shopId/branches/:branchId", async (request, response, ne
       await writeAuditLog(tx, { shopId, actorId: auth.id, action: "branch.update", entity: "Shop", entityId: branchId, metadata: data });
       return updated;
     });
-    response.json({ branch });
+    response.json({ branch: publicShop(branch) });
   } catch (error) { next(error); }
 });
