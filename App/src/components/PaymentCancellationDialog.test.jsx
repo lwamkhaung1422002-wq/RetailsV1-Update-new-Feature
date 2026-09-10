@@ -20,7 +20,7 @@ function show(kind) {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.api.suppliers.deliveryRecord.mockResolvedValue({ record: { status: "active", payments: [payment] } });
-  mocks.api.orders.get.mockResolvedValue({ order: { fulfillmentStatus: "completed", payments: [payment] } });
+  mocks.api.orders.get.mockResolvedValue({ order: { total: 10000, fulfillmentStatus: "completed", payments: [payment] } });
 });
 afterEach(cleanup);
 
@@ -59,6 +59,8 @@ it("cancels an unpaid supplier invoice without calling payment reversal", async 
 });
 it("cancels a sale payment without cancelling the order", async () => {
   show("sale");
+  await screen.findByText("Cancel Sale Payment");
+  expect(screen.queryByText("Choose the payment to cancel and enter a cancellation reason.")).toBeNull();
   fireEvent.change(await screen.findByLabelText(/Cancel Payment Reason/), { target: { value: "Wrong collection" } });
   fireEvent.click(screen.getByRole("button", { name: "Cancel Payment" }));
   await waitFor(() => expect(close).toHaveBeenCalled());
@@ -66,7 +68,7 @@ it("cancels a sale payment without cancelling the order", async () => {
   expect(mocks.api.orders.cancel).not.toHaveBeenCalled();
 });
 it("allows order cancellation after all payments have been reversed", async () => {
-  mocks.api.orders.get.mockResolvedValue({ order: { fulfillmentStatus: "completed", payments: [payment, { id: "refund", originalPaymentId: "pay-1", amount: -5555 }] } });
+  mocks.api.orders.get.mockResolvedValue({ order: { total: 10000, fulfillmentStatus: "completed", payments: [payment, { id: "refund", originalPaymentId: "pay-1", amount: -5555 }] } });
   show("sale");
   fireEvent.change(await screen.findByLabelText(/Cancellation Reason/), { target: { value: "Wrong order" } });
   fireEvent.click(screen.getByRole("button", { name: "Cancel Order" }));
@@ -74,10 +76,19 @@ it("allows order cancellation after all payments have been reversed", async () =
   expect(mocks.api.orders.cancel).toHaveBeenCalledWith("record-1", { reason: "Wrong order" });
 });
 it("blocks cancellation if a payment was added while the dialog was open", async () => {
-  mocks.api.orders.get.mockResolvedValueOnce({ order: { fulfillmentStatus: "completed", payments: [] } });
+  mocks.api.orders.get.mockResolvedValueOnce({ order: { total: 10000, fulfillmentStatus: "completed", payments: [] } });
   show("sale");
   fireEvent.change(await screen.findByLabelText(/Cancellation Reason/), { target: { value: "Wrong order" } });
   fireEvent.click(screen.getByRole("button", { name: "Cancel Order" }));
   expect(await screen.findByText(/Cancel active payments before/)).toBeTruthy();
   expect(mocks.api.orders.cancel).not.toHaveBeenCalled();
+});
+it("cancels a fully paid sale directly without creating a refund", async () => {
+  mocks.api.orders.get.mockResolvedValue({ order: { total: 5555, fulfillmentStatus: "completed", payments: [payment] } });
+  show("sale");
+  fireEvent.change(await screen.findByLabelText(/Cancellation Reason/), { target: { value: "Wrong order" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel Order" }));
+  await waitFor(() => expect(close).toHaveBeenCalled());
+  expect(mocks.api.orders.cancel).toHaveBeenCalledWith("record-1", { reason: "Wrong order" });
+  expect(mocks.api.payments.refundOrder).not.toHaveBeenCalled();
 });

@@ -10,26 +10,30 @@ import { apiRequest } from "./lib/api";
 import { accessTokenRefreshDelay, requestAccessTokenRefresh } from "./lib/auth-refresh";
 import { queryClient } from "./lib/queryClient";
 import { readStoredJson } from "./lib/storage";
+import { localeToUiLanguage, translateUi } from "./lib/uiLanguage";
 
 const defaultShop = { name: "POS System", address: "", logo: "" };
 
 export default function AppProvider() {
-  const [themeMode, setThemeMode] = useState(() => localStorage.getItem("pos-theme-mode") || "light");
   const [shop, setShopState] = useState(() => readStoredJson("pos-shop-details", defaultShop));
+  const [uiLanguage, setUiLanguageState] = useState(() => localStorage.getItem("pos-ui-language") || "English");
   const [session, setSession] = useState(null);
   const [accessToken, setAccessToken] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [registrationPromptOpen, setRegistrationPromptOpen] = useState(false);
   const previousShopId = useRef(null);
-  const setMode = useCallback((mode) => { setThemeMode(mode); localStorage.setItem("pos-theme-mode", mode); }, []);
   const setShop = useCallback((nextShop) => { setShopState(nextShop); localStorage.setItem("pos-shop-details", JSON.stringify(nextShop)); }, []);
+  const setUiLanguage = useCallback((language) => { setUiLanguageState(language); localStorage.setItem("pos-ui-language", language); }, []);
   const saveSession = useCallback((nextSession, nextAccessToken) => {
     setSession(nextSession);
     setAccessToken(nextAccessToken);
     setSessionExpired(false);
-    if (nextSession.shop) setShop({ name: nextSession.shop.name, address: nextSession.shop.address || "", logo: nextSession.shop.logoUrl || "" });
-  }, [setShop]);
+    if (nextSession.shop) {
+      setShop({ name: nextSession.shop.name, address: nextSession.shop.address || "", logo: nextSession.shop.logoUrl || "" });
+      setUiLanguage(localeToUiLanguage(nextSession.shop.setting?.locale));
+    }
+  }, [setShop, setUiLanguage]);
   const clearSession = useCallback(() => {
     queryClient.clear();
     setSession(null);
@@ -133,8 +137,9 @@ export default function AppProvider() {
     if (previousShopId.current && nextShopId && previousShopId.current !== nextShopId) queryClient.clear();
     previousShopId.current = nextShopId;
   }, [session?.shop?.id]);
-  const theme = useMemo(() => createTheme({ palette: { mode: themeMode, primary: { main: "#1976d2", dark: "#1565c0" }, background: { default: themeMode === "dark" ? "#101827" : "#f8fafc" } } }), [themeMode]);
-  const preferences = useMemo(() => ({ themeMode, setThemeMode: setMode, shop, setShop }), [themeMode, setMode, shop, setShop]);
+  const theme = useMemo(() => createTheme({ palette: { mode: "light", primary: { main: "#1976d2", dark: "#1565c0" }, background: { default: "#f8fafc" } } }), []);
+  const t = useCallback((key) => translateUi(uiLanguage, key), [uiLanguage]);
+  const preferences = useMemo(() => ({ shop, setShop, uiLanguage, setUiLanguage, t }), [shop, setShop, uiLanguage, setUiLanguage, t]);
   const requestRegistration = useCallback(() => setRegistrationPromptOpen(true), []);
   const selectShop = useCallback((nextShop) => saveSession({ ...session, shop: nextShop }, accessToken), [accessToken, saveSession, session]);
   const auth = useMemo(() => ({ session, user: session?.user || null, shop: session?.shop || null, token: accessToken, isGuest: session?.mode === "guest", isAuthenticated: Boolean(accessToken || session?.mode === "guest"), authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, refreshAccessToken, expireSession }), [session, accessToken, authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, refreshAccessToken, expireSession]);
@@ -148,5 +153,5 @@ export default function AppProvider() {
       setRegistrationPromptOpen(true);
     }
   };
-  return <QueryClientProvider client={queryClient}><AppPreferenceContext.Provider value={preferences}><AuthContext.Provider value={auth}><ThemeProvider theme={theme}><CssBaseline /><div onClickCapture={guardGuestAction}><AppRouter /></div><Dialog open={registrationPromptOpen} onClose={() => setRegistrationPromptOpen(false)} fullWidth maxWidth="xs"><DialogTitle fontWeight={800}>Create an account to save</DialogTitle><DialogContent><Typography color="text.secondary">Guest mode lets you explore General POS. Create an account before saving stock, orders, payments, or other business records.</Typography></DialogContent><DialogActions sx={{ px: 3, py: 2 }}><Button onClick={() => setRegistrationPromptOpen(false)}>Continue exploring</Button><Button variant="contained" onClick={() => { window.location.assign("/register"); }}>Create account</Button></DialogActions></Dialog></ThemeProvider></AuthContext.Provider></AppPreferenceContext.Provider></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><AppPreferenceContext.Provider value={preferences}><AuthContext.Provider value={auth}><ThemeProvider theme={theme}><CssBaseline /><div onClickCapture={guardGuestAction}><AppRouter /></div><Dialog open={registrationPromptOpen} onClose={() => setRegistrationPromptOpen(false)} fullWidth maxWidth="xs"><DialogTitle fontWeight={800}>{t("Create an account to save")}</DialogTitle><DialogContent><Typography color="text.secondary">{t("Guest mode lets you explore General POS. Create an account before saving stock, orders, payments, or other business records.")}</Typography></DialogContent><DialogActions sx={{ px: 3, py: 2 }}><Button onClick={() => setRegistrationPromptOpen(false)}>{t("Continue exploring")}</Button><Button variant="contained" onClick={() => { window.location.assign("/register"); }}>{t("Create account")}</Button></DialogActions></Dialog></ThemeProvider></AuthContext.Provider></AppPreferenceContext.Provider></QueryClientProvider>;
 }

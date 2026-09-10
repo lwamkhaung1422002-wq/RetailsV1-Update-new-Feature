@@ -1517,8 +1517,8 @@ function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
     <Box
       sx={{
         display: "grid",
-        gridTemplateColumns: "84px minmax(150px, 1fr) 246px 130px",
-        gap: 2,
+        gridTemplateColumns: "84px minmax(150px, 1fr) 230px 154px",
+        gap: 1.5,
         alignItems: "center",
         minHeight: 136,
         p: 1.75,
@@ -1545,7 +1545,7 @@ function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
           {item.name}
         </Typography>
         <Typography color="text.secondary" sx={{ fontSize: 14, mt: 0.8 }}>
-          Code: {item.id === "water" ? "WTR-001" : "AIRX-002"}
+          {item.description || "No description"}
         </Typography>
         <Typography color="text.secondary" sx={{ fontSize: 14, mt: 0.55 }}>
           Stock: {item.stock} pcs
@@ -1599,12 +1599,12 @@ function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
         <Stack
           direction="row"
           justifyContent="flex-end"
-          alignItems="center"
+          alignItems="flex-start"
           spacing={0.5}
-          sx={{ color: "success.main", mt: 1.5, whiteSpace: "nowrap" }}
+          sx={{ color: "success.main", mt: 1.5 }}
         >
           <SellOutlinedIcon sx={{ fontSize: 17 }} />
-          <Typography sx={{ fontSize: 13, fontWeight: 600 }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3, textAlign: "right", overflowWrap: "anywhere" }}>
             {promotionText}
           </Typography>
         </Stack>

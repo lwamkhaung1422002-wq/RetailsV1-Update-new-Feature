@@ -34,7 +34,9 @@ export default function PaymentCancellationDialog({ kind, recordId, onClose, onS
     return () => { active = false; };
   }, [api, recordId, supplier]);
   const payments = record ? paymentsFor(record) : [];
-  const paymentMode = payments.length > 0;
+  const activeSalePaid = supplier ? 0 : payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const saleRemaining = supplier || !record ? 0 : Math.max(0, Number(record.total || 0) - activeSalePaid);
+  const paymentMode = payments.length > 0 && (supplier || saleRemaining > 0);
   const cancelled = record && (record.status === "cancelled" || record.fulfillmentStatus === "cancelled");
   const title = paymentMode ? supplier ? "Cancel Supplier Payment" : "Cancel Sale Payment" : supplier ? "Cancel Invoice" : "Cancel Order";
   const save = async () => {
@@ -45,14 +47,15 @@ export default function PaymentCancellationDialog({ kind, recordId, onClose, onS
       const result = supplier ? await api.suppliers.deliveryRecord(recordId) : await api.orders.get(recordId);
       const latest = supplier ? result.record : result.order;
       const active = paymentsFor(latest);
+      const latestActivePaid = supplier ? 0 : active.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+      const mustCancelPayment = active.length > 0 && (supplier || Math.max(0, Number(latest.total || 0) - latestActivePaid) > 0);
       if (latest.status === "cancelled" || latest.fulfillmentStatus === "cancelled") throw new Error("This record is already cancelled.");
-      if (paymentMode) {
+      if (mustCancelPayment) {
         const payment = active.find((item) => item.id === selected);
-        if (!payment) throw new Error("This payment has already been cancelled. Reopen the dialog to refresh.");
+        if (!payment) throw new Error(selected ? "This payment has already been cancelled. Reopen the dialog to refresh." : "Cancel active payments before cancelling this record. Reopen the dialog to refresh.");
         if (supplier) await api.suppliers.reverseDeliveryPayment(recordId, selected, { reason: reason.trim() });
         else await api.payments.refundOrder(recordId, { originalPaymentId: selected, amount: Number(payment.amount), method: payment.method || "Cash", note: reason.trim() });
       } else {
-        if (active.length) throw new Error("Cancel active payments before cancelling this record. Reopen the dialog to refresh.");
         if (supplier) await api.suppliers.cancelDeliveryRecord(recordId, { reason: reason.trim() });
         else await api.orders.cancel(recordId, { reason: reason.trim() });
       }
@@ -67,7 +70,7 @@ export default function PaymentCancellationDialog({ kind, recordId, onClose, onS
     <DialogContent><Stack spacing={1.5}>
       {!record && !error && <Typography>Loading payments…</Typography>}
       {record && <>
-        <Typography>{paymentMode ? "Choose the payment to cancel and enter a cancellation reason." : "Enter a cancellation reason. The record will be kept."}</Typography>
+        {(supplier || !paymentMode) && <Typography>{paymentMode ? "Choose the payment to cancel and enter a cancellation reason." : "Enter a cancellation reason. The record will be kept."}</Typography>}
         {paymentMode && <TextField select fullWidth label="Payment" value={selected} disabled={saving} onChange={(event) => setSelected(event.target.value)}>{payments.map((payment) => <MenuItem key={payment.id} value={payment.id}>{payment.method} · {Number(payment.amount).toLocaleString()} ကျပ် · {new Date(payment.paidAt || payment.createdAt).toLocaleDateString()}</MenuItem>)}</TextField>}
         <TextField required fullWidth label={paymentMode ? "Cancel Payment Reason" : "Cancellation Reason"} value={reason} disabled={saving} onChange={(event) => setReason(event.target.value)} />
       </>}

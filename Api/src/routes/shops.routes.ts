@@ -13,6 +13,7 @@ export const shopsRouter = Router();
 
 const createShopSchema = z.object({
   name: z.string().trim().min(1, "Shop name is required."),
+  currencyCode: z.enum(["MMK", "USD", "THB"]),
 });
 const shopParamsSchema = z.object({ shopId: z.string().min(1) });
 const updateShopSchema = z.object({
@@ -57,7 +58,7 @@ shopsRouter.post("/", async (request, response, next) => {
           ledgerEnabled: true,
           inventoryReadMode: "LEDGER",
           ledgerCutoverAt: new Date(),
-          setting: { create: {} },
+          setting: { create: { currencyCode: input.currencyCode } },
         },
         include: { setting: true },
       });

@@ -14,6 +14,7 @@ export const authRouter = Router();
 const registerSchema = z.object({
   name: z.string().trim().min(1, "Name is required."),
   shopName: z.string().trim().min(1, "Shop name is required."),
+  currencyCode: z.enum(["MMK", "USD", "THB"]),
   email: z.email().trim().toLowerCase(),
   password: z.string().min(8, "Password must be at least 8 characters."),
 });
@@ -84,7 +85,7 @@ authRouter.post("/register", authRateLimit, async (request, response, next) => {
           inventoryReadMode: "LEDGER",
           ledgerCutoverAt: new Date(),
           setting: {
-            create: {},
+            create: { currencyCode: input.currencyCode },
           },
         },
         include: { setting: true },

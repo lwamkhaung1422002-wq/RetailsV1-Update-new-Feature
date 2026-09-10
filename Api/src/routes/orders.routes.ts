@@ -1102,7 +1102,9 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
           reversal.amount < 0 && reversal.originalPaymentId === payment.id,
         ),
       );
-      if (activePaymentRecords.length > 0) {
+      const activePaidAmount = activePaymentRecords.reduce((sum, payment) => sum + payment.amount, 0);
+      const remainingAmount = Math.max(0, existingOrder.total - activePaidAmount);
+      if (activePaymentRecords.length > 0 && remainingAmount > 0) {
         throw badRequest("Cancel active payment records before cancelling this order.");
       }
 

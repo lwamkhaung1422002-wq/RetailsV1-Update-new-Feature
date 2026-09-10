@@ -18,7 +18,6 @@ import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import RocketLaunchRoundedIcon from "@mui/icons-material/RocketLaunchRounded";
 import ShoppingCartCheckoutRoundedIcon from "@mui/icons-material/ShoppingCartCheckoutRounded";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
-import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
 import { useNavigate } from "react-router";
 import { useDashboardQuery } from "../../hooks/usePosQueries";
 
@@ -379,21 +378,21 @@ export default function HomePage() {
 
 function DesktopDashboard({ summary, orders, navigate }) {
   const metrics = [
-    { label: "Today's Sales", value: formatKyat(summary.todaySales), trend: "12.5%", tone: "#1769e0", soft: "#f3f7ff" },
-    { label: "Today's Expense", value: formatKyat(summary.todayExpense), trend: "8.3%", tone: "#f36b2b", soft: "#fff8f1", down: true },
-    { label: "Low Stock Items", value: summary.lowStockItems, action: "See more", tone: "#7648e9", soft: "#faf7ff" },
-    { label: "Today's Profit", value: formatKyat(summary.todayProfit), trend: "18.7%", tone: "#24934a", soft: "#f4fbf6" },
+    { label: "Today's Sales", value: formatKyat(summary.todaySales), tone: "#1769e0", soft: "#f3f7ff" },
+    { label: "Today's Expense", value: formatKyat(summary.todayExpense), tone: "#f36b2b", soft: "#fff8f1" },
+    { label: "Low Stock Items", value: summary.lowStockItems, tone: "#7648e9", soft: "#faf7ff" },
+    { label: "Today's Profit", value: formatKyat(summary.todayProfit), tone: "#24934a", soft: "#f4fbf6" },
   ];
   const topSellingProducts = [];
 
   return (
     <Box sx={{ width: "100%", maxWidth: "none", mx: 0, py: 0.5 }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 2.25, mb: 4 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 2.25, alignItems: "stretch", mb: 4 }}>
         {metrics.map((metric) => <DesktopMetricCard key={metric.label} {...metric} />)}
-        <Card sx={{ ...desktopCardSx, minHeight: 168 }}>
-          <CardContent sx={{ height: "100%", boxSizing: "border-box", p: 2, display: "grid", gap: 1.25, "&:last-child": { pb: 2 } }}>
-            <Button variant="contained" startIcon={<ShoppingCartCheckoutRoundedIcon />} onClick={() => navigate("/sale/create")} sx={{ minHeight: 56, textTransform: "none", fontWeight: 700, borderRadius: 1.75, whiteSpace: "nowrap" }}>Create Order</Button>
-            <Button variant="outlined" startIcon={<AddRoundedIcon />} onClick={() => navigate("/stock/add")} sx={{ minHeight: 56, textTransform: "none", fontWeight: 700, borderRadius: 1.75, whiteSpace: "nowrap" }}>Add Product</Button>
+        <Card sx={{ ...desktopCardSx, minHeight: 116 }}>
+          <CardContent sx={{ height: "100%", boxSizing: "border-box", p: 1.5, display: "grid", gap: 1, "&:last-child": { pb: 1.5 } }}>
+            <Button variant="contained" startIcon={<ShoppingCartCheckoutRoundedIcon />} onClick={() => navigate("/sale/create")} sx={{ minHeight: 42, textTransform: "none", fontWeight: 700, borderRadius: 1.5, whiteSpace: "nowrap" }}>Create Order</Button>
+            <Button variant="outlined" startIcon={<AddRoundedIcon />} onClick={() => navigate("/stock/add")} sx={{ minHeight: 42, textTransform: "none", fontWeight: 700, borderRadius: 1.5, whiteSpace: "nowrap" }}>Add Product</Button>
           </CardContent>
         </Card>
       </Box>
@@ -446,13 +445,12 @@ function DesktopDashboard({ summary, orders, navigate }) {
   );
 }
 
-function DesktopMetricCard({ label, value, trend, action, tone, soft, down = false }) {
+function DesktopMetricCard({ label, value, tone, soft }) {
   return (
-    <Card sx={{ ...desktopCardSx, minHeight: 168, bgcolor: soft, borderColor: `${tone}24` }}>
-      <CardContent sx={{ p: 2.75, "&:last-child": { pb: 2.75 } }}>
-        <Typography sx={{ minHeight: 21, color: tone, fontSize: 15, fontWeight: 700, textAlign: "left" }}>{label}</Typography>
-        <Typography noWrap sx={{ mt: 2, fontSize: 27, lineHeight: 1.1, fontWeight: 700, textAlign: "left" }}>{value}</Typography>
-        {action ? <Button endIcon={<ArrowForwardRoundedIcon />} sx={{ mt: 2.5, minWidth: 0, p: 0, color: tone, textTransform: "none", fontWeight: 700 }}>{action}</Button> : <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mt: 2.5, color: tone }}><TrendingUpRoundedIcon sx={{ fontSize: 23, transform: down ? "rotate(90deg)" : "none" }} /><Typography sx={{ fontSize: 14, fontWeight: 700 }}>{trend}</Typography></Stack>}
+    <Card sx={{ ...desktopCardSx, minHeight: 116, bgcolor: soft, borderColor: `${tone}24` }}>
+      <CardContent sx={{ p: 2.25, "&:last-child": { pb: 2.25 } }}>
+        <Typography sx={{ color: tone, fontSize: 14, lineHeight: 1.3, fontWeight: 700, textAlign: "left" }}>{label}</Typography>
+        <Typography noWrap sx={{ mt: 1.35, fontSize: 25, lineHeight: 1.1, fontWeight: 700, textAlign: "left" }}>{value}</Typography>
       </CardContent>
     </Card>
   );

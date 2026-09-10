@@ -966,7 +966,7 @@ function DesktopPaymentsPage({ onAddPayment, onDetails, onMenu }) {
     return (
       (status === "All" ||
         (status === "Expense"
-          ? record.kind === "expense"
+          ? record.kind === "expense" && !["Cancel", "Cancelled"].includes(record.status)
           : status === "Unpaid"
             ? ["Unpaid", "Partial", "Credit"].includes(record.status)
             : status === "Cancel"
@@ -1813,6 +1813,9 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
       : payment.kind === "income"
         ? "Income"
         : payment.id;
+  const dateLabel = payment.status === "Credit" && ["supplier", "supplier-delivery"].includes(payment.kind)
+    ? "Due"
+    : "Date";
   const tone =
     cancelled
       ? "#d14343"
@@ -1940,7 +1943,7 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
             lineHeight: 1,
           }}
         >
-          Date
+          {dateLabel}
         </Box>
         <Typography
           noWrap

@@ -34,7 +34,6 @@ const catalogSettingsSchema = z.object({
     .max(50)
     .optional(),
   lowStockDefault: z.coerce.number().int().min(0).max(100000).optional(),
-  currencyCode: z.enum(["MMK", "USD", "THB"]).optional(),
   dateFormat: z.enum(["yyyy-MM-dd", "dd/MM/yyyy", "MM/dd/yyyy"]).optional(),
   locale: z.enum(["en-MM", "my-MM", "en-US", "th-TH", "zh-CN"]).optional(),
   timeZone: z.enum(["Asia/Yangon", "Asia/Bangkok", "UTC"]).optional(),
@@ -139,9 +138,13 @@ shopSettingsRouter.patch("/:shopId/settings", async (request, response, next) =>
   try {
     const authUser = getAuthUser(request);
     const { shopId } = paramsSchema.parse(request.params);
+    await assertUserOwnsShop(authUser.id, shopId);
+    if (Object.prototype.hasOwnProperty.call(request.body ?? {}, "currencyCode")) {
+      response.status(409).json({ message: "Shop base currency cannot be changed after the shop is created." });
+      return;
+    }
     const input = catalogSettingsSchema.parse(request.body);
 
-    await assertUserOwnsShop(authUser.id, shopId);
     await ensureShopSetting(shopId);
 
     const settings = await prisma.shopSetting.update({
@@ -158,7 +161,6 @@ shopSettingsRouter.patch("/:shopId/settings", async (request, response, next) =>
         ...(input.option2Values !== undefined ? { option2Values: JSON.stringify(uniqueValues(input.option2Values)) } : {}),
         ...(input.paymentMethods !== undefined ? { paymentMethods: JSON.stringify(normalizePaymentMethods(input.paymentMethods)) } : {}),
         ...(input.lowStockDefault !== undefined ? { lowStockDefault: input.lowStockDefault } : {}),
-        ...(input.currencyCode !== undefined ? { currencyCode: input.currencyCode } : {}),
         ...(input.dateFormat !== undefined ? { dateFormat: input.dateFormat } : {}),
         ...(input.locale !== undefined ? { locale: input.locale } : {}),
         ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),

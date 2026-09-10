@@ -10,6 +10,7 @@ import {
   IconButton,
   InputAdornment,
   Link,
+  MenuItem,
   Stack,
   TextField,
   Typography,
@@ -18,16 +19,14 @@ import {
 import AccountCircleOutlinedIcon from "@mui/icons-material/AccountCircleOutlined";
 import AddAPhotoOutlinedIcon from "@mui/icons-material/AddAPhotoOutlined";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
-import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import CurrencyExchangeRoundedIcon from "@mui/icons-material/CurrencyExchangeRounded";
 import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
-import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import StorefrontOutlinedIcon from "@mui/icons-material/StorefrontOutlined";
 import VisibilityOffOutlinedIcon from "@mui/icons-material/VisibilityOffOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import { useAuth } from "../../context/AuthContext";
-import { useAppPreferences } from "../../context/AppPreferenceContext";
 
 const fieldSx = {
   "& .MuiOutlinedInput-root": { borderRadius: 1.5, minHeight: 52 },
@@ -60,6 +59,7 @@ function useAuthForm(mode, requireConfirmation = false) {
   const [form, setForm] = useState({
     name: "",
     shopName: "",
+    currencyCode: "MMK",
     email: "",
     password: "",
     confirmPassword: "",
@@ -90,6 +90,7 @@ function useAuthForm(mode, requireConfirmation = false) {
         ? await register({
             name: form.name,
             shopName: form.shopName,
+            currencyCode: form.currencyCode,
             email: form.email,
             password: form.password,
             logoFile,
@@ -204,6 +205,19 @@ function DesktopAuthPage({ mode }) {
                     onChange={update("shopName")}
                     sx={fieldSx}
                   />
+                  <TextField
+                    required
+                    select
+                    label="Base currency"
+                    value={form.currencyCode}
+                    onChange={update("currencyCode")}
+                    helperText="This cannot be changed after the shop is created."
+                    sx={fieldSx}
+                  >
+                    <MenuItem value="MMK">Myanmar Kyat (MMK)</MenuItem>
+                    <MenuItem value="USD">US Dollar (USD)</MenuItem>
+                    <MenuItem value="THB">Thai Baht (THB)</MenuItem>
+                  </TextField>
                 </>
               )}
               <TextField
@@ -301,7 +315,6 @@ function MobileAuthPage({ mode }) {
     update,
     submit,
   } = auth;
-  const { themeMode, setThemeMode } = useAppPreferences();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [preview, setPreview] = useState("");
@@ -410,29 +423,6 @@ function MobileAuthPage({ mode }) {
             "radial-gradient(circle at 18% 20%, rgba(32,103,239,.09), transparent 27%), radial-gradient(circle at 88% 35%, rgba(232,181,50,.12), transparent 28%)",
         }}
       >
-        <IconButton
-          aria-label="Toggle theme"
-          onClick={() =>
-            setThemeMode(themeMode === "dark" ? "light" : "dark")
-          }
-          sx={{
-            position: "absolute",
-            top: 12,
-            right: 20,
-            zIndex: 1,
-            width: 40,
-            height: 40,
-            border: "1px solid #d8e0ec",
-            color: "#0f57dd",
-            bgcolor: "rgba(255,255,255,.88)",
-          }}
-        >
-          {themeMode === "dark" ? (
-            <DarkModeOutlinedIcon />
-          ) : (
-            <LightModeOutlinedIcon />
-          )}
-        </IconButton>
         {isRegister && (
           <IconButton
             aria-label="Back to sign in"
@@ -520,6 +510,23 @@ function MobileAuthPage({ mode }) {
                 {field("Shop Name", "shopName", <StorefrontOutlinedIcon />, {
                   placeholder: "Enter your shop name",
                 })}
+                <Box>
+                  <Typography sx={{ mb: 0.65, color: "#101b35", fontSize: 14, fontWeight: 650 }}>Base Currency</Typography>
+                  <TextField
+                    select
+                    fullWidth
+                    required
+                    value={form.currencyCode}
+                    onChange={update("currencyCode")}
+                    helperText="This cannot be changed after the shop is created."
+                    sx={mobileFieldSx}
+                    slotProps={{ input: { startAdornment: <InputAdornment position="start"><CurrencyExchangeRoundedIcon /></InputAdornment> } }}
+                  >
+                    <MenuItem value="MMK">Myanmar Kyat (MMK)</MenuItem>
+                    <MenuItem value="USD">US Dollar (USD)</MenuItem>
+                    <MenuItem value="THB">Thai Baht (THB)</MenuItem>
+                  </TextField>
+                </Box>
                 <LogoPicker
                   preview={preview}
                   fileName={logoFile?.name}

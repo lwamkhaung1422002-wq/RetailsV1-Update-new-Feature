@@ -15,14 +15,19 @@ app.use(ordersRouter);
 app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => { res.status(400).json({ message: error.message }); });
 beforeEach(() => { vi.clearAllMocks(); mocks.update.mockResolvedValue({ id: "order-1", fulfillmentStatus: "cancelled" }); });
 it("rejects cancellation with even one active payment before changing stock or order", async () => {
-  mocks.findFirst.mockResolvedValue({ id: "order-1", fulfillmentStatus: "completed", items: [], payments: [{ id: "pay-1", amount: 5000 }] });
+  mocks.findFirst.mockResolvedValue({ id: "order-1", total: 10000, fulfillmentStatus: "completed", items: [], payments: [{ id: "pay-1", amount: 5000 }] });
   const result = await request(app).post("/shop-1/orders/order-1/cancel").send({ reason: "Wrong order" }).expect(400);
   expect(result.body.message).toMatch(/Cancel active payment records/);
   expect(mocks.update).not.toHaveBeenCalled();
   expect(mocks.audit).not.toHaveBeenCalled();
 });
 it("keeps the order as cancelled after all payments are reversed", async () => {
-  mocks.findFirst.mockResolvedValue({ id: "order-1", fulfillmentStatus: "completed", items: [], payments: [{ id: "pay-1", amount: 5000 }, { id: "refund-1", originalPaymentId: "pay-1", amount: -5000 }] });
+  mocks.findFirst.mockResolvedValue({ id: "order-1", total: 10000, fulfillmentStatus: "completed", items: [], payments: [{ id: "pay-1", amount: 5000 }, { id: "refund-1", originalPaymentId: "pay-1", amount: -5000 }] });
+  await request(app).post("/shop-1/orders/order-1/cancel").send({ reason: "Wrong order" }).expect(200);
+  expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "order-1" }, data: expect.objectContaining({ fulfillmentStatus: "cancelled", cancelReason: "Wrong order" }) }));
+});
+it("cancels a fully paid order directly without requiring a refund", async () => {
+  mocks.findFirst.mockResolvedValue({ id: "order-1", total: 5000, fulfillmentStatus: "completed", items: [], payments: [{ id: "pay-1", amount: 5000 }] });
   await request(app).post("/shop-1/orders/order-1/cancel").send({ reason: "Wrong order" }).expect(200);
   expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "order-1" }, data: expect.objectContaining({ fulfillmentStatus: "cancelled", cancelReason: "Wrong order" }) }));
 });

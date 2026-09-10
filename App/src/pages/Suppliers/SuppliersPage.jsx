@@ -192,10 +192,13 @@ void desktopSupplierRecords;
 const supplierDate = (value) => value ? new Date(value).toISOString().slice(0, 10) : "";
 function mapSupplierRecords(purchasesResult, deliveriesResult) {
   const purchases = (purchasesResult?.purchases || []).map((purchase) => {
-    const paid = Number(purchase.paidAmount || 0) >= Number(purchase.total || 0);
+    const totalAmount = Number(purchase.total || 0);
+    const paidAmount = Number(purchase.paidAmount || 0);
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    const paid = paidAmount >= totalAmount;
     const payment = [...(purchase.payments || [])].sort((a, b) => new Date(b.paidAt) - new Date(a.paidAt))[0];
-    const date = supplierDate(paid ? payment?.paidAt || purchase.updatedAt : purchase.expectedAt || purchase.createdAt);
-    return { id: purchase.purchaseNumber || purchase.id, apiId: purchase.id, supplierId: purchase.supplierId, name: purchase.supplier?.name || "Supplier", amount: paid ? Number(purchase.paidAmount || purchase.total || 0) : Math.max(0, Number(purchase.total || 0) - Number(purchase.paidAmount || 0)), status: purchase.status === "cancelled" ? "Cancel" : paid ? "Paid" : "Credit", receiveDate: supplierDate(purchase.createdAt), dateLabel: paid ? "Paid" : "Due", date, method: payment?.method === "KBZ Pay" ? "KBZPay" : payment?.method || "", hasPaymentRecord: (purchase.payments || []).length > 0 };
+    const date = supplierDate(purchase.status === "cancelled" ? purchase.cancelledAt || purchase.updatedAt : paid ? payment?.paidAt || purchase.updatedAt : purchase.expectedAt || purchase.createdAt);
+    return { id: purchase.purchaseNumber || purchase.id, apiId: purchase.id, supplierId: purchase.supplierId, name: purchase.supplier?.name || "Supplier", amount: paid ? paidAmount || totalAmount : remainingAmount, totalAmount, remainingAmount, status: purchase.status === "cancelled" ? "Cancel" : paid ? "Paid" : "Credit", receiveDate: supplierDate(purchase.createdAt), dateLabel: purchase.status === "cancelled" ? "Date" : paid ? "Paid" : "Due", date, method: payment?.method === "KBZ Pay" ? "KBZPay" : payment?.method || "", hasPaymentRecord: (purchase.payments || []).length > 0 };
   });
   const deliveries = (deliveriesResult?.records || []).map((record) => {
     const activePayments = (record.payments || []).filter((payment) => !payment.reversedAt && !payment.reversal);
@@ -203,7 +206,7 @@ function mapSupplierRecords(purchasesResult, deliveriesResult) {
     const amount = Number(record.amount || 0);
     const remaining = Number(record.remaining ?? Math.max(0, amount - activePaid));
     const invoiceStatus = record.invoiceStatus || (record.status === "cancelled" ? "Cancelled" : remaining === 0 ? "Paid" : "Credit");
-    return { id: record.invoiceNumber || record.id, apiId: record.id, supplierId: record.supplierId, name: record.supplierName || record.supplier?.name || "Supplier", amount: invoiceStatus === "Paid" ? amount : remaining, totalAmount: amount, remainingAmount: remaining, activePaid, status: invoiceStatus === "Cancelled" ? "Cancel" : invoiceStatus, receiveDate: supplierDate(record.receivedAt), dateLabel: invoiceStatus === "Paid" ? "Paid" : invoiceStatus === "Cancelled" ? "Cancelled" : "Due", date: supplierDate(invoiceStatus === "Paid" ? activePayments.at(-1)?.paidAt : record.cancelledAt || record.dueAt || record.receivedAt), method: activePayments.at(-1)?.method || "", deliveryOnly: true, deliveryRecord: record, hasPaymentRecord: activePaid > 0, activePaymentRecordCount: Number(record.activePaymentCount ?? activePayments.length), allowedActions: record.allowedActions, sortAt: new Date(record.createdAt || record.receivedAt).getTime() };
+    return { id: record.invoiceNumber || record.id, apiId: record.id, supplierId: record.supplierId, name: record.supplierName || record.supplier?.name || "Supplier", amount: invoiceStatus === "Paid" ? amount : remaining, totalAmount: amount, remainingAmount: remaining, activePaid, status: invoiceStatus === "Cancelled" ? "Cancel" : invoiceStatus, receiveDate: supplierDate(record.receivedAt), dateLabel: invoiceStatus === "Paid" ? "Paid" : invoiceStatus === "Cancelled" ? "Date" : "Due", date: supplierDate(invoiceStatus === "Paid" ? activePayments.at(-1)?.paidAt : record.cancelledAt || record.dueAt || record.receivedAt), method: activePayments.at(-1)?.method || "", deliveryOnly: true, deliveryRecord: record, hasPaymentRecord: activePaid > 0, activePaymentRecordCount: Number(record.activePaymentCount ?? activePayments.length), allowedActions: record.allowedActions, sortAt: new Date(record.createdAt || record.receivedAt).getTime() };
   });
   return [...purchases, ...deliveries].sort((left, right) => (right.sortAt || new Date(right.date || 0).getTime()) - (left.sortAt || new Date(left.date || 0).getTime()));
 }
@@ -877,26 +880,16 @@ function DesktopSuppliers({ records, openPaymentRecordId }) {
                 ? `${record.dateLabel}: ${record.date.split("-").reverse().join("/")}`
                 : "--"}
             </Typography>
-            <Typography
-              noWrap
-              sx={{
-                justifySelf: "end",
-                textAlign: "right",
-                whiteSpace: "nowrap",
-                fontSize: 15.5,
-                fontWeight: 800,
-              }}
-            >
+            <Box sx={{ justifySelf: "end", minWidth: 0, textAlign: "right" }}>
+              <Typography noWrap sx={{ fontSize: 15.5, lineHeight: 1.25, fontWeight: 800 }}>
+                {money(record.totalAmount ?? record.amount)}
+              </Typography>
               {record.status === "Credit" && Number(record.remainingAmount || 0) > 0 && (
-                <Box
-                  component="span"
-                  sx={{ mr: 1, color: "#ef6c00", fontSize: 12.5, fontWeight: 700 }}
-                >
+                <Typography noWrap sx={{ mt: 0.35, color: "#ef6c00", fontSize: 12, lineHeight: 1.2, fontWeight: 600 }}>
                   Remaining {money(record.remainingAmount)}
-                </Box>
+                </Typography>
               )}
-              {money(record.totalAmount ?? record.amount)}
-            </Typography>
+            </Box>
             <Stack
               direction="row"
               spacing={0.75}
@@ -917,18 +910,20 @@ function DesktopSuppliers({ records, openPaymentRecordId }) {
                 <><IconButton
                   aria-label={`Pay ${record.name}`}
                   onClick={() => openPayment(record)}
+                  disabled={record.status === "Cancel"}
                   sx={desktopPayIconSx}
                 >
                   <PaymentsOutlinedIcon fontSize="small" />
                 </IconButton><IconButton
                 aria-label={`Edit ${record.name}`}
-                disabled={record.deliveryOnly && record.allowedActions?.edit === false}
+                disabled={record.status === "Cancel" || (record.deliveryOnly && record.allowedActions?.edit === false)}
                 onClick={() => navigate(`/suppliers/add?edit=${record.deliveryOnly ? record.apiId : record.supplierId}`)}
                 sx={desktopActionIconSx}
               >
                 <EditOutlinedIcon fontSize="small" />
               </IconButton><IconButton
                 aria-label={`Delete ${record.name}`}
+                disabled={record.status === "Cancel"}
                 onClick={() => open("delete", record)}
                 sx={{ ...desktopActionIconSx, color: "error.main" }}
               >
@@ -1526,7 +1521,7 @@ function DesktopSupplierFilter({ label, active, icon, onClick, tone }) {
 }
 
 const desktopSupplierGrid =
-  "56px minmax(200px, 1.25fr) minmax(120px, .7fr) 96px minmax(130px, .75fr) minmax(160px, .95fr) minmax(130px, .75fr) 136px";
+  "52px minmax(160px, 1.2fr) minmax(120px, .9fr) 92px minmax(120px, .9fr) minmax(145px, 1fr) minmax(150px, 1fr) 128px";
 const desktopSupplierSearchSx = {
   "& .MuiOutlinedInput-root": {
     minHeight: 46,
@@ -1553,20 +1548,20 @@ const desktopSupplierAddSx = {
 const desktopSupplierHeaderSx = {
   display: "grid",
   gridTemplateColumns: desktopSupplierGrid,
-  columnGap: 1.5,
+  columnGap: 1,
   alignItems: "center",
   minHeight: 58,
-  px: 2.5,
+  px: 2,
   borderBottom: "1px solid",
   borderColor: "divider",
 };
 const desktopSupplierRowSx = {
   display: "grid",
   gridTemplateColumns: desktopSupplierGrid,
-  columnGap: 1.5,
+  columnGap: 1,
   alignItems: "center",
   minHeight: 74,
-  px: 2.5,
+  px: 2,
   borderBottom: "1px solid",
   borderColor: "divider",
   "&:last-of-type": { borderBottom: 0 },
@@ -1630,6 +1625,7 @@ const SupplierCard = memo(function SupplierCard({ record, onMenu, onClick }) {
   const cancelled = record.status === "Cancel";
   const paid = record.status === "Paid";
   const dateColor = cancelled ? "#d14343" : paid ? "success.main" : "#ef6c00";
+  const dateLabel = record.status === "Credit" ? "Due" : "Date";
   return (
     <Paper
       elevation={2}
@@ -1638,10 +1634,10 @@ const SupplierCard = memo(function SupplierCard({ record, onMenu, onClick }) {
         p: 1.5,
         borderRadius: 1.5,
         display: "grid",
-        gridTemplateColumns: "68px minmax(0, 1fr) auto",
-        gridTemplateRows: "auto auto",
-        columnGap: 1.5,
-        rowGap: 1.25,
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gridTemplateRows: "auto auto auto",
+        columnGap: 1,
+        rowGap: 1,
         alignItems: "center",
         cursor: "pointer",
         fontFamily: "Inter, Roboto, Noto Sans Myanmar, sans-serif",
@@ -1663,23 +1659,14 @@ const SupplierCard = memo(function SupplierCard({ record, onMenu, onClick }) {
           borderRadius: 1,
         }}
       />
-      <Typography
-        sx={{
-          gridColumn: 1,
-          gridRow: 2,
-          fontSize: 14,
-          fontWeight: 400,
-          lineHeight: 1.3,
-          color: "text.secondary",
-        }}
-      >
-        {record.id}
+      <Typography sx={{ gridColumn: 2, gridRow: 1, justifySelf: "end", color: dateColor, fontSize: 13, fontWeight: 500, lineHeight: 1.3, whiteSpace: "nowrap" }}>
+        {dateLabel}: {record.date.split("-").reverse().join("/")}
       </Typography>
       <Typography
         noWrap
         sx={{
-          gridColumn: 2,
-          gridRow: 1,
+          gridColumn: 1,
+          gridRow: 2,
           minWidth: 0,
           fontSize: 17,
           fontWeight: 600,
@@ -1689,64 +1676,37 @@ const SupplierCard = memo(function SupplierCard({ record, onMenu, onClick }) {
       >
         {record.name}
       </Typography>
-      <Box
+      <Typography
+        noWrap
         sx={{
           gridColumn: 2,
           gridRow: 2,
-          display: "flex",
-          minWidth: 0,
-          alignItems: "center",
-          gap: 0.65,
-          color: dateColor,
+          justifySelf: "end",
+          textAlign: "right",
+          fontSize: 18,
+          fontWeight: 600,
+          lineHeight: 1.2,
+          color: "text.primary",
+          whiteSpace: "nowrap",
         }}
       >
-        <CalendarTodayOutlinedIcon sx={{ fontSize: 17, flexShrink: 0 }} />
-        <Typography
-          noWrap
-          component="span"
-          sx={{
-            fontSize: 13,
-            fontWeight: 400,
-            lineHeight: 1.3,
-            color: "inherit",
-          }}
+        {money(record.totalAmount ?? record.amount)}
+      </Typography>
+      <Typography sx={{ gridColumn: 1, gridRow: 3, minWidth: 0, fontSize: 14, fontWeight: 400, lineHeight: 1.3, color: "text.secondary" }}>
+        {record.id}
+      </Typography>
+      <Box sx={{ gridColumn: 2, gridRow: 3, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: .5, minWidth: 0 }}>
+        {record.status === "Credit" && Number(record.remainingAmount || 0) > 0 && <Typography noWrap sx={{ color: "#ef6c00", fontSize: 12, fontWeight: 600 }}>Remaining {money(record.remainingAmount)}</Typography>}
+        <IconButton
+          aria-label={`More actions for ${record.name}`}
+          onClick={(event) => onMenu(event, record)}
+          disabled={record.status === "Cancel"}
+          size="small"
+          sx={{ p: 0.25, flexShrink: 0 }}
         >
-          {record.dateLabel}:{" "}
-          <Box
-            component="span"
-            sx={{ color: "inherit", fontSize: 13, fontWeight: 500 }}
-          >
-            {record.date.split("-").reverse().join("/")}
-          </Box>
-        </Typography>
+          <MoreVertRoundedIcon fontSize="small" />
+        </IconButton>
       </Box>
-      <Stack
-        direction="row"
-        spacing={0.6}
-        alignItems="baseline"
-        sx={{ gridColumn: 3, gridRow: 1, justifySelf: "end", whiteSpace: "nowrap" }}
-      >
-        {record.status === "Credit" && Number(record.remainingAmount || 0) > 0 && (
-          <Typography sx={{ color: "#ef6c00", fontSize: 12, fontWeight: 700 }}>
-            Remaining {money(record.remainingAmount)}
-          </Typography>
-        )}
-        <Typography
-          noWrap
-          sx={{ fontSize: 18, fontWeight: 600, lineHeight: 1.2, color: "text.primary" }}
-        >
-          {money(record.totalAmount ?? record.amount)}
-        </Typography>
-      </Stack>
-      <IconButton
-        aria-label={`More actions for ${record.name}`}
-        onClick={(event) => onMenu(event, record)}
-        disabled={record.status === "Cancel"}
-        size="small"
-        sx={{ gridColumn: 3, gridRow: 2, justifySelf: "end", p: 0.25 }}
-      >
-        <MoreVertRoundedIcon fontSize="small" />
-      </IconButton>
     </Paper>
   );
 });

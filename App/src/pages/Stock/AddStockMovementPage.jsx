@@ -201,7 +201,7 @@ export default function AddStockMovementPage() {
         <Typography sx={{ ...sectionLabelSx, mt: 3.5 }}>MOVEMENT DETAILS</Typography>
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5, mb: 2.5 }}>
           <MovementButton active={movementType === "in"} onClick={() => setMovementType("in")} icon={<AddCircleOutlineRoundedIcon />} label="Stock IN" tone="success" />
-          <MovementButton active={movementType === "adjustment"} onClick={() => setMovementType("adjustment")} icon={<Inventory2RoundedIcon />} label="Stock Adjustment" tone="primary" />
+          <MovementButton active={movementType === "adjustment"} onClick={() => setMovementType("adjustment")} label="Stock Adjustment" tone="primary" />
         </Box>
 
         {movementType === "in" ? (

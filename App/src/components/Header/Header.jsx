@@ -8,6 +8,7 @@ import StorefrontRoundedIcon from "@mui/icons-material/StorefrontRounded";
 import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "../../context/AuthContext";
 import { usePosApi } from "../../hooks/useApiResource";
+import { useAppPreferences } from "../../context/AppPreferenceContext";
 
 const pageTitles = {
   "/": "Home",
@@ -36,6 +37,7 @@ export default function Header() {
   const [notificationAnchor, setNotificationAnchor] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const api = usePosApi();
+  const { t } = useAppPreferences();
   const { shop } = useAuth();
   useEffect(() => { let active = true; if (!shop?.id) return undefined; api.notifications.list().then((result) => { if (active) setNotifications(result.notifications || []); }).catch(() => {}); return () => { active = false; }; }, [api, shop?.id]);
 
@@ -60,7 +62,7 @@ export default function Header() {
           {action ? <IconButton aria-label={action.label} onClick={(event) => action.event === "inventory-sort" ? setSortAnchor(event.currentTarget) : window.dispatchEvent(new Event(action.event))} sx={{ flexShrink: 0, color: "common.white" }}>{action.icon}</IconButton> : <Box sx={{ width: 40, flexShrink: 0 }} />}
         </Toolbar>
         <Menu anchorEl={sortAnchor} open={Boolean(sortAnchor)} onClose={() => setSortAnchor(null)} PaperProps={{ sx: { minWidth: 268, borderRadius: 1, mt: 1 } }}>
-          {[ ["recent", "Recently Added"], ["name", "Name (A-Z)"], ["price", "Price (High to Low)"], ["stock", "Stock (Low to High)"] ].map(([value, label]) => <MenuItem key={value} onClick={() => { window.dispatchEvent(new CustomEvent("inventory-sort", { detail: value })); setSortAnchor(null); }} sx={{ minHeight: 60, fontSize: 17 }}>{label}</MenuItem>)}
+          {[ ["recent", "Recently Added"], ["name", "Name (A-Z)"], ["price", "Price (High to Low)"], ["stock", "Stock (Low to High)"] ].map(([value, label]) => <MenuItem key={value} onClick={() => { window.dispatchEvent(new CustomEvent("inventory-sort", { detail: value })); setSortAnchor(null); }} sx={{ minHeight: 60, fontSize: 17 }}>{t(label)}</MenuItem>)}
         </Menu>
       </AppBar>
     );
@@ -69,11 +71,11 @@ export default function Header() {
       <AppBar position="sticky" elevation={0} sx={{ bgcolor: "#1976d2", borderBottom: 0 }}>
         <Toolbar sx={{ minHeight: 64, display: "grid", gridTemplateColumns: "1fr auto 1fr" }}>
           <Box />
-          <Typography variant="h6" fontWeight={700}>{mobileTitle}</Typography>
+          <Typography variant="h6" fontWeight={700}>{t(mobileTitle)}</Typography>
           {action ? <IconButton aria-label={action.label} onClick={(event) => action.event === "inventory-sort" ? setSortAnchor(event.currentTarget) : window.dispatchEvent(new Event(action.event))} sx={{ justifySelf: "end", color: "common.white" }}>{action.icon}</IconButton> : <Box />}
         </Toolbar>
         <Menu anchorEl={sortAnchor} open={Boolean(sortAnchor)} onClose={() => setSortAnchor(null)} PaperProps={{ sx: { minWidth: 268, borderRadius: 1, mt: 1 } }}>
-          {[ ["recent", "Recently Added"], ["name", "Name (A-Z)"], ["price", "Price (High to Low)"], ["stock", "Stock (Low to High)"] ].map(([value, label]) => <MenuItem key={value} onClick={() => { window.dispatchEvent(new CustomEvent("inventory-sort", { detail: value })); setSortAnchor(null); }} sx={{ minHeight: 60, fontSize: 17 }}>{label}</MenuItem>)}
+          {[ ["recent", "Recently Added"], ["name", "Name (A-Z)"], ["price", "Price (High to Low)"], ["stock", "Stock (Low to High)"] ].map(([value, label]) => <MenuItem key={value} onClick={() => { window.dispatchEvent(new CustomEvent("inventory-sort", { detail: value })); setSortAnchor(null); }} sx={{ minHeight: 60, fontSize: 17 }}>{t(label)}</MenuItem>)}
         </Menu>
       </AppBar>
     );
@@ -84,7 +86,7 @@ export default function Header() {
       <Toolbar sx={{ justifyContent: "space-between", minHeight: 72, px: { md: 4, lg: 5 } }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           {(isDesktopStockDetails || isDesktopStockHistory || isDesktopCreateOrder) && <IconButton aria-label={isDesktopCreateOrder ? "Back to orders" : "Back to inventory"} onClick={() => navigate(isDesktopCreateOrder ? "/sale" : "/stock")} sx={{ ml: -1 }}><ArrowBackRoundedIcon /></IconButton>}
-          {!isSupplierDetails && <Typography variant="h6" fontWeight={800}>{pathname === "/" ? "Dashboard" : isDesktopStockDetails ? "Stock Details" : isDesktopStockHistory ? "Stock Movement" : pathname === "/report/sales" ? "Sale Report" : pathname === "/report/products" ? "Product Report" : pathname.startsWith("/report") ? "Reports" : pageTitles[pathname] ?? "POS System"}</Typography>}
+          {!isSupplierDetails && <Typography variant="h6" fontWeight={800}>{t(pathname === "/" ? "Dashboard" : isDesktopStockDetails ? "Stock Details" : isDesktopStockHistory ? "Stock Movement" : pathname === "/report/sales" ? "Sale Report" : pathname === "/report/products" ? "Product Report" : pathname.startsWith("/report") ? "Reports" : pageTitles[pathname] ?? "POS System")}</Typography>}
         </Box>
         <Stack direction="row" spacing={1}>
           <IconButton aria-label="Notifications" onClick={(event) => setNotificationAnchor(event.currentTarget)}><Badge color="error" variant="dot" invisible={!notifications.some((item) => !item.readAt)}><NotificationsRoundedIcon /></Badge></IconButton>
@@ -92,7 +94,7 @@ export default function Header() {
         </Stack>
       </Toolbar>
       <Menu anchorEl={notificationAnchor} open={Boolean(notificationAnchor)} onClose={() => setNotificationAnchor(null)} PaperProps={{ sx: { width: 340, maxHeight: 420 } }}>
-        {!notifications.length && <MenuItem disabled>No notifications</MenuItem>}
+        {!notifications.length && <MenuItem disabled>{t("No notifications")}</MenuItem>}
         {notifications.map((item) => <MenuItem key={item.id} onClick={async () => { if (!item.readAt) { await api.notifications.markRead(item.id); setNotifications((current) => current.map((entry) => entry.id === item.id ? { ...entry, readAt: new Date().toISOString() } : entry)); } }} sx={{ whiteSpace: "normal", alignItems: "flex-start", opacity: item.readAt ? .65 : 1 }}><Box><Typography fontWeight={700} variant="body2">{item.title}</Typography><Typography variant="caption" color="text.secondary">{item.message}</Typography></Box></MenuItem>)}
       </Menu>
     </AppBar>
