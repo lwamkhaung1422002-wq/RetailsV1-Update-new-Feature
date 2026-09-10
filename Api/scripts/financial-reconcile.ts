@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { calculateFinancialMetrics } from "../src/lib/financial-domain.js";
 import { prisma } from "../src/lib/prisma.js";
 
 async function main(): Promise<void> {
@@ -32,10 +33,15 @@ async function main(): Promise<void> {
       if (purchase.paidAmount < 0 || purchase.paidAmount > purchase.total) failures.push(`${purchase.id}: invalid paid balance`);
       if (purchase.returns.some((entry) => entry.amount < 0)) failures.push(`${purchase.id}: negative supplier return`);
     }
-    const revenue = orders.filter((order) => order.fulfillmentStatus === "completed").reduce((sum, order) => sum + order.total, 0);
-    const cogs = orders.filter((order) => order.fulfillmentStatus === "completed").flatMap((order) => order.items).reduce((sum, item) => sum + item.unitCost * Number(item.baseQuantity ?? item.quantity), 0);
-    const operatingExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-    const cashReceived = orders.flatMap((order) => order.payments).reduce((sum, payment) => sum + (payment.type === "refund" ? -payment.amount : payment.amount), 0);
+    const financialMetrics = calculateFinancialMetrics({
+      recognizedOrders: orders.filter((order) => order.fulfillmentStatus === "completed"),
+      payments: orders.flatMap((order) => order.payments),
+      expenses,
+    });
+    const customerPayments = orders.flatMap((order) => order.payments)
+      .filter((payment) => payment.type === "payment" && payment.scope !== "cod-settlement-void")
+      .reduce((sum, payment) => sum + payment.amount, 0);
+    const cashReceived = customerPayments - financialMetrics.refunds;
     const supplierPaid = purchases.flatMap((purchase) => purchase.payments).filter((payment) => !payment.reversedAt).reduce((sum, payment) => sum + payment.amount, 0);
     const receivable = orders.reduce((sum, order) => {
       const paid = order.payments.reduce((paymentSum, payment) => paymentSum + (payment.type === "refund" ? -payment.amount : payment.amount), 0);
@@ -47,8 +53,14 @@ async function main(): Promise<void> {
     for (const failure of failures) console.error(`FAIL ${shop.name} ${failure}`);
     console.log(JSON.stringify({
       status: failures.length ? "FAIL" : "PASS", shop: shop.name,
-      revenue, cogs, grossProfit: revenue - cogs, operatingExpenses,
-      netProfit: revenue - cogs - operatingExpenses, cashReceived, supplierPaid,
+      recognizedSalesBeforeRefunds: financialMetrics.recognizedSalesBeforeRefunds,
+      refunds: financialMetrics.refunds,
+      revenue: financialMetrics.netRevenue,
+      cogs: financialMetrics.costOfGoods,
+      grossProfit: financialMetrics.grossProfit,
+      operatingExpenses: financialMetrics.operatingExpenses,
+      netProfit: financialMetrics.netProfit,
+      cashReceived, supplierPaid,
       receivable, payable, inventoryValuation,
     }));
   }

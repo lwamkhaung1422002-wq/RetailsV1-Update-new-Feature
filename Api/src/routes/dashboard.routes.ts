@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
 
+import {
+  calculateFinancialMetrics,
+  costOfGoodsSold,
+  recognizedSalesBeforeRefunds,
+} from "../lib/financial-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -41,6 +46,7 @@ type SalesOrder = {
   completedAt: Date | null;
   items: Array<{
     quantity: number;
+    baseQuantity: { toString(): string } | null;
     unitCost: number;
     lineTotal: number;
     recognizedAt: Date | null;
@@ -65,10 +71,10 @@ type DashboardOrder = {
   id: string; orderNumber: string | null; total: number; fulfillmentStatus: string; paymentStatus: string;
   completedAt: Date | null; createdAt: Date;
   customer: { name: string } | null;
-  items: Array<{ quantity: number; unitCost: number; recognizedAt: Date | null }>;
+  items: Array<{ quantity: number; baseQuantity: { toString(): string } | null; unitCost: number; recognizedAt: Date | null }>;
 };
 type DashboardPayment = ReportPayment;
-type DashboardExpense = { amount: number };
+type DashboardExpense = { amount: number; category: string | null; cancelledAt: Date | null };
 type DashboardPurchase = {
   id: string; total: number; paidAmount: number; status: string; expectedAt: Date; purchaseNumber: string;
   supplier: { name: string };
@@ -160,9 +166,9 @@ function isDateWithin(value: Date | null, start: Date, end: Date): boolean {
 }
 
 function reportMetrics(orders: SalesOrder[]): SalesMetrics {
-  const totalSales = orders.reduce((sum, order) => sum + order.total, 0);
+  const totalSales = recognizedSalesBeforeRefunds(orders);
   const itemsSold = orders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0);
-  const totalCostPrice = orders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.unitCost * item.quantity, 0), 0);
+  const totalCostPrice = costOfGoodsSold(orders);
   return {
     totalSales,
     orders: orders.length,
@@ -333,26 +339,21 @@ dashboardRouter.get("/:shopId/dashboard", requireAuth, async (request, response,
       0,
     );
     const periodPayments = payments.filter((payment) => isInRange(payment.paidAt, recognitionRange));
-    // Refund payments are stored as negative cash movements. Dashboard totals
-    // expose refunds as a positive deduction so they reduce revenue/profit and
-    // increase cash out instead of being added back in.
-    const refunds = periodPayments
-      .filter((payment) => payment.type === "refund")
-      .reduce((sum, payment) => sum + Math.abs(payment.amount), 0);
-    const revenue = recognizedOrders.reduce((sum, order) => sum + order.total, 0) - refunds;
-    const costOfGoods = recognizedOrders.reduce(
-      (sum, order) =>
-        sum +
-        order.items.reduce(
-          (itemSum, item) => itemSum + item.unitCost * item.quantity,
-          0,
-        ),
-      0,
-    );
-    const grossProfit = revenue - costOfGoods;
-    const operatingExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-    const netProfit = grossProfit - operatingExpenses;
-    const todayProfit = todaySales - todayCostOfGoods - operatingExpenses;
+    const financialMetrics = calculateFinancialMetrics({
+      recognizedOrders,
+      payments: periodPayments,
+      expenses,
+    });
+    const {
+      refunds,
+      netRevenue: revenue,
+      costOfGoods,
+      grossProfit,
+      operatingExpenses,
+      netProfit,
+    } = financialMetrics;
+    const expenseCashOut = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+    const todayProfit = todaySales - todayCostOfGoods - expenseCashOut;
     const unpaidTotal = orders
       .filter((order) => isRecognizedSale(order))
       .reduce((sum, order) => sum + Math.max(0, order.total - paidAmountForOrder(order.id, payments)), 0);
@@ -365,8 +366,8 @@ dashboardRouter.get("/:shopId/dashboard", requireAuth, async (request, response,
     const supplierPayable = purchases.reduce((sum, purchase) => sum + Math.max(0, purchase.total - purchase.paidAmount), 0);
     const inventoryValuation = balances.reduce((sum, balance) =>
       sum + Number(balance.onHand) * Number(balance.product.cost ?? 0), 0);
-    const cashBalance = cashReceived - refunds - purchasePayments - operatingExpenses;
-    const cashOut = purchasePayments + operatingExpenses + refunds;
+    const cashBalance = cashReceived - refunds - purchasePayments - expenseCashOut;
+    const cashOut = purchasePayments + expenseCashOut + refunds;
     const stockUnits = balances.reduce((sum, balance) => sum + Math.max(0, Number(balance.onHand)), 0);
 
     // A product can have several receipt batches and locations. Low-stock is a
