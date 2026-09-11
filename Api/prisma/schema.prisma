@@ -127,6 +127,21 @@ model ShopRolePolicy {
   @@index([shopId])
 }
 
+model ManagerApprovalToken {
+  id          String    @id
+  shopId      String
+  requesterId String
+  approverId  String
+  action      String
+  targetId    String
+  payloadHash String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([shopId, expiresAt])
+}
+
 model ShopSetting {
   id                 String   @id @default(cuid())
   shopId             String   @unique

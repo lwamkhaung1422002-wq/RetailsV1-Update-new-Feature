@@ -3,7 +3,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { z } from "zod";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { writeAuditLog } from "../lib/audit-log.js";
-import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction } from "../lib/manager-approval.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import { recordInventoryMovement } from "../lib/inventory-domain.js";
 import { refreshProductWeightedCost } from "../lib/costing.js";
 import { prisma } from "../lib/prisma.js";
@@ -358,7 +358,7 @@ purchasesRouter.post("/:shopId/supplier-delivery-records/:recordId/cancel", asyn
 purchasesRouter.post("/:shopId/supplier-delivery-records/:recordId/payments/:paymentId/reverse", async (request, response, next) => {
   try {
     const auth = getAuthUser(request); const { shopId } = params.parse(request.params); const input = reversalInput.parse(request.body); await assertUserOwnsShop(auth.id, shopId);
-    const authorization = await authorizeSensitiveAction({ requesterId: auth.id, shopId, action: "supplier.payment.reverse", targetId: request.params.paymentId!, approvalToken: approvalAccessToken(request.headers) });
+    const authorization = await authorizeSensitiveAction({ requesterId: auth.id, shopId, action: "supplier.payment.reverse", targetId: request.params.paymentId!, payload: { deliveryRecordId: request.params.recordId!, paymentId: request.params.paymentId!, ...input }, approvalToken: approvalAccessToken(request.headers) });
     const record = await prisma.supplierDeliveryRecord.findFirst({ where: { id: request.params.recordId, shopId } });
     if (!record) throw notFound("Supplier delivery record not found.");
     if (record.status === "cancelled") throw badRequest("Cancelled supplier records cannot change payments.");
@@ -366,6 +366,7 @@ purchasesRouter.post("/:shopId/supplier-delivery-records/:recordId/payments/:pay
     if (!payment) throw notFound("Supplier payment not found.");
     if (payment.reversedAt || payment.reversal) throw badRequest("Supplier payment has already been cancelled.");
     const reversed = await prisma.$transaction(async (tx) => {
+      await consumeManagerApproval(tx, authorization);
       const event = await tx.supplierDeliveryPaymentReversal.create({ data: { shopId, originalPaymentId: payment.id, reason: input.reason, actorId: auth.id } });
       await writeAuditLog(tx, { shopId, actorId: auth.id, action: "supplier.delivery.payment.reverse", entity: "SupplierDeliveryPaymentReversal", entityId: event.id, metadata: { deliveryRecordId: record.id, originalPaymentId: payment.id, amount: payment.amount, reason: input.reason, ...approvalAuditMetadata(authorization) } });
       const updatedRecord = await tx.supplierDeliveryRecord.findUniqueOrThrow({
@@ -860,7 +861,7 @@ purchasesRouter.post("/:shopId/purchases/:purchaseId/payments/:paymentId/reverse
     const auth = getAuthUser(request);
     const { shopId } = params.parse(request.params);
     const input = reversalInput.parse(request.body);
-    const authorization = await authorizeSensitiveAction({ requesterId: auth.id, shopId, action: "supplier.payment.reverse", targetId: request.params.paymentId!, approvalToken: approvalAccessToken(request.headers) });
+    const authorization = await authorizeSensitiveAction({ requesterId: auth.id, shopId, action: "supplier.payment.reverse", targetId: request.params.paymentId!, payload: { purchaseId: request.params.purchaseId!, paymentId: request.params.paymentId!, ...input }, approvalToken: approvalAccessToken(request.headers) });
     await assertUserOwnsShop(auth.id, shopId);
     const purchase = await prisma.purchase.findFirst({ where: { id: request.params.purchaseId, shopId } });
     if (!purchase) throw notFound("Purchase not found.");
@@ -868,6 +869,7 @@ purchasesRouter.post("/:shopId/purchases/:purchaseId/payments/:paymentId/reverse
     if (!payment) throw notFound("Purchase payment not found.");
     if (payment.reversedAt) throw badRequest("Purchase payment has already been reversed.");
     const updated = await prisma.$transaction(async (tx) => {
+      await consumeManagerApproval(tx, authorization);
       await tx.purchasePayment.update({
         where: { id: payment.id },
         data: { reversedAt: new Date(), reversalReason: input.reason },

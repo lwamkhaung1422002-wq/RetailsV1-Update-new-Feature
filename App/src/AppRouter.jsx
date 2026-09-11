@@ -1,7 +1,10 @@
 import { lazy, Suspense } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router";
+import { Alert, Box } from "@mui/material";
 import { LoadingState } from "./components/ApiState/ApiState";
 import RouteErrorBoundary from "./components/RouteErrorBoundary/RouteErrorBoundary";
+import { useAuth } from "./context/AuthContext";
+import { canAccessFeatureRoute } from "./lib/feature-route-access";
 
 import App from "./App";
 import Home from "./pages/Home/HomePage";
@@ -53,6 +56,12 @@ function RouteContent({ children }) {
   return <Suspense fallback={<LoadingState minHeight="100vh" />}>{children}</Suspense>;
 }
 
+function FeatureRoute({ rule, children }) {
+  const { shop } = useAuth();
+  if (!canAccessFeatureRoute(shop, rule)) return <Box sx={{ p: 3 }}><Alert severity="error">You do not have access to this page.</Alert></Box>;
+  return children;
+}
+
 const router = createBrowserRouter([
   { path: "/login", element: <RouteContent><AuthPage mode="login" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
   { path: "/register", element: <RouteContent><AuthPage mode="register" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
@@ -94,8 +103,8 @@ const router = createBrowserRouter([
       { path: "price/history", element: <RouteContent><PriceHistory /></RouteContent> },
       { path: "price/promotion/:campaignId/report", element: <RouteContent><PromotionReport /></RouteContent> },
       { path: "report", element: <RouteContent><Report /></RouteContent> },
-      { path: "report/products", element: <RouteContent><ProductReport /></RouteContent> },
-      { path: "report/sales", element: <RouteContent><SalesReport /></RouteContent> },
+      { path: "report/products", element: <FeatureRoute rule="report.viewSales"><RouteContent><ProductReport /></RouteContent></FeatureRoute> },
+      { path: "report/sales", element: <FeatureRoute rule="report.viewSales"><RouteContent><SalesReport /></RouteContent></FeatureRoute> },
       { path: "sale-record", element: <RouteContent><SaleRecord /></RouteContent> },
       { path: "suppliers", element: <RouteContent><Suppliers /></RouteContent> },
       { path: "suppliers/add", element: <RouteContent><AddSupplier /></RouteContent> },
@@ -108,10 +117,10 @@ const router = createBrowserRouter([
       { path: "settings/categories", element: <RouteContent><CategoryManagement /></RouteContent> },
       { path: "settings/payment-methods", element: <RouteContent><PaymentMethodManagement /></RouteContent> },
       { path: "settings/shop-details", element: <RouteContent><ShopDetailsPage /></RouteContent> },
-      { path: "settings/staff-access", element: <RouteContent><StaffAccessPage /></RouteContent> },
-      { path: "branches", element: <RouteContent><BranchesPage /></RouteContent> },
-      { path: "report/payments", element: <RouteContent><PaymentReportPage /></RouteContent> },
-      { path: "report/operations", element: <RouteContent><OperationsPage /></RouteContent> },
+      { path: "settings/staff-access", element: <FeatureRoute rule="staff-access"><RouteContent><StaffAccessPage /></RouteContent></FeatureRoute> },
+      { path: "branches", element: <FeatureRoute rule="branches"><RouteContent><BranchesPage /></RouteContent></FeatureRoute> },
+      { path: "report/payments", element: <FeatureRoute rule="report.viewSales"><RouteContent><PaymentReportPage /></RouteContent></FeatureRoute> },
+      { path: "report/operations", element: <FeatureRoute rule="audit.view"><RouteContent><OperationsPage /></RouteContent></FeatureRoute> },
     ],
   },
 ]);

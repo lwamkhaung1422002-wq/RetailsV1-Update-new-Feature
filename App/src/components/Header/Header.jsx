@@ -46,9 +46,10 @@ export default function Header() {
   const { shop, user, selectShop } = useAuth();
   const accessibleShops = user?.shops || [];
   const hasBranchSelector = accessibleShops.length > 1;
+  const showBranchManagement = Boolean(shop?.isOwner);
   const branchMenu = <Menu anchorEl={shopAnchor} open={Boolean(shopAnchor)} onClose={() => setShopAnchor(null)} PaperProps={{ sx: { minWidth: 220, mt: 1 } }}>
-    <MenuItem onClick={() => { setShopAnchor(null); navigate("/branches"); }}>All branches</MenuItem>
-    <Divider />
+    {showBranchManagement && <MenuItem onClick={() => { setShopAnchor(null); navigate("/branches"); }}>All branches</MenuItem>}
+    {showBranchManagement && <Divider />}
     {accessibleShops.map((entry) => <MenuItem key={entry.id} selected={entry.id === shop?.id} onClick={() => { selectShop(entry); setShopAnchor(null); }}>{entry.name}</MenuItem>)}
   </Menu>;
   useEffect(() => { let active = true; if (!shop?.id) return undefined; api.notifications.list().then((result) => { if (active) setNotifications(result.notifications || []); }).catch(() => {}); return () => { active = false; }; }, [api, shop?.id]);

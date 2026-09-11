@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
 import { usePosApi } from "../hooks/useApiResource";
 
-export default function ApprovalDialog({ open, action, actionLabel, targetId, targetLabel, amountLabel, initialReason = "", onClose, onApproved }) {
+export default function ApprovalDialog({ open, action, actionLabel, targetId, targetLabel, amountLabel, payload, initialReason = "", onClose, onApproved }) {
   const api = usePosApi();
   const [approvers, setApprovers] = useState([]);
   const [approverId, setApproverId] = useState("");
@@ -26,7 +26,7 @@ export default function ApprovalDialog({ open, action, actionLabel, targetId, ta
   const approve = async () => {
     setSaving(true); setError("");
     try {
-      const result = await api.approvals.create({ approverId, pin, action, targetId, reason: reason.trim() });
+      const result = await api.approvals.create({ approverId, pin, action, targetId, payload, reason: reason.trim() });
       await onApproved(result.approvalToken, reason.trim());
       onClose();
     } catch (failure) {

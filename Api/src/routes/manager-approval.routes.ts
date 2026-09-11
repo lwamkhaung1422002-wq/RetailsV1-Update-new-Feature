@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import bcrypt from "bcrypt";
 import { Router } from "express";
 import { z } from "zod";
 
-import { MANAGER_APPROVAL_ACTIONS, signManagerApproval } from "../lib/manager-approval.js";
+import { approvalPayloadFingerprint, MANAGER_APPROVAL_ACTIONS, signManagerApproval } from "../lib/manager-approval.js";
 import { prisma } from "../lib/prisma.js";
 import { assertShopAccess } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -17,6 +18,7 @@ const approvalSchema = z.object({
   pin: z.string().regex(/^\d{6}$/, "PIN must be 6 digits."),
   action: z.enum(Object.keys(MANAGER_APPROVAL_ACTIONS) as [keyof typeof MANAGER_APPROVAL_ACTIONS, ...(keyof typeof MANAGER_APPROVAL_ACTIONS)[]]),
   targetId: z.string().min(1),
+  payload: z.record(z.string(), z.unknown()),
   reason: z.string().trim().min(1).max(500),
 });
 
@@ -93,6 +95,19 @@ managerApprovalRouter.post("/:shopId/approvals", approvalRateLimit, async (reque
     }
     if (!pinHash || !await bcrypt.compare(input.pin, pinHash)) throw forbidden("PIN is incorrect.");
     const permission = MANAGER_APPROVAL_ACTIONS[input.action];
+    const jti = randomUUID();
+    const payloadHash = approvalPayloadFingerprint(input.action, input.payload);
+    const expiresAt = new Date(Date.now() + 90_000);
+    await prisma.managerApprovalToken.create({ data: {
+      id: jti,
+      shopId,
+      requesterId: requester.id,
+      approverId: input.approverId,
+      action: input.action,
+      targetId: input.targetId,
+      payloadHash,
+      expiresAt,
+    } });
     const approvalToken = signManagerApproval({
       kind: "manager-approval",
       requesterId: requester.id,
@@ -102,7 +117,9 @@ managerApprovalRouter.post("/:shopId/approvals", approvalRateLimit, async (reque
       action: input.action,
       permission,
       targetId: input.targetId,
+      payloadHash,
       reason: input.reason,
+      jti,
     });
     response.status(201).json({ approvalToken, expiresInSeconds: 90 });
   } catch (error) {

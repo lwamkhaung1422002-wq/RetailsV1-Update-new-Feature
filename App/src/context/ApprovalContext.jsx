@@ -41,6 +41,7 @@ export function ApprovalProvider({ children }) {
       targetId={pending?.targetId}
       targetLabel={pending?.targetLabel}
       amountLabel={pending?.amountLabel}
+      payload={pending?.payload}
       initialReason={pending?.initialReason}
       onClose={close}
       onApproved={approved}

@@ -10,6 +10,7 @@ vi.mock("../lib/manager-approval.js", () => ({
   approvalAccessToken: () => undefined,
   approvalAuditMetadata: () => ({}),
   authorizeSensitiveAction: vi.fn().mockResolvedValue({ actorRole: "OWNER", authorizationMode: "direct" }),
+  consumeManagerApproval: vi.fn(),
 }));
 vi.mock("../middleware/auth.middleware.js", () => ({ requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(), getAuthUser: () => ({ id: "user-1" }) }));
 import { ordersRouter } from "./orders.routes.js";

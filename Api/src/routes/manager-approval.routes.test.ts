@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   compare: vi.fn(),
   findShop: vi.fn(),
   findMember: vi.fn(),
+  createApprovalToken: vi.fn(),
+  fingerprint: vi.fn(),
   sign: vi.fn(),
 }));
 
@@ -15,11 +17,13 @@ vi.mock("../lib/prisma.js", () => ({
   prisma: {
     shop: { findUniqueOrThrow: mocks.findShop },
     shopMember: { findUnique: mocks.findMember },
+    managerApprovalToken: { create: mocks.createApprovalToken },
   },
 }));
 vi.mock("../lib/shop-access.js", () => ({ assertShopAccess: mocks.assertShopAccess }));
 vi.mock("../lib/manager-approval.js", () => ({
   MANAGER_APPROVAL_ACTIONS: { "payment.refund": "payment.refund" },
+  approvalPayloadFingerprint: mocks.fingerprint,
   signManagerApproval: mocks.sign,
 }));
 vi.mock("../middleware/auth.middleware.js", () => ({
@@ -44,6 +48,7 @@ const approval = {
   pin: "123456",
   action: "payment.refund",
   targetId: "order-1",
+  payload: { orderId: "order-1", amount: 20_000, method: "Cash" },
   reason: "Customer request",
 };
 
@@ -54,6 +59,7 @@ describe("manager approval endpoint", () => {
     mocks.findShop.mockResolvedValue({ ownerId: "owner-1", approvalPinHash: "owner-hash" });
     mocks.findMember.mockResolvedValue({ role: "MANAGER", active: true, approvalPinHash: "manager-hash" });
     mocks.compare.mockResolvedValue(true);
+    mocks.fingerprint.mockReturnValue("payload-hash");
     mocks.sign.mockReturnValue("approval-token");
   });
 
@@ -61,7 +67,8 @@ describe("manager approval endpoint", () => {
     const result = await request(app).post("/shop-1/approvals").send({ ...approval, approverId: "owner-1" }).expect(201);
     expect(result.body.approvalToken).toBe("approval-token");
     expect(mocks.compare).toHaveBeenCalledWith("123456", "owner-hash");
-    expect(mocks.sign).toHaveBeenCalledWith(expect.objectContaining({ shopId: "shop-1", requesterId: "cashier-1", approverId: "owner-1", approverRole: "OWNER" }));
+    expect(mocks.createApprovalToken).toHaveBeenCalledWith({ data: expect.objectContaining({ shopId: "shop-1", requesterId: "cashier-1", approverId: "owner-1", payloadHash: "payload-hash" }) });
+    expect(mocks.sign).toHaveBeenCalledWith(expect.objectContaining({ shopId: "shop-1", requesterId: "cashier-1", approverId: "owner-1", approverRole: "OWNER", payloadHash: "payload-hash", jti: expect.any(String) }));
   });
 
   it("allows an active same-Shop Manager to approve", async () => {

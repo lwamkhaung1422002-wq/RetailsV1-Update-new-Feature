@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import jwt from "jsonwebtoken";
 
+import type { Prisma } from "../generated/prisma/client.js";
 import { assertShopAccess, hasShopPermission, type ShopAccess, type ShopPermission, type ShopRole } from "./shop-access.js";
 
 export const MANAGER_APPROVAL_ACTIONS = {
@@ -20,7 +22,9 @@ type ApprovalClaims = {
   action: ManagerApprovalAction;
   permission: ShopPermission;
   targetId: string;
+  payloadHash: string;
   reason: string;
+  jti: string;
 };
 
 export type ActionAuthorization = {
@@ -29,6 +33,7 @@ export type ActionAuthorization = {
   approvedById?: string;
   approvedByRole?: ShopRole;
   reason?: string;
+  approvalTokenId?: string;
 };
 
 function approvalSecret(): string {
@@ -39,6 +44,32 @@ function approvalSecret(): string {
 
 function forbidden(message: string): Error {
   return Object.assign(new Error(message), { name: "ForbiddenError" });
+}
+
+const forbiddenPayloadKeys = new Set(["pin", "password", "secret", "token", "approvaltoken"]);
+
+function canonicalPayload(value: unknown): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw forbidden("Approval payload is invalid.");
+    return value;
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(canonicalPayload);
+  if (typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => {
+        if (forbiddenPayloadKeys.has(key.toLowerCase())) throw forbidden("Approval payload contains a protected field.");
+        return [key, canonicalPayload(entry)];
+      }));
+  }
+  throw forbidden("Approval payload is invalid.");
+}
+
+export function approvalPayloadFingerprint(action: ManagerApprovalAction, payload: unknown): string {
+  return createHash("sha256").update(JSON.stringify({ action, payload: canonicalPayload(payload) })).digest("hex");
 }
 
 export function signManagerApproval(input: ApprovalClaims): string {
@@ -56,6 +87,7 @@ export async function authorizeSensitiveAction(input: {
   shopId: string;
   action: ManagerApprovalAction;
   targetId: string;
+  payload: unknown;
   approvalToken: string | undefined;
 }): Promise<ActionAuthorization> {
   const access = await assertShopAccess(input.requesterId, input.shopId);
@@ -75,6 +107,7 @@ export async function authorizeSensitiveAction(input: {
     || claims.action !== input.action
     || claims.permission !== permission
     || claims.targetId !== input.targetId
+    || claims.payloadHash !== approvalPayloadFingerprint(input.action, input.payload)
   ) throw forbidden("Approval does not match this action.");
   return {
     actorRole: access.role,
@@ -82,7 +115,21 @@ export async function authorizeSensitiveAction(input: {
     approvedById: claims.approverId,
     approvedByRole: claims.approverRole,
     reason: claims.reason,
+    approvalTokenId: claims.jti,
   };
+}
+
+export async function consumeManagerApproval(
+  tx: Pick<Prisma.TransactionClient, "managerApprovalToken">,
+  authorization: ActionAuthorization,
+): Promise<void> {
+  if (authorization.authorizationMode === "direct") return;
+  if (!authorization.approvalTokenId) throw forbidden("Approval is invalid or expired.");
+  const consumed = await tx.managerApprovalToken.updateMany({
+    where: { id: authorization.approvalTokenId, consumedAt: null, expiresAt: { gt: new Date() } },
+    data: { consumedAt: new Date() },
+  });
+  if (consumed.count !== 1) throw forbidden("Approval has already been used or expired.");
 }
 
 export function approvalAuditMetadata(authorization: ActionAuthorization) {

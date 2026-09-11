@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
-import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction } from "../lib/manager-approval.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import {
   activateDuePriceEntries,
   assertPricingTarget,
@@ -388,9 +388,10 @@ pricingRouter.get("/:shopId/prices", async (request, response, next) => {
 pricingRouter.post("/:shopId/prices", async (request, response, next) => {
   try {
     const auth = getAuthUser(request); const { shopId } = shopParams.parse(request.params); const input = priceChangeInput.parse(request.body); await assertUserOwnsShop(auth.id, shopId);
-    const authorization = await authorizeSensitiveAction({ requesterId: auth.id, shopId, action: "price.override", targetId: input.productId, approvalToken: approvalAccessToken(request.headers) });
+    const authorization = await authorizeSensitiveAction({ requesterId: auth.id, shopId, action: "price.override", targetId: input.productId, payload: input, approvalToken: approvalAccessToken(request.headers) });
     if (input.effectiveTo && input.effectiveTo <= input.effectiveFrom) throw badRequest("Price end time must be after its start time.");
     const entry = await prisma.$transaction(async (tx) => {
+      await consumeManagerApproval(tx, authorization);
       const target = await assertPricingTarget(tx, shopId, input); assertPriceAtOrAboveCost(input.unitPrice, target.product.cost); const book = await ensureDefaultPriceBook(tx, shopId); const now = new Date();
       const targetKey = priceTargetKey(input.productId, input.variantId, input.productUnitId);
       if (input.effectiveFrom <= now) {

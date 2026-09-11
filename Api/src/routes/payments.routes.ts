@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { writeAuditLog } from "../lib/audit-log.js";
-import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction } from "../lib/manager-approval.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import { prisma } from "../lib/prisma.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -451,8 +451,6 @@ paymentsRouter.post("/:shopId/orders/:orderId/refunds", async (request, response
     const orderId = z.string().min(1).parse(request.params.orderId);
     const input = refundPaymentSchema.parse(request.body);
 
-    const authorization = await authorizeSensitiveAction({ requesterId: authUser.id, shopId, action: "payment.refund", targetId: orderId, approvalToken: approvalAccessToken(request.headers) });
-
     await assertUserOwnsShop(authUser.id, shopId);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -481,9 +479,20 @@ paymentsRouter.post("/:shopId/orders/:orderId/refunds", async (request, response
       const paidAmount = await paidAmountForOrder(tx, shopId, order.id);
       const refundAmount = input.amount ?? paidAmount;
 
+      const authorization = await authorizeSensitiveAction({
+        requesterId: authUser.id,
+        shopId,
+        action: "payment.refund",
+        targetId: orderId,
+        payload: { orderId, ...input, amount: refundAmount },
+        approvalToken: approvalAccessToken(request.headers),
+      });
+
       if (refundAmount <= 0 || refundAmount > paidAmount || (originalPayment && refundAmount > originalPayment.amount)) {
         throw badRequest("Refund amount must be within the paid order balance.");
       }
+
+      await consumeManagerApproval(tx, authorization);
 
       const refund = await tx.payment.create({
         data: {

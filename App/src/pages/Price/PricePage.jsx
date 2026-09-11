@@ -230,7 +230,8 @@ function DesktopPriceForm({ products, categories, promotion, onClose, onPromotio
       if (promotion) {
         await api.pricing.createPromotionCampaign({ name: promotionName.trim(), scope: scope === "individual" ? "PRODUCT" : scope.toUpperCase(), ...(scope === "individual" ? { productId: selectedId } : scope === "category" ? { categoryId: category } : {}), type: "PERCENTAGE", value: Number(percentage), startsAt: new Date(`${start}T00:00:00+06:30`).toISOString(), endsAt: new Date(`${end}T23:59:59+06:30`).toISOString(), state: "SCHEDULED", reason: reason.trim(), timeZone: "Asia/Yangon" });
       } else if (scope === "individual") {
-        await runWithApproval({ permission: "price.edit", action: "price.override", actionLabel: "Price override", targetId: selectedId, targetLabel: selected?.name, amountLabel: money(Number(shownPrice)), initialReason: reason.trim() }, (approvalToken) => api.pricing.createPrice({ productId: selectedId, unitPrice: Number(shownPrice), effectiveFrom: new Date().toISOString(), reason: reason.trim() }, approvalToken));
+        const body = { productId: selectedId, unitPrice: Number(shownPrice), effectiveFrom: new Date().toISOString(), reason: reason.trim() };
+        await runWithApproval({ permission: "price.edit", action: "price.override", actionLabel: "Price override", targetId: selectedId, targetLabel: selected?.name, amountLabel: money(body.unitPrice), payload: body, initialReason: body.reason }, (approvalToken) => api.pricing.createPrice(body, approvalToken));
       } else {
         await api.pricing.bulkPrices({ scope: scope.toUpperCase(), ...(scope === "category" ? { categoryId: category } : {}), marginPercent: Number(percentage), reason: reason.trim() });
       }

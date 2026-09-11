@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
-import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction } from "../lib/manager-approval.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import { recordInventoryMovement } from "../lib/inventory-domain.js";
 import { refreshProductWeightedCost } from "../lib/costing.js";
 import { prisma } from "../lib/prisma.js";
@@ -308,12 +308,20 @@ inventoryRouter.post("/:shopId/inventory/adjustments/by-cost", async (request, r
     const authUser = getAuthUser(request);
     const { shopId } = paramsSchema.parse(request.params);
     const input = costPriceDecreaseSchema.parse(request.body);
-    const authorization = await authorizeSensitiveAction({ requesterId: authUser.id, shopId, action: "stock.adjust", targetId: input.productId, approvalToken: approvalAccessToken(request.headers) });
+    const authorization = await authorizeSensitiveAction({
+      requesterId: authUser.id,
+      shopId,
+      action: "stock.adjust",
+      targetId: input.productId,
+      payload: { mode: "by-cost", ...input, action: "SUB" },
+      approvalToken: approvalAccessToken(request.headers),
+    });
     await assertUserOwnsShop(authUser.id, shopId);
     await assertProductBelongsToShop(input.productId, shopId);
     await assertVariantBelongsToProduct(input.variantId, input.productId);
 
     const result = await prisma.$transaction(async (tx) => {
+      await consumeManagerApproval(tx, authorization);
       const batches = await tx.inventoryBatch.findMany({
         where: { shopId, productId: input.productId, variantId: input.variantId ?? null, unitCost: input.unitCost },
         orderBy: [{ receivedAt: "asc" }, { createdAt: "asc" }],
@@ -377,14 +385,23 @@ inventoryRouter.post(
       // foreign-shop batch cannot leak validation details.
       const scopedBatch = await prisma.inventoryBatch.findFirst({ where: { id: inventoryBatchId, shopId }, select: { id: true, productId: true } });
       if (!scopedBatch) throw notFound("Inventory batch not found.");
-      const authorization = await authorizeSensitiveAction({ requesterId: authUser.id, shopId, action: "stock.adjust", targetId: scopedBatch.productId, approvalToken: approvalAccessToken(request.headers) });
       const input = adjustmentSchema.parse(request.body);
+      const normalizedAction = input.action === "REMOVE" ? "SUB" : input.action;
+      const authorization = await authorizeSensitiveAction({
+        requesterId: authUser.id,
+        shopId,
+        action: "stock.adjust",
+        targetId: scopedBatch.productId,
+        payload: { mode: "batch", productId: scopedBatch.productId, inventoryBatchId, ...input, action: normalizedAction },
+        approvalToken: approvalAccessToken(request.headers),
+      });
 
       if (input.action !== "SET" && input.quantity < 1) {
         throw badRequest("Quantity must be greater than 0.");
       }
 
       const result = await prisma.$transaction(async (tx) => {
+        await consumeManagerApproval(tx, authorization);
         const batch = await tx.inventoryBatch.findFirst({
           where: { id: inventoryBatchId, shopId },
         });
@@ -394,7 +411,7 @@ inventoryRouter.post(
         }
 
         const beforeQuantity = batch.quantity;
-        const action = input.action === "REMOVE" ? "SUB" : input.action;
+        const action = normalizedAction;
         const afterQuantity =
           action === "ADD"
             ? beforeQuantity + input.quantity
@@ -432,7 +449,6 @@ inventoryRouter.post(
             afterQuantity,
             reason: input.reason,
             staffName: input.staffName,
-            ...approvalAuditMetadata(authorization),
           },
         });
 
@@ -450,6 +466,7 @@ inventoryRouter.post(
             afterQuantity,
             reason: input.reason,
             staffName: input.staffName,
+            ...approvalAuditMetadata(authorization),
           },
         });
         const delta = afterQuantity - beforeQuantity;

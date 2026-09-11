@@ -875,8 +875,10 @@ export default function PaymentPage() {
               throw new Error(
                 "Cancel later payment records from Payment before cancelling this order.",
               );
-            if (order.fulfillmentStatus !== "cancelled")
-              await runWithApproval({ permission: "order.cancel", action: "order.cancel", actionLabel: "Cancel paid sale", targetId: order.id, targetLabel: record.name, initialReason: reason }, (approvalToken) => api.orders.cancel(order.id, { reason }, approvalToken));
+            if (order.fulfillmentStatus !== "cancelled") {
+              const body = { reason };
+              await runWithApproval({ permission: "order.cancel", action: "order.cancel", actionLabel: "Cancel paid sale", targetId: order.id, targetLabel: record.name, payload: { orderId: order.id, ...body }, initialReason: reason }, (approvalToken) => api.orders.cancel(order.id, body, approvalToken));
+            }
             await invalidatePaymentData(queryClient, paymentRefreshKeys.order(shop?.id));
             setMobileDialog(null);
           } catch (error) {
@@ -919,12 +921,13 @@ export default function PaymentPage() {
               : activePayments.at(-1);
             if (!selectedPayment)
               throw new Error("This payment has already been cancelled.");
-            await runWithApproval({ permission: "payment.refund", action: "payment.refund", actionLabel: "Refund", targetId: order.id, targetLabel: record.name, amountLabel: `${Number(selectedPayment.amount || 0).toLocaleString()} MMK`, initialReason: reason }, (approvalToken) => api.payments.refundOrder(order.id, {
+            const body = {
               method: selectedPayment.method || "Cash",
               amount: Number(selectedPayment.amount || 0),
               originalPaymentId: selectedPayment.id,
               note: reason,
-            }, approvalToken));
+            };
+            await runWithApproval({ permission: "payment.refund", action: "payment.refund", actionLabel: "Refund", targetId: order.id, targetLabel: record.name, amountLabel: `${body.amount.toLocaleString()} MMK`, payload: { orderId: order.id, ...body }, initialReason: reason }, (approvalToken) => api.payments.refundOrder(order.id, body, approvalToken));
             await invalidatePaymentData(queryClient, paymentRefreshKeys.order(shop?.id));
             setMobileDialog(null);
           } catch (error) {
@@ -937,7 +940,8 @@ export default function PaymentPage() {
           setSavingPayment(true);
           setPaymentError("");
           try {
-            await runWithApproval({ permission: "supplier.pay", action: "supplier.payment.reverse", actionLabel: "Reverse supplier payment", targetId: paymentId, targetLabel: record.name, initialReason: reason }, (approvalToken) => api.suppliers.reverseDeliveryPayment(record.apiId, paymentId, { reason }, approvalToken));
+            const body = { reason: reason.trim() };
+            await runWithApproval({ permission: "supplier.pay", action: "supplier.payment.reverse", actionLabel: "Reverse supplier payment", targetId: paymentId, targetLabel: record.name, payload: { deliveryRecordId: record.apiId, paymentId, ...body }, initialReason: body.reason }, (approvalToken) => api.suppliers.reverseDeliveryPayment(record.apiId, paymentId, body, approvalToken));
             await invalidatePaymentData(queryClient, paymentRefreshKeys.supplier(shop?.id));
             setMobileDialog(null);
           } catch (error) {

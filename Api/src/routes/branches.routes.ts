@@ -5,7 +5,7 @@ import { summarizeBranchInventory } from "../lib/branch-domain.js";
 import { writeAuditLog } from "../lib/audit-log.js";
 import { prisma } from "../lib/prisma.js";
 import { applyTemplateDefaults } from "../lib/store-capabilities.js";
-import { assertShopAccess, assertShopOwner, getAccessibleShops, getShopAccess, hasShopPermission, publicShop } from "../lib/shop-access.js";
+import { assertShopAccess, assertShopOwner, assertShopPermission, getAccessibleShops, getShopAccess, hasShopPermission, publicShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
 export const branchesRouter = Router();
@@ -24,10 +24,13 @@ function yangonDayRange() {
 }
 
 async function accessibleBranchContext(userId: string, activeShopId: string) {
-  await assertShopAccess(userId, activeShopId);
-  const shops = await getAccessibleShops(userId);
+  const activeAccess = await assertShopAccess(userId, activeShopId);
+  const accessibleShops = await getAccessibleShops(userId);
+  const shops = activeAccess.isOwner
+    ? accessibleShops.filter((shop) => shop.isOwner)
+    : accessibleShops.filter((shop) => shop.id === activeShopId);
   const access = new Map((await Promise.all(shops.map((shop) => getShopAccess(userId, shop.id)))).filter((item) => item !== null).map((item) => [item.shopId, item]));
-  return { shops, access };
+  return { shops, access, activeAccess };
 }
 
 branchesRouter.get("/:shopId/branches", async (request, response, next) => {
@@ -35,25 +38,29 @@ branchesRouter.get("/:shopId/branches", async (request, response, next) => {
     const auth = getAuthUser(request);
     const { shopId } = params.parse(request.params);
     const { shops, access } = await accessibleBranchContext(auth.id, shopId);
-    const shopIds = shops.map((shop) => shop.id);
+    const salesShopIds = shops.filter((shop) => hasShopPermission(access.get(shop.id)!, "report.viewSales")).map((shop) => shop.id);
+    const inventoryShopIds = shops.filter((shop) => hasShopPermission(access.get(shop.id)!, "stock.view") || hasShopPermission(access.get(shop.id)!, "report.viewCost")).map((shop) => shop.id);
     const [orders, balances, members] = await Promise.all([
-      prisma.order.findMany({ where: { shopId: { in: shopIds }, createdAt: yangonDayRange(), fulfillmentStatus: { not: "cancelled" } }, select: { shopId: true, total: true } }),
-      prisma.inventoryBalance.findMany({ where: { shopId: { in: shopIds } }, include: { product: { select: { name: true, sku: true, minimumStock: true, cost: true } } } }),
-      prisma.shopMember.findMany({ where: { shopId: { in: shopIds }, active: true }, select: { shopId: true } }),
+      prisma.order.findMany({ where: { shopId: { in: salesShopIds }, createdAt: yangonDayRange(), fulfillmentStatus: { not: "cancelled" } }, select: { shopId: true, total: true } }),
+      prisma.inventoryBalance.findMany({ where: { shopId: { in: inventoryShopIds } }, include: { product: { select: { name: true, sku: true, minimumStock: true, cost: true } } } }),
+      prisma.shopMember.findMany({ where: { shopId: { in: shops.map((shop) => shop.id) }, active: true }, select: { shopId: true } }),
     ]);
     const inventory = summarizeBranchInventory(balances);
     response.json({ branches: shops.map((shop) => {
       const branchOrders = orders.filter((order) => order.shopId === shop.id);
       const branchInventory = inventory.filter((item) => item.shopId === shop.id);
       const branchAccess = access.get(shop.id)!;
+      const canViewSales = hasShopPermission(branchAccess, "report.viewSales");
+      const canViewStock = hasShopPermission(branchAccess, "stock.view");
+      const canViewCost = hasShopPermission(branchAccess, "report.viewCost");
       return {
         id: shop.id, name: shop.name, address: shop.address, logoUrl: shop.logoUrl, setting: shop.setting,
         role: branchAccess.role, permissions: branchAccess.permissions, isOwner: branchAccess.isOwner,
-        todaySales: branchOrders.reduce((sum, order) => sum + order.total, 0),
-        orders: branchOrders.length,
-        lowStock: branchInventory.filter((item) => item.available <= item.minimumStock).length,
-        stockValue: hasShopPermission(branchAccess, "report.viewCost") ? branchInventory.reduce((sum, item) => sum + item.stockValue, 0) : null,
-        staff: members.filter((member) => member.shopId === shop.id).length,
+        todaySales: canViewSales ? branchOrders.reduce((sum, order) => sum + order.total, 0) : null,
+        orders: canViewSales ? branchOrders.length : null,
+        lowStock: canViewStock ? branchInventory.filter((item) => item.available <= item.minimumStock).length : null,
+        stockValue: canViewCost ? branchInventory.reduce((sum, item) => sum + item.stockValue, 0) : null,
+        staff: branchAccess.isOwner || hasShopPermission(branchAccess, "staff.manage") ? members.filter((member) => member.shopId === shop.id).length : null,
       };
     }) });
   } catch (error) { next(error); }
@@ -63,7 +70,8 @@ branchesRouter.get("/:shopId/branches/inventory", async (request, response, next
   try {
     const auth = getAuthUser(request);
     const { shopId } = params.parse(request.params);
-    const { shops, access } = await accessibleBranchContext(auth.id, shopId);
+    const { shops, access, activeAccess } = await accessibleBranchContext(auth.id, shopId);
+    if (!activeAccess.isOwner) await assertShopPermission(auth.id, shopId, "stock.view");
     const visibleShops = shops.filter((shop) => hasShopPermission(access.get(shop.id)!, "stock.view"));
     const balances = await prisma.inventoryBalance.findMany({ where: { shopId: { in: visibleShops.map((shop) => shop.id) } }, include: { product: { select: { name: true, sku: true, minimumStock: true, cost: true } } } });
     const shopById = new Map(visibleShops.map((shop) => [shop.id, shop]));
