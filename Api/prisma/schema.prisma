@@ -294,6 +294,8 @@ model InventoryBatch {
   reservedQuantity Int                   @default(0)
   unitCost         Int
   receivedAt       DateTime              @default(now())
+  supplierName     String?
+  invoiceReference String?
   note             String?
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt

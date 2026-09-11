@@ -46,6 +46,7 @@ import { normalizeBarcode } from "../../lib/barcodeScanner";
 import { queryKeys } from "../../lib/queryKeys";
 import { useAuth } from "../../context/AuthContext";
 import { useManagerApproval } from "../../context/approval-context";
+import { initialStockReceiptPayload } from "./stockReceiptSource";
 
 const emptyForm = {
   name: "",
@@ -57,6 +58,8 @@ const emptyForm = {
   cost: "0",
   price: "0",
   stock: "0",
+  supplierName: "",
+  invoiceReference: "",
   unitId: "",
   minimum: "10",
 };
@@ -144,6 +147,8 @@ export default function AddProductPage() {
             cost: String(product.cost ?? 0),
             price: String(product.price ?? 0),
             stock: String(stock),
+            supplierName: "",
+            invoiceReference: "",
             unitId: baseUnit?.unitId || nextUnits[0]?.id || "",
             minimum: "10",
           });
@@ -348,13 +353,14 @@ export default function AddProductPage() {
           ? { shortCode: form.shortCode.trim().toUpperCase() }
           : {}),
       });
-      if (Number(form.stock) > 0)
-        await api.inventory.create({
-          productId: result.product.id,
-          quantity: Number(form.stock),
-          unitCost: Number(form.cost),
-          note: "Initial stock created with product.",
-        });
+      const initialStockReceipt = initialStockReceiptPayload({
+        productId: result.product.id,
+        stock: form.stock,
+        cost: form.cost,
+        supplierName: form.supplierName,
+        invoiceReference: form.invoiceReference,
+      });
+      if (initialStockReceipt) await api.inventory.create(initialStockReceipt);
       setMessage({
         severity: "success",
         text: barcode
@@ -451,6 +457,7 @@ export default function AddProductPage() {
           />
           <UnitField {...props} />
         </Box>
+        {!isEditMode && <StockSourceFields form={form} update={update} />}
         <Field
           label="Minimum Stock Alert Level (Optional)"
           value={form.minimum}
@@ -644,6 +651,14 @@ function UnitField({ form, update, units }) {
     </Field>
   );
 }
+function StockSourceFields({ form, update }) {
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
+      <Field label="Supplier (Optional)" value={form.supplierName} onChange={update("supplierName")} />
+      <Field label="Invoice / Reference No. (Optional)" value={form.invoiceReference} onChange={update("invoiceReference")} />
+    </Box>
+  );
+}
 function DesktopAddProduct(props) {
   const {
     form,
@@ -675,6 +690,7 @@ function DesktopAddProduct(props) {
           <Box sx={{ gridColumn: "1 / -1" }}><PricingFields form={form} update={update} /></Box>
           <Field label="Stock Quantity" value={form.stock} onChange={update("stock")} icon={<Inventory2RoundedIcon />} disabled={isEditMode && hasSaleHistory} helperText={isEditMode && hasSaleHistory ? "Locked after sale history." : undefined} />
           <UnitField form={form} update={update} units={units} />
+          {!isEditMode && <><Field label="Supplier (Optional)" value={form.supplierName} onChange={update("supplierName")} /><Field label="Invoice / Reference No. (Optional)" value={form.invoiceReference} onChange={update("invoiceReference")} /></>}
           <Box sx={{ gridColumn: "1 / -1" }}><Field
             label="Minimum Stock Alert Level (Optional)"
             value={form.minimum}

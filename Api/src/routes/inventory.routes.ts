@@ -28,6 +28,8 @@ const createInventoryBatchSchema = z.object({
   deliveryCost: moneySchema.optional(),
   deliveryMethod: z.string().trim().optional(),
   receivedAt: z.coerce.date().optional(),
+  supplierName: z.string().trim().max(160).optional(),
+  invoiceReference: z.string().trim().max(160).optional(),
   note: z.string().trim().optional(),
 });
 
@@ -135,7 +137,11 @@ inventoryRouter.get("/:shopId/inventory-movements", async (request, response, ne
     await assertUserOwnsShop(authUser.id, shopId);
     const movements = await prisma.inventoryMovement.findMany({
       where: { shopId, ...(query.productId ? { productId: query.productId } : {}) },
-      include: { product: { include: { barcodes: { where: { status: "ACTIVE" } } } }, variant: true },
+      include: {
+        product: { include: { barcodes: { where: { status: "ACTIVE" } } } },
+        variant: true,
+        inventoryBatch: { select: { supplierName: true, invoiceReference: true } },
+      },
       orderBy: { occurredAt: "desc" },
       take: query.limit,
     });
@@ -151,7 +157,12 @@ inventoryRouter.get("/:shopId/inventory-movements", async (request, response, ne
     const orderIdByItemId = new Map(orderItems.map((item) => [item.id, item.orderId]));
     const invoiceByOrderId = new Map(orders.map((order) => [order.id, order.orderNumber || order.id]));
     const invoiceByAllocationId = new Map(allocations.map((allocation) => [allocation.id, invoiceByOrderId.get(orderIdByItemId.get(allocation.orderItemId) || "")]));
-    response.status(200).json({ movements: movements.map((movement) => ({ ...movement, invoiceNumber: movement.sourceType === "OrderItemAllocation" && movement.sourceId ? invoiceByAllocationId.get(movement.sourceId.split(":")[0] ?? "") ?? null : null })) });
+    response.status(200).json({ movements: movements.map(({ inventoryBatch, ...movement }) => ({
+      ...movement,
+      supplierName: inventoryBatch?.supplierName ?? null,
+      invoiceReference: inventoryBatch?.invoiceReference ?? null,
+      invoiceNumber: movement.sourceType === "OrderItemAllocation" && movement.sourceId ? invoiceByAllocationId.get(movement.sourceId.split(":")[0] ?? "") ?? null : null,
+    })) });
   } catch (error) {
     next(error);
   }
@@ -174,6 +185,8 @@ inventoryRouter.post("/:shopId/inventory", async (request, response, next) => {
       unitCost: input.unitCost,
       ...(input.variantId !== undefined ? { variantId: input.variantId } : {}),
       ...(input.receivedAt !== undefined ? { receivedAt: input.receivedAt } : {}),
+      ...(input.supplierName ? { supplierName: input.supplierName } : {}),
+      ...(input.invoiceReference ? { invoiceReference: input.invoiceReference } : {}),
       ...(input.note !== undefined ? { note: input.note } : {}),
     };
 
@@ -211,6 +224,8 @@ inventoryRouter.post("/:shopId/inventory", async (request, response, next) => {
           variantId: input.variantId ?? null,
           quantity: input.quantity,
           unitCost: input.unitCost,
+          supplierName: input.supplierName || null,
+          invoiceReference: input.invoiceReference || null,
           deliveryCost: input.deliveryCost ?? 0,
         },
       });
