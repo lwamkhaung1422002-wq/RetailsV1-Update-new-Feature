@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { isFinancialRefund } from "../lib/financial-domain.js";
-import { paymentMethodFor, paymentReportMetrics } from "../lib/payment-report.js";
+import { paymentMethodFor, paymentReportCashMovements, paymentReportMetrics } from "../lib/payment-report.js";
 import { prisma } from "../lib/prisma.js";
 import { assertShopPermission } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -49,7 +49,8 @@ paymentReportRouter.get("/:shopId/reports/payments", async (request, response, n
     const actorIds = [...new Set(audits.flatMap((audit) => [audit.actorId, typeof audit.metadata === "object" && audit.metadata !== null && "approvedById" in audit.metadata ? String(audit.metadata.approvedById) : null]).filter((id): id is string => Boolean(id)))];
     const users = await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } });
     const usersById = new Map(users.map((user) => [user.id, user]));
-    const attributed = periodPayments.map((payment) => ({ payment, audit: auditByPayment.get(payment.id) }));
+    const cashMovements = paymentReportCashMovements(periodPayments);
+    const attributed = cashMovements.map((payment) => ({ payment, audit: auditByPayment.get(payment.id) }));
     const staffFiltered = attributed.filter(({ audit }) => !query.staffId || (query.staffId === "unassigned" ? !audit?.actorId : audit?.actorId === query.staffId));
     const methodFiltered = staffFiltered.filter(({ payment }) => !query.method || paymentMethodFor(payment, byId) === query.method);
     const selectedPayments = methodFiltered.map(({ payment }) => payment);
@@ -75,7 +76,7 @@ paymentReportRouter.get("/:shopId/reports/payments", async (request, response, n
         { status: "Collected", count: selectedPayments.filter((payment) => payment.type === "payment" && payment.scope !== "cod-settlement-void").length, amount: summary.collected },
         { status: "Refunded", count: selectedPayments.filter(isFinancialRefund).length, amount: summary.refunds },
       ],
-      staff: users.filter((user) => audits.some((audit) => audit.actorId === user.id)),
+      staff: users.filter((user) => attributed.some(({ audit }) => audit?.actorId === user.id)),
       recent: methodFiltered.slice(0, 50).map(({ payment, audit }) => {
         const metadata = typeof audit?.metadata === "object" && audit.metadata !== null ? audit.metadata : {};
         const approvedById = "approvedById" in metadata ? String(metadata.approvedById) : null;
