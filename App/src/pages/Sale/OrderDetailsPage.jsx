@@ -20,6 +20,7 @@ import { useLocation, useNavigate, useParams } from "react-router";
 import { useTheme } from "@mui/material/styles";
 import { usePosApi } from "../../hooks/useApiResource";
 import { useOrderQuery } from "../../hooks/usePosQueries";
+import { buildExchangeReceiptHtml, buildInvoiceReceiptHtml } from "../../lib/receipt";
 import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
 import ExchangeDialog from "../../components/ExchangeDialog";
 
@@ -41,6 +42,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
     refetch: refetchOrder,
   } = useOrderQuery(orderId);
   const record = orderResult?.order || null;
+  const receipt = orderResult?.receipt || null;
   const [shop, setShop] = useState(null);
   const [loadError, setLoadError] = useState("");
   const viewportIsMobile = useMediaQuery("(max-width:768px)");
@@ -111,7 +113,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
       ),
       status: record.fulfillmentStatus === "cancelled" ? "Cancel" : "Done",
       paymentMethod: (() => {
-        const payment = [...(record.payments || [])]
+        const payment = [...(receipt?.payments || [])]
           .filter((entry) => Number(entry.amount || 0) > 0)
           .sort(
             (left, right) =>
@@ -120,11 +122,10 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
           )[0];
         return payment?.method === "KBZ Pay"
           ? "KPay"
-          : payment?.method ||
-              (record.paymentStatus === "unpaid" ? "Unpaid" : "Cash");
+          : payment?.method || (record.paymentStatus === "unpaid" ? "Unpaid" : "—");
       })(),
     };
-  }, [record]);
+  }, [record, receipt]);
   if (!order)
     return (
       <Box sx={{ minHeight: "100vh", bgcolor: colors.page, p: 3 }}>
@@ -148,34 +149,14 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
     );
 
   const orderItems = (record.items || []).map((item) => {
-    const quantity = Number(item.quantity || 0);
-    const sellUnitPrice = Number(item.regularUnitPrice ?? item.unitPrice ?? 0);
     return {
       ...item,
-      sellUnitPrice,
-      sellLineTotal: sellUnitPrice * quantity,
-      appliedDiscount: Math.max(
-        0,
-        sellUnitPrice * quantity - Number(item.lineTotal || 0),
-      ),
+      sellUnitPrice: Number(item.unitPrice || 0),
+      sellLineTotal: Number(item.lineTotal || 0),
     };
   });
-  const subtotal =
-    orderItems.reduce((sum, item) => sum + item.sellLineTotal, 0) ||
-    order.subtotal;
-  const discount =
-    order.discount +
-    orderItems.reduce((sum, item) => sum + item.appliedDiscount, 0);
-  const promotionNames = [
-    ...new Set(
-      orderItems
-        .map((item) => item.pricingSnapshot?.promotionName)
-        .filter(Boolean),
-    ),
-  ];
-  const discountLabel = promotionNames.length
-    ? `Discount (${promotionNames.join(", ")})`
-    : "Discount";
+  const subtotal = Number(receipt?.totals?.subtotal ?? record.subtotal ?? 0);
+  const discount = Number(receipt?.totals?.orderDiscount ?? record.discount ?? 0);
   const paymentRecords = [...(record.payments || [])]
     .filter((payment) => Number(payment.amount || 0) > 0)
     .sort(
@@ -183,15 +164,12 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
         new Date(left.paidAt || left.createdAt) -
         new Date(right.paidAt || right.createdAt),
     );
-  const paymentActivity = [...(record.payments || [])].sort(
+  const paymentActivity = [...(receipt?.payments || [])].sort(
     (left, right) =>
       new Date(left.paidAt || left.createdAt) -
       new Date(right.paidAt || right.createdAt),
   );
-  const paidAmount = paymentActivity.reduce(
-    (sum, payment) => sum + Number(payment.amount || 0),
-    0,
-  );
+  const paidAmount = Number(receipt?.totals?.paid ?? 0);
   const activePaymentRecordCount = paymentRecords.filter(
     (payment) =>
       !(record.payments || []).some(
@@ -200,7 +178,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
           reversal.originalPaymentId === payment.id,
       ),
   ).length;
-  const remainingAmount = Math.max(0, Number(record.total || 0) - paidAmount);
+  const remainingAmount = Number(receipt?.totals?.outstanding ?? 0);
   const showPaymentSummary =
     paymentActivity.length > 0 ||
     ["unpaid", "partial"].includes(
@@ -307,15 +285,22 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
       setLoadError("Allow pop-ups to print this receipt.");
       return;
     }
-    const rows = (record.items || [])
-      .map(
-        (item) =>
-          `<tr><td><strong>${escapeHtml(item.productName || item.product?.name || "Item")}</strong><br><span>${Number(item.quantity)} x ${formatKyat(Number(item.unitPrice || 0))}</span></td><td>${formatKyat(Number(item.lineTotal || 0))}</td></tr>`,
-      )
-      .join("");
-    popup.document.write(
-      `<!doctype html><html><head><title>Invoice ${escapeHtml(order.id)}</title><style>@page{size:80mm auto;margin:0}*{box-sizing:border-box}body{width:80mm;margin:0;color:#000;background:#fff;font:12px Arial,sans-serif}.receipt{width:72mm;margin:0 auto;padding:4mm 0}.brand{text-align:center;border-bottom:2px solid #000;padding:0 0 3mm}.brand h1{margin:0;font-size:17px;letter-spacing:.5px}.brand p{margin:1.5mm 0 0;font-size:10px}.invoice{display:flex;justify-content:space-between;align-items:center;margin:3mm 0;font-weight:700}.invoice b{font-size:14px}.meta{border:1px solid #000;padding:2.5mm;line-height:1.65;font-size:10px}.meta strong{display:inline-block;min-width:31mm}table{width:100%;border-collapse:collapse;margin-top:3mm}th{border-bottom:1.5px solid #000;padding:1.5mm 0;text-align:left;font-size:10px}th:last-child,td:last-child{text-align:right}td{vertical-align:top;border-bottom:1px dashed #777;padding:2mm 0}td span{font-size:10px}.summary{margin-top:3mm;border-top:1.5px solid #000;padding-top:2mm}.summary div{display:flex;justify-content:space-between;padding:.7mm 0}.summary .total{border-top:1.5px solid #000;margin-top:1mm;padding-top:2mm;font-size:15px;font-weight:700}.foot{border-top:1px solid #000;margin-top:4mm;padding-top:3mm;text-align:center;font-size:10px;line-height:1.5}</style></head><body><main class="receipt"><header class="brand"><h1>${escapeHtml(shop?.name || "POS INVOICE")}</h1><p>${escapeHtml(shop?.address || "Thank you for shopping with us.")}</p></header><section class="invoice"><span>INVOICE</span><b>${escapeHtml(order.id)}</b></section><section class="meta"><div><strong>Date</strong>${escapeHtml(`${order.date} ${order.time}`)}</div><div><strong>Payment status</strong>${escapeHtml(order.paymentStatus)}</div><div><strong>Payment method</strong>${escapeHtml(order.paymentMethod)}</div><div><strong>Total quantity</strong>${order.quantity} item(s)</div></section><table><thead><tr><th>ITEM</th><th>AMOUNT</th></tr></thead><tbody>${rows}</tbody></table><section class="summary"><div><span>Subtotal</span><span>${formatKyat(subtotal)}</span></div><div><span>Discount</span><span>${discount > 0 ? `- ${formatKyat(discount)}` : formatKyat(0)}</span></div><div class="total"><span>TOTAL</span><span>${formatKyat(order.amount)}</span></div></section><footer class="foot"><strong>Thank you for shopping.</strong><br>We appreciate your business.</footer></main><script>window.onload=()=>window.print();window.onafterprint=()=>window.close();</script></body></html>`,
-    );
+    if (!receipt) {
+      popup.close();
+      setLoadError("Receipt data is unavailable. Refresh and try again.");
+      return;
+    }
+    popup.document.write(buildInvoiceReceiptHtml(receipt, { reprint: true }));
+    popup.document.close();
+  };
+  const printExchange = (exchange) => {
+    const popup = window.open("", "_blank", "width=420,height=720");
+    if (!popup || !receipt) {
+      popup?.close();
+      setLoadError("Receipt data is unavailable. Refresh and try again.");
+      return;
+    }
+    popup.document.write(buildExchangeReceiptHtml(receipt, exchange, { reprint: true }));
     popup.document.close();
   };
   const shareInvoice = async () => {
@@ -737,7 +722,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
               <Stack spacing={1.25}>
                 <DetailRow label="Subtotal" value={formatKyat(subtotal)} />
                 <DetailRow
-                  label={discountLabel}
+                  label="Order Discount"
                   value={
                     discount > 0 ? `- ${formatKyat(discount)}` : formatKyat(0)
                   }
@@ -839,6 +824,31 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                     </Stack>
                   </>
                 )}
+              </CardContent>
+            </Card>
+          )}
+          {(receipt?.returns?.length > 0 || receipt?.refunds?.length > 0 || receipt?.exchanges?.length > 0) && (
+            <Card sx={{ ...cardSx, mt: 2 }}>
+              <CardContent sx={{ p: isMobile ? 2.5 : 3, "&:last-child": { pb: isMobile ? 2.5 : 3 } }}>
+                <Typography sx={{ fontSize: isMobile ? 22 : 23, fontWeight: 700 }}>Adjustments</Typography>
+                <Divider sx={{ my: 2, borderColor: colors.divider }} />
+                <Stack spacing={1.5}>
+                  {receipt.returns.map((entry) => <DetailRow key={entry.id} label="Return Reference" value={entry.id} />)}
+                  {receipt.refunds.map((entry) => <DetailRow key={entry.id} label="Refund Reference" value={`${entry.id} · ${formatKyat(Math.abs(Number(entry.amount || 0)))}`} />)}
+                  {receipt.exchanges.map((exchange) => (
+                    <Box key={exchange.id} sx={{ p: 1.5, borderRadius: 1.5, bgcolor: isDark ? "rgba(255,255,255,.05)" : "#f7f9fc" }}>
+                      <DetailRow label="Exchange Reference" value={exchange.id} />
+                      <DetailRow label="Original Invoice" value={exchange.originalInvoice.invoiceNumber} />
+                      <DetailRow label="Replacement Invoice" value={exchange.replacementInvoice.invoiceNumber} />
+                      <DetailRow label="Returned Value" value={formatKyat(exchange.returnedValue)} />
+                      <DetailRow label="Replacement Value" value={formatKyat(exchange.replacementValue)} />
+                      <DetailRow label={exchange.differenceType === "refund" ? "Refund" : exchange.differenceType === "customer-payment" ? "Customer Paid" : "Difference"} value={formatKyat(Math.abs(exchange.difference))} />
+                      <Button fullWidth variant="outlined" startIcon={<PrintRoundedIcon />} onClick={() => printExchange(exchange)} sx={{ mt: 1.5, textTransform: "none", fontWeight: 700 }}>
+                        Print Exchange
+                      </Button>
+                    </Box>
+                  ))}
+                </Stack>
               </CardContent>
             </Card>
           )}

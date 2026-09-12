@@ -1,0 +1,46 @@
+const escapeHtml = (value) => String(value ?? "").replace(
+  /[&<>'"]/g,
+  (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character],
+);
+
+const money = (value) => `${new Intl.NumberFormat("en-US").format(Number(value || 0))} MMK`;
+const dateTime = (value) => value ? new Date(value).toLocaleString() : "-";
+const invoiceNumber = (value) => escapeHtml(value || "-");
+
+function promotionName(item) {
+  const snapshot = item?.pricingSnapshot;
+  return snapshot && typeof snapshot === "object" && snapshot.promotionName
+    ? String(snapshot.promotionName)
+    : "";
+}
+
+export function buildInvoiceReceiptHtml(receipt, { reprint = true } = {}) {
+  const itemRows = receipt.items.map((item) => {
+    const adjustments = [
+      promotionName(item) ? `Promotion: ${escapeHtml(promotionName(item))}` : "",
+      Number(item.promotionDiscount) > 0 ? `Promotion discount: -${money(item.promotionDiscount)}` : "",
+      Number(item.manualDiscount) > 0 ? `Manual discount: -${money(item.manualDiscount)}` : "",
+      Number(item.itemDiscount) > 0 ? `Item discount: -${money(item.itemDiscount)}` : "",
+    ].filter(Boolean).join("<br>");
+    return `<tr><td><strong>${escapeHtml(item.name)}</strong>${item.variantName ? ` / ${escapeHtml(item.variantName)}` : ""}<br><span>${escapeHtml(item.quantity)} x ${money(item.unitPrice)}</span>${adjustments ? `<br><small>${adjustments}</small>` : ""}</td><td>${money(item.lineTotal)}</td></tr>`;
+  }).join("");
+  const paymentRows = receipt.payments.length
+    ? receipt.payments.map((payment) => `<div><span>${escapeHtml(payment.method)}</span><span>${payment.amount < 0 ? "-" : ""}${money(Math.abs(payment.amount))}</span></div>`).join("")
+    : `<div><span>No payment</span><span>${money(0)}</span></div>`;
+  const returnRows = receipt.returns.map((entry) => `<div>Return ${escapeHtml(entry.id)} | ${escapeHtml(entry.itemName)} x ${escapeHtml(entry.quantity)}</div>`).join("");
+  const refundRows = receipt.refunds.map((entry) => `<div>Refund ${escapeHtml(entry.id)} | ${escapeHtml(entry.method)} | ${money(Math.abs(entry.amount))}</div>`).join("");
+  const exchangeRows = receipt.exchanges.map((entry) => `<div>Exchange ${escapeHtml(entry.id)} | ${invoiceNumber(entry.originalInvoice.invoiceNumber)} -> ${invoiceNumber(entry.replacementInvoice.invoiceNumber)}</div>`).join("");
+
+  return `<!doctype html><html><head><title>Invoice ${invoiceNumber(receipt.invoiceNumber)}</title><style>@page{size:80mm auto;margin:0}*{box-sizing:border-box}body{width:80mm;margin:0;color:#000;background:#fff;font:12px Arial,sans-serif}.receipt{width:72mm;margin:0 auto;padding:4mm 0}.brand{text-align:center;border-bottom:2px solid #000;padding:0 0 3mm}.brand h1{margin:0;font-size:17px}.brand p{margin:1.5mm 0 0;font-size:10px}.reprint{text-align:center;font-weight:700;letter-spacing:1px;margin:2mm 0}.invoice{display:flex;justify-content:space-between;margin:3mm 0;font-weight:700}.meta,.references{border:1px solid #000;padding:2.5mm;line-height:1.55;font-size:10px}.meta strong{display:inline-block;min-width:27mm}table{width:100%;border-collapse:collapse;margin-top:3mm}th{border-bottom:1.5px solid #000;padding:1.5mm 0;text-align:left;font-size:10px}th:last-child,td:last-child{text-align:right}td{vertical-align:top;border-bottom:1px dashed #777;padding:2mm 0}td span,td small{font-size:10px}.summary{margin-top:3mm;border-top:1.5px solid #000;padding-top:2mm}.summary div{display:flex;justify-content:space-between;padding:.7mm 0}.summary .total{border-top:1.5px solid #000;margin-top:1mm;padding-top:2mm;font-size:15px;font-weight:700}.references{margin-top:3mm}.references strong{display:block;margin-bottom:1mm}.foot{border-top:1px solid #000;margin-top:4mm;padding-top:3mm;text-align:center;font-size:10px}</style></head><body><main class="receipt"><header class="brand"><h1>${escapeHtml(receipt.shop.name)}</h1><p>${escapeHtml(receipt.shop.address || "")}</p></header>${reprint ? `<div class="reprint">REPRINT</div>` : ""}<section class="invoice"><span>INVOICE</span><b>${invoiceNumber(receipt.invoiceNumber)}</b></section><section class="meta"><div><strong>Date</strong>${escapeHtml(dateTime(receipt.transactionAt))}</div><div><strong>Branch</strong>${escapeHtml(receipt.shop.name)}</div>${receipt.cashier ? `<div><strong>Cashier</strong>${escapeHtml(receipt.cashier.name)}</div>` : ""}${receipt.customer ? `<div><strong>Customer</strong>${escapeHtml(receipt.customer.name)}</div>` : ""}<div><strong>Payment status</strong>${escapeHtml(receipt.paymentStatus)}</div></section><table><thead><tr><th>ITEM</th><th>AMOUNT</th></tr></thead><tbody>${itemRows}</tbody></table><section class="summary"><div><span>Subtotal</span><span>${money(receipt.totals.subtotal)}</span></div><div><span>Order discount</span><span>${receipt.totals.orderDiscount ? `-${money(receipt.totals.orderDiscount)}` : money(0)}</span></div>${receipt.totals.deliveryFee ? `<div><span>Delivery fee</span><span>${money(receipt.totals.deliveryFee)}</span></div>` : ""}<div class="total"><span>TOTAL</span><span>${money(receipt.totals.total)}</span></div><div><span>Paid</span><span>${money(receipt.totals.paid)}</span></div><div><span>Outstanding</span><span>${money(receipt.totals.outstanding)}</span></div>${paymentRows}</section>${returnRows || refundRows || exchangeRows ? `<section class="references"><strong>REFERENCES</strong>${returnRows}${refundRows}${exchangeRows}</section>` : ""}<footer class="foot">Thank you for shopping.</footer></main><script>window.onload=()=>window.print();window.onafterprint=()=>window.close();</script></body></html>`;
+}
+
+export function buildExchangeReceiptHtml(receipt, exchange, { reprint = true } = {}) {
+  const returned = exchange.returnedItems.map((item) => `<tr><td>${escapeHtml(item.name)}${item.variantName ? ` / ${escapeHtml(item.variantName)}` : ""}<br><small>Return ${escapeHtml(item.reference)} | ${escapeHtml(item.quantity)} returned | ${escapeHtml(item.condition)}</small></td><td></td></tr>`).join("");
+  const replacements = exchange.replacementItems.map((item) => `<tr><td>${escapeHtml(item.name)}${item.variantName ? ` / ${escapeHtml(item.variantName)}` : ""}<br><small>${escapeHtml(item.quantity)} x ${money(item.unitPrice)}</small></td><td>${money(item.lineTotal)}</td></tr>`).join("");
+  const difference = exchange.differenceType === "customer-payment"
+    ? `Customer paid ${money(exchange.difference)}`
+    : exchange.differenceType === "refund"
+      ? `Refund ${money(Math.abs(exchange.difference))}`
+      : "No additional payment or refund";
+  return `<!doctype html><html><head><title>Exchange ${escapeHtml(exchange.id)}</title><style>@page{size:80mm auto;margin:0}*{box-sizing:border-box}body{width:80mm;margin:0;color:#000;background:#fff;font:12px Arial,sans-serif}.receipt{width:72mm;margin:0 auto;padding:4mm 0}.head{text-align:center;border-bottom:2px solid #000;padding-bottom:3mm}.head h1{margin:0;font-size:17px}.reprint{text-align:center;font-weight:700;letter-spacing:1px;margin:2mm}.meta{border:1px solid #000;padding:2.5mm;line-height:1.6;font-size:10px}.meta strong{display:inline-block;min-width:29mm}h2{font-size:11px;margin:3mm 0 1mm}table{width:100%;border-collapse:collapse}td{padding:1.5mm 0;border-bottom:1px dashed #777;vertical-align:top}td:last-child{text-align:right}.totals{margin-top:3mm;border-top:1.5px solid #000;padding-top:2mm}.totals div{display:flex;justify-content:space-between;padding:.8mm 0}.difference{font-size:14px;font-weight:700;border-top:1.5px solid #000;margin-top:1mm;padding-top:2mm}.foot{text-align:center;border-top:1px solid #000;margin-top:4mm;padding-top:3mm;font-size:10px}</style></head><body><main class="receipt"><header class="head"><h1>${escapeHtml(receipt.shop.name)}</h1><div>EXCHANGE</div></header>${reprint ? `<div class="reprint">REPRINT</div>` : ""}<section class="meta"><div><strong>Exchange reference</strong>${escapeHtml(exchange.id)}</div><div><strong>Date</strong>${escapeHtml(dateTime(exchange.createdAt))}</div><div><strong>Branch</strong>${escapeHtml(receipt.shop.name)}</div>${exchange.cashier ? `<div><strong>Cashier</strong>${escapeHtml(exchange.cashier.name)}</div>` : ""}<div><strong>Original invoice</strong>${invoiceNumber(exchange.originalInvoice.invoiceNumber)}</div><div><strong>Replacement invoice</strong>${invoiceNumber(exchange.replacementInvoice.invoiceNumber)}</div><div><strong>Reason</strong>${escapeHtml(exchange.reason || "-")}</div></section><h2>RETURNED</h2><table>${returned}</table><h2>REPLACEMENT</h2><table>${replacements}</table><section class="totals"><div><span>Returned value</span><span>${money(exchange.returnedValue)}</span></div><div><span>Replacement value</span><span>${money(exchange.replacementValue)}</span></div>${exchange.differenceMethod ? `<div><span>Payment method</span><span>${escapeHtml(exchange.differenceMethod)}</span></div>` : ""}${exchange.differencePaymentReference ? `<div><span>Payment reference</span><span>${escapeHtml(exchange.differencePaymentReference)}</span></div>` : ""}<div class="difference"><span>Difference</span><span>${escapeHtml(difference)}</span></div></section><footer class="foot">Linked adjustment to ${invoiceNumber(exchange.originalInvoice.invoiceNumber)}</footer></main><script>window.onload=()=>window.print();window.onafterprint=()=>window.close();</script></body></html>`;
+}

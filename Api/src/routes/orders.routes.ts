@@ -7,6 +7,7 @@ import { approvalAccessToken, approvalAuditMetadata, approvalPayloadFingerprint,
 import { recordInventoryMovement, setInventoryReservation } from "../lib/inventory-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { resolvePrice } from "../lib/pricing-domain.js";
+import { buildReceiptReadModel } from "../lib/receipt-read-model.js";
 import { exchangeDifference, historicalReturnedValue } from "../lib/sale-exchange.js";
 import { assertShopAccess, assertUserOwnsShop, hasShopPermission } from "../lib/shop-access.js";
 import { assertCapability } from "../lib/store-capabilities.js";
@@ -431,9 +432,11 @@ ordersRouter.get("/:shopId/orders/:orderId", async (request, response, next) => 
     const orderId = z.string().min(1).parse(request.params.orderId);
 
     await assertUserOwnsShop(authUser.id, shopId);
-    const order = await prisma.order.findFirst({
+    const [order, allocatedPayments, creatorAudit] = await Promise.all([
+      prisma.order.findFirst({
       where: { id: orderId, shopId },
       include: {
+        shop: { select: { id: true, name: true, address: true } },
         customer: true,
         items: {
           include: {
@@ -448,14 +451,27 @@ ordersRouter.get("/:shopId/orders/:orderId", async (request, response, next) => 
           },
         },
         payments: true,
-        sourceExchanges: { include: { replacementOrder: true, returns: true, payments: true } },
-        replacementExchange: { include: { originalOrder: true, returns: true, payments: true } },
+        sourceExchanges: { include: { originalOrder: { include: { items: true } }, replacementOrder: { include: { items: true } }, returns: true, payments: true } },
+        replacementExchange: { include: { originalOrder: { include: { items: true } }, replacementOrder: { include: { items: true } }, returns: true, payments: true } },
       },
-    });
+      }),
+      prisma.payment.findMany({ where: { shopId, orderIds: { contains: orderId } } }),
+      prisma.auditLog.findFirst({ where: { shopId, action: "order.create", entity: "Order", entityId: orderId }, orderBy: { createdAt: "asc" }, select: { actorId: true } }),
+    ]);
 
     if (!order) throw notFound("Order not found.");
 
-    response.status(200).json({ order });
+    const actorIds = [...new Set([
+      creatorAudit?.actorId,
+      ...order.sourceExchanges.map((exchange) => exchange.actorId),
+      order.replacementExchange?.actorId,
+    ].filter((id): id is string => Boolean(id)))];
+    const actors = actorIds.length
+      ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
+      : [];
+    const receipt = buildReceiptReadModel(order, allocatedPayments, creatorAudit?.actorId ?? null, new Map(actors.map((actor) => [actor.id, actor])));
+
+    response.status(200).json({ order, receipt });
   } catch (error) {
     next(error);
   }
