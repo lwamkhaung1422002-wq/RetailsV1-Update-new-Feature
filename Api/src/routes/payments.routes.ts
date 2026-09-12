@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { writeAuditLog } from "../lib/audit-log.js";
 import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
+import { orderPaidAmount } from "../lib/order-payment-balance.js";
 import { prisma } from "../lib/prisma.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -106,38 +107,7 @@ async function paidAmountForOrder(tx: any, shopId: string, orderId: string): Pro
     select: { allocations: true, amount: true, type: true, scope: true },
   });
 
-  const directTotal = directPayments.reduce((sum: number, payment: { amount: number }) => {
-    return sum + payment.amount;
-  }, 0);
-
-  const allocationTotal = scopedPayments.reduce(
-    (sum: number, payment: { allocations: string | null; amount: number; type: string; scope: string | null }) => {
-      const allocations = parseJsonArray(payment.allocations);
-      const sign = payment.amount < 0 || paymentScope(payment.type, payment.scope).includes("void") ? -1 : 1;
-      const allocation = allocations.find((entry) => {
-        return (
-          typeof entry === "object" &&
-          entry !== null &&
-          "orderId" in entry &&
-          entry.orderId === orderId
-        );
-      });
-
-      if (
-        !allocation ||
-        typeof allocation !== "object" ||
-        !("amount" in allocation) ||
-        typeof allocation.amount !== "number"
-      ) {
-        return sum;
-      }
-
-      return sum + sign * allocation.amount;
-    },
-    0,
-  );
-
-  return directTotal + allocationTotal;
+  return orderPaidAmount(orderId, directPayments, scopedPayments);
 }
 
 async function updateOrderPaymentStatus(tx: any, shopId: string, orderId: string) {

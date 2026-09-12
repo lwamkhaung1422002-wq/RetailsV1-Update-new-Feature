@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
 import { approvalAccessToken, approvalAuditMetadata, approvalPayloadFingerprint, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
+import { historicalReceiptPaymentSummary } from "../lib/order-payment-balance.js";
 import { recordInventoryMovement, setInventoryReservation } from "../lib/inventory-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { resolvePrice } from "../lib/pricing-domain.js";
@@ -469,7 +470,8 @@ ordersRouter.get("/:shopId/orders/:orderId", async (request, response, next) => 
     const actors = actorIds.length
       ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
       : [];
-    const receipt = buildReceiptReadModel(order, allocatedPayments, creatorAudit?.actorId ?? null, new Map(actors.map((actor) => [actor.id, actor])));
+    const paymentSummary = historicalReceiptPaymentSummary(order.total, order.id, order.payments, allocatedPayments);
+    const receipt = buildReceiptReadModel(order, paymentSummary, creatorAudit?.actorId ?? null, new Map(actors.map((actor) => [actor.id, actor])));
 
     response.status(200).json({ order, receipt });
   } catch (error) {

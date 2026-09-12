@@ -1,3 +1,5 @@
+import { exchangeDifference } from "./sale-exchange.js";
+
 type ReceiptPayment = {
   id: string;
   amount: number;
@@ -67,34 +69,6 @@ type ReceiptOrder = ReceiptOrderReference & {
 
 type ReceiptActor = { id: string; name: string };
 
-function parsedAllocations(value?: string | null): Array<{ orderId?: unknown; amount?: unknown }> {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function scopedPaymentEntries(orderId: string, payments: ReceiptPayment[]) {
-  return payments.flatMap((payment) => {
-    const allocation = parsedAllocations(payment.allocations).find((entry) => entry.orderId === orderId);
-    if (!allocation || typeof allocation.amount !== "number") return [];
-    const amount = payment.amount < 0 || payment.scope === "cod-settlement-void"
-      ? -Math.abs(allocation.amount)
-      : allocation.amount;
-    return [{ ...payment, amount }];
-  });
-}
-
-function invoicePaymentEntries(order: ReceiptOrder, allocatedPayments: ReceiptPayment[]) {
-  return [
-    ...order.payments.filter((payment) => payment.scope !== "exchange-return"),
-    ...scopedPaymentEntries(order.id, allocatedPayments),
-  ];
-}
-
 function paymentReference(payment: ReceiptPayment) {
   return {
     id: payment.id,
@@ -111,7 +85,9 @@ function paymentReference(payment: ReceiptPayment) {
 function exchangeReference(exchange: ReceiptExchange, actors: Map<string, ReceiptActor>) {
   const originalItems = new Map(exchange.originalOrder.items.map((item) => [item.id, item]));
   const returnedPayment = exchange.payments.find((payment) => payment.scope === "exchange-return");
-  const difference = exchange.payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const returnedValue = Math.abs(returnedPayment?.amount ?? 0);
+  const replacementValue = exchange.replacementOrder.total;
+  const difference = exchangeDifference(returnedValue, replacementValue);
   const differencePayment = difference > 0
     ? exchange.payments.find((payment) => payment.scope === "exchange-difference")
     : difference < 0
@@ -146,8 +122,8 @@ function exchangeReference(exchange: ReceiptExchange, actors: Map<string, Receip
       unitPrice: item.unitPrice,
       lineTotal: item.lineTotal,
     })),
-    returnedValue: Math.abs(returnedPayment?.amount ?? 0),
-    replacementValue: exchange.replacementOrder.total,
+    returnedValue,
+    replacementValue,
     difference,
     differenceType: difference > 0 ? "customer-payment" : difference < 0 ? "refund" : "even",
     differenceMethod: differencePayment?.method ?? null,
@@ -157,12 +133,10 @@ function exchangeReference(exchange: ReceiptExchange, actors: Map<string, Receip
 
 export function buildReceiptReadModel(
   order: ReceiptOrder,
-  allocatedPayments: ReceiptPayment[],
+  paymentSummary: { entries: ReceiptPayment[]; paid: number; outstanding: number; paymentStatus: string },
   creatorId: string | null,
   actors: Map<string, ReceiptActor>,
 ) {
-  const payments = invoicePaymentEntries(order, allocatedPayments);
-  const paid = payments.reduce((sum, payment) => sum + payment.amount, 0);
   const exchanges = [
     ...(order.sourceExchanges ?? []),
     ...(order.replacementExchange ? [order.replacementExchange] : []),
@@ -178,7 +152,7 @@ export function buildReceiptReadModel(
     cashier: creatorId ? actors.get(creatorId) ?? null : null,
     customer: order.customer ?? null,
     fulfillmentStatus: order.fulfillmentStatus,
-    paymentStatus: order.paymentStatus,
+    paymentStatus: paymentSummary.paymentStatus,
     items: order.items.map((item) => ({
       id: item.id,
       name: item.productName,
@@ -197,10 +171,10 @@ export function buildReceiptReadModel(
       orderDiscount: order.discount,
       deliveryFee: order.deliveryFee ?? 0,
       total: order.total,
-      paid,
-      outstanding: Math.max(0, order.total - paid),
+      paid: paymentSummary.paid,
+      outstanding: paymentSummary.outstanding,
     },
-    payments: payments.map(paymentReference),
+    payments: paymentSummary.entries.map(paymentReference),
     returns: order.items.flatMap((item) => (item.returns ?? []).map((entry) => ({
       id: entry.id,
       orderItemId: item.id,
