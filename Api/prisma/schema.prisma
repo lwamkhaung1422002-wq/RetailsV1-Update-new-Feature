@@ -57,6 +57,7 @@ model Shop {
   adjustments         StockAdjustment[]
   orders              Order[]
   payments            Payment[]
+  saleExchanges       SaleExchange[]
   expenses            Expense[]
   auditLogs           AuditLog[]
   suppliers           Supplier[]
@@ -537,6 +538,8 @@ model Order {
   items             OrderItem[]
   payments          Payment[]
   returns           CustomerReturn[]
+  sourceExchanges   SaleExchange[]  @relation("OriginalSaleExchanges")
+  replacementExchange SaleExchange? @relation("ReplacementSaleExchange")
 
   @@unique([shopId, orderNumber])
   @@index([shopId])
@@ -610,6 +613,7 @@ model Payment {
   id                String   @id @default(cuid())
   shopId            String
   orderId           String?
+  exchangeId        String?
   type              String
   scope             String?
   method            String
@@ -625,9 +629,11 @@ model Payment {
   createdAt         DateTime @default(now())
   shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
   order             Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  exchange          SaleExchange? @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
 
   @@index([shopId])
   @@index([orderId])
+  @@index([exchangeId])
   @@index([billNumber])
   @@index([originalPaymentId])
   @@index([transactionId])
@@ -680,6 +686,27 @@ model OrderItemSerialAllocation {
   @@unique([orderItemId, serialId])
   @@unique([serialId])
   @@index([orderItemId])
+}
+
+model SaleExchange {
+  id                 String           @id @default(cuid())
+  shopId             String
+  originalOrderId    String
+  replacementOrderId String           @unique
+  actorId            String
+  reason             String
+  idempotencyKey     String
+  requestHash        String
+  createdAt          DateTime         @default(now())
+  shop               Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  originalOrder      Order            @relation("OriginalSaleExchanges", fields: [originalOrderId], references: [id], onDelete: Restrict)
+  replacementOrder   Order            @relation("ReplacementSaleExchange", fields: [replacementOrderId], references: [id], onDelete: Restrict)
+  returns            CustomerReturn[]
+  payments           Payment[]
+
+  @@unique([shopId, idempotencyKey])
+  @@index([shopId, createdAt])
+  @@index([originalOrderId])
 }
 
 model ReleaseFeature {
@@ -1233,6 +1260,7 @@ model CustomerReturn {
   shopId         String
   orderId        String
   orderItemId    String
+  exchangeId     String?
   productId      String
   variantId      String?
   quantity       Decimal   @db.Decimal(18, 3)
@@ -1244,9 +1272,11 @@ model CustomerReturn {
   order          Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
   orderItem      OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
   product        Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  exchange       SaleExchange? @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
 
   @@unique([shopId, idempotencyKey])
   @@index([shopId, createdAt])
   @@index([orderId])
   @@index([orderItemId])
+  @@index([exchangeId])
 }

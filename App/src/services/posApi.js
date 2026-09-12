@@ -176,6 +176,15 @@ export function createPosApi({
         shopRequest(`/orders/${id}/status`, { method: "PATCH", body }),
       cancel: (id, body, approvalToken) =>
         shopRequest(`/orders/${id}/cancel`, { method: "POST", body, ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}) }),
+      exchange: (id, body, idempotencyKey, approvalToken) =>
+        shopRequest(`/orders/${id}/exchanges`, {
+          method: "POST",
+          body,
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            ...(approvalToken ? { "x-manager-approval": approvalToken } : {}),
+          },
+        }),
       remove: (id) => shopRequest(`/orders/${id}`, { method: "DELETE" }),
     },
     pricing: {

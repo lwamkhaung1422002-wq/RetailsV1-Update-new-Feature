@@ -21,6 +21,7 @@ import { useTheme } from "@mui/material/styles";
 import { usePosApi } from "../../hooks/useApiResource";
 import { useOrderQuery } from "../../hooks/usePosQueries";
 import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
+import ExchangeDialog from "../../components/ExchangeDialog";
 
 const formatKyat = (amount) =>
   `${new Intl.NumberFormat("en-US").format(amount)} ကျပ်`;
@@ -32,6 +33,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
   const location = useLocation();
   const api = usePosApi();
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [exchangeOpen, setExchangeOpen] = useState(false);
   const {
     data: orderResult,
     error: orderError,
@@ -492,6 +494,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
       }}
     >
       {cancelOpen && <PaymentCancellationDialog kind="sale" recordId={record.id} onClose={() => setCancelOpen(false)} onSaved={() => void refetchOrder()} />}
+      {exchangeOpen && <ExchangeDialog open order={record} onClose={() => setExchangeOpen(false)} onSaved={async () => { setExchangeOpen(false); await refetchOrder(); }} />}
       <Box sx={{ maxWidth: isMobile ? "none" : 880, mx: "auto" }}>
         <Box
           sx={{
@@ -640,6 +643,15 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                   Share Invoice
                 </Button>
               </Box>
+              <Button
+                fullWidth
+                variant="outlined"
+                disabled={record.fulfillmentStatus !== "completed"}
+                onClick={() => setExchangeOpen(true)}
+                sx={{ mt: 2.25, minHeight: 46, textTransform: "none", fontSize: 16, fontWeight: 700 }}
+              >
+                Exchange
+              </Button>
               <Button
                 fullWidth
                 startIcon={<DeleteOutlineRoundedIcon />}
