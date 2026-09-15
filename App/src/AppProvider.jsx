@@ -12,7 +12,7 @@ import { accessTokenRefreshDelay, requestAccessTokenRefresh } from "./lib/auth-r
 import { queryClient } from "./lib/queryClient";
 import { readStoredJson } from "./lib/storage";
 import { localeToUiLanguage, translateUi } from "./lib/uiLanguage";
-import { selectAccessibleShop } from "./lib/active-shop";
+import { isShopOwner, normalizeShopAccess, selectAccessibleShop } from "./lib/active-shop";
 
 const defaultShop = { name: "POS System", address: "", logo: "" };
 const activeShopStorageKey = "pos-active-shop-id";
@@ -34,13 +34,20 @@ export default function AppProvider() {
   const setShop = useCallback((nextShop) => { setShopState(nextShop); localStorage.setItem("pos-shop-details", JSON.stringify(nextShop)); }, []);
   const setUiLanguage = useCallback((language) => { setUiLanguageState(language); localStorage.setItem("pos-ui-language", language); }, []);
   const saveSession = useCallback((nextSession, nextAccessToken) => {
-    setSession(nextSession);
+    const userId = nextSession.user?.id;
+    const normalizedShops = nextSession.user?.shops?.map((entry) => normalizeShopAccess(entry, userId));
+    const normalizedSession = {
+      ...nextSession,
+      ...(nextSession.user ? { user: { ...nextSession.user, ...(normalizedShops ? { shops: normalizedShops } : {}) } } : {}),
+      shop: normalizeShopAccess(nextSession.shop, userId),
+    };
+    setSession(normalizedSession);
     setAccessToken(nextAccessToken);
     setSessionExpired(false);
-    if (nextSession.shop) {
-      localStorage.setItem(activeShopStorageKey, nextSession.shop.id);
-      setShop({ name: nextSession.shop.name, address: nextSession.shop.address || "", logo: nextSession.shop.logoUrl || "" });
-      setUiLanguage(localeToUiLanguage(nextSession.shop.setting?.locale));
+    if (normalizedSession.shop) {
+      localStorage.setItem(activeShopStorageKey, normalizedSession.shop.id);
+      setShop({ name: normalizedSession.shop.name, address: normalizedSession.shop.address || "", logo: normalizedSession.shop.logoUrl || "" });
+      setUiLanguage(localeToUiLanguage(normalizedSession.shop.setting?.locale));
     }
   }, [setShop, setUiLanguage]);
   const clearSession = useCallback(() => {
@@ -159,7 +166,7 @@ export default function AppProvider() {
     if (selectedShop) saveSession({ ...session, user: { ...session.user, shops }, shop: selectedShop }, accessToken);
     return shops;
   }, [accessToken, saveSession, session]);
-  const hasPermission = useCallback((permission) => Boolean(session?.mode === "guest" || session?.shop?.isOwner || session?.shop?.permissions?.includes(permission)), [session?.mode, session?.shop]);
+  const hasPermission = useCallback((permission) => Boolean(session?.mode === "guest" || isShopOwner(session?.shop, session?.user?.id) || session?.shop?.permissions?.includes(permission)), [session?.mode, session?.shop, session?.user?.id]);
   const auth = useMemo(() => ({ session, user: session?.user || null, shop: session?.shop || null, token: accessToken, isGuest: session?.mode === "guest", isAuthenticated: Boolean(accessToken || session?.mode === "guest"), authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, reloadShops, hasPermission, refreshAccessToken, expireSession }), [session, accessToken, authReady, sessionExpired, login, register, logout, continueAsGuest, requestRegistration, selectShop, reloadShops, hasPermission, refreshAccessToken, expireSession]);
   const guardGuestAction = (event) => {
     if (session?.mode !== "guest") return;

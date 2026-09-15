@@ -21,6 +21,7 @@ import {
   Inventory2Rounded as InventoryIcon,
   LocalOfferRounded as PriceIcon,
   LogoutRounded as LogoutIcon,
+  GroupsRounded as StaffAccessIcon,
   SettingsRounded as SettingsRoundedIcon,
   ShoppingCartRounded as SaleIcon,
   ShoppingCartSharp as SuppliersIcon,
@@ -47,11 +48,22 @@ const menuItems = [
     path: "/payment",
     icon: <PaymentIcon />, permission: "payment.view",
   },
+  {
+    label: "Staff & Access",
+    path: "/settings/staff-access",
+    icon: <StaffAccessIcon />,
+    staffAccess: true,
+  },
   { label: "Sale Report", path: "/report/sales", icon: <ReportIcon />, permission: "report.viewSales" },
   {
     label: "Product Report",
     path: "/report/products",
     icon: <InventoryIcon />, permission: "report.viewSales",
+  },
+  {
+    label: "Payment Report",
+    path: "/report/payments",
+    icon: <PaymentIcon />, permission: "report.viewSales",
   },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, permission: "settings.manage" },
 ];
@@ -74,7 +86,9 @@ export default function AppDrawer({ expanded, setExpanded }) {
       <Avatar sx={{ width: 40, height: 40, bgcolor: "#fff", color: "#1471d5", boxShadow: "0 3px 10px rgba(0,0,0,.12)" }}><StoreIcon /></Avatar>
       <Typography fontWeight={700} sx={{ ...textSx, fontSize: 17 }}>{shop?.name || "Belle Store"}</Typography>
     </Toolbar>
-    <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.75, flexGrow: 1 }}>{menuItems.filter((item) => !item.permission || hasPermission(item.permission) || (item.label === "Settings" && shop?.role === "MANAGER")).map(listItem)}</List>
+    <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.75, flexGrow: 1 }}>{menuItems.filter((item) => item.staffAccess
+      ? Boolean(shop?.isOwner || shop?.role === "OWNER" || shop?.role === "MANAGER")
+      : !item.permission || hasPermission(item.permission) || (item.label === "Settings" && shop?.role === "MANAGER")).map(listItem)}</List>
     <Divider sx={{ borderColor: "rgba(255,255,255,0.18)", mx: expanded ? 2.25 : 1.25 }} />
     <List sx={{ px: expanded ? 1.5 : 1.25, py: 1.5 }}>{listItem({ label: "Logout", icon: <LogoutIcon /> })}</List>
   </Drawer>;

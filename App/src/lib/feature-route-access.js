@@ -1,6 +1,7 @@
 export function canAccessFeatureRoute(shop, rule) {
   if (!shop) return false;
-  if (rule === "staff-access") return Boolean(shop.isOwner || shop.role === "MANAGER");
-  if (rule === "branches") return Boolean(shop.isOwner);
-  return Boolean(shop.isOwner || shop.permissions?.includes(rule));
+  const isOwner = shop.isOwner === true || shop.role === "OWNER";
+  if (rule === "staff-access") return Boolean(isOwner || shop.role === "MANAGER");
+  if (rule === "branches") return isOwner;
+  return Boolean(isOwner || shop.permissions?.includes(rule));
 }

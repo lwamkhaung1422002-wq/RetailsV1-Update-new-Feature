@@ -7,12 +7,14 @@ describe("feature route access", () => {
 
   it("keeps Staff & Access limited to owners and managers", () => {
     expect(canAccessFeatureRoute({ isOwner: true, role: "OWNER", permissions: [] }, "staff-access")).toBe(true);
+    expect(canAccessFeatureRoute({ role: "OWNER", permissions: [] }, "staff-access")).toBe(true);
     expect(canAccessFeatureRoute({ isOwner: false, role: "MANAGER", permissions: [] }, "staff-access")).toBe(true);
     expect(canAccessFeatureRoute(cashier, "staff-access")).toBe(false);
   });
 
   it("keeps branch management owner-only", () => {
     expect(canAccessFeatureRoute({ isOwner: true, role: "OWNER", permissions: [] }, "branches")).toBe(true);
+    expect(canAccessFeatureRoute({ role: "OWNER", permissions: [] }, "branches")).toBe(true);
     expect(canAccessFeatureRoute({ isOwner: false, role: "MANAGER", permissions: ["branch.manage"] }, "branches")).toBe(false);
   });
 

@@ -23,6 +23,7 @@ const pageTitles = {
   "/price": "Price & Discount",
   "/suppliers": "Suppliers",
   "/settings": "Settings",
+  "/settings/staff-access": "Staff & Access",
   "/branches": "Branches",
   "/report/payments": "Payment Report",
   "/report/operations": "Operations",

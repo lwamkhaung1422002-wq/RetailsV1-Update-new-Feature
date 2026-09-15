@@ -252,9 +252,9 @@ export function createPosApi({
       updatePolicy: (role, permissions, branchId = shopId) => request(shopPath(branchId, `/role-policies/${role}`), { method: "PUT", body: { permissions } }),
     },
     approvals: {
-      approvers: () => shopRequest("/approvers"),
+      approvers: (branchId = shopId) => request(shopPath(branchId, "/approvers")),
       create: (body) => shopRequest("/approvals", { method: "POST", body }),
-      setPin: (body) => shopRequest("/approval-pin", { method: "PUT", body }),
+      setPin: (body, branchId = shopId) => request(shopPath(branchId, "/approval-pin"), { method: "PUT", body }),
     },
     branches: {
       overview: () => shopRequest("/branches"),
