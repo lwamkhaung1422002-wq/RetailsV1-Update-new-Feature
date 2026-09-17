@@ -4,7 +4,6 @@ import { z } from "zod";
 import { writeAuditLog } from "../lib/audit-log.js";
 import { prisma } from "../lib/prisma.js";
 import { DEFAULT_ROLE_PERMISSIONS, SHOP_PERMISSIONS, STAFF_ROLES, assertShopOwner, type ShopPermission } from "../lib/shop-access.js";
-import { sendResetLogin, sendStaffInvite } from "../lib/staff-email.js";
 import { createStaffToken, hashStaffToken, staffInviteExpiresAt, staffInviteUrl, staffResetExpiresAt, staffResetUrl } from "../lib/staff-tokens.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
@@ -102,8 +101,7 @@ staffAccessRouter.post("/:shopId/staff", async (request, response, next) => {
       throw error;
     }
     const inviteUrl = staffInviteUrl(rawToken);
-    const emailDelivery = await sendStaffInvite({ email: invitation.email, name: invitation.name, shopName: shop.name, url: inviteUrl, expiresAt });
-    response.status(201).json({ invitation: { id: invitation.id, status: "SETUP_REQUIRED", expiresAt, emailDelivery, inviteUrl } });
+    response.status(201).json({ invitation: { id: invitation.id, status: "SETUP_REQUIRED", expiresAt, inviteUrl } });
   } catch (error) { next(error); }
 });
 
@@ -112,7 +110,7 @@ staffAccessRouter.post("/:shopId/staff-invites/:inviteId/resend", async (request
     const auth = getAuthUser(request);
     const { shopId, inviteId } = inviteParamsSchema.parse(request.params);
     await assertShopOwner(auth.id, shopId);
-    const current = await prisma.staffInvite.findFirst({ where: { id: inviteId, shopId }, include: { shop: { select: { name: true } } } });
+    const current = await prisma.staffInvite.findFirst({ where: { id: inviteId, shopId } });
     if (!current) throw notFound("Staff invitation not found.");
     if (current.revokedAt || current.acceptedAt) throw conflict("This invitation is no longer pending.");
     if (current.lastSentAt && current.lastSentAt > new Date(Date.now() - 60_000)) throw rateLimited("Wait one minute before resending this invitation.");
@@ -122,12 +120,11 @@ staffAccessRouter.post("/:shopId/staff-invites/:inviteId/resend", async (request
       const rotated = await transaction.staffInvite.updateMany({ where: { id: current.id, shopId, acceptedAt: null, revokedAt: null }, data: { tokenHash: hashStaffToken(rawToken), expiresAt, lastSentAt: new Date() } });
       if (rotated.count !== 1) throw conflict("This invitation is no longer pending.");
       const updated = await transaction.staffInvite.findUniqueOrThrow({ where: { id: current.id } });
-      await writeAuditLog(transaction, { shopId, actorId: auth.id, action: "staff.inviteResent", entity: "StaffInvite", entityId: updated.id, metadata: { email: updated.email, role: updated.role, expiresAt: expiresAt.toISOString(), delivery: "email" } });
+      await writeAuditLog(transaction, { shopId, actorId: auth.id, action: "staff.inviteResent", entity: "StaffInvite", entityId: updated.id, metadata: { email: updated.email, role: updated.role, expiresAt: expiresAt.toISOString(), delivery: "copy-link" } });
       return updated;
     });
     const inviteUrl = staffInviteUrl(rawToken);
-    const emailDelivery = await sendStaffInvite({ email: invitation.email, name: invitation.name, shopName: current.shop.name, url: inviteUrl, expiresAt });
-    response.json({ invitation: { id: invitation.id, status: "SETUP_REQUIRED", expiresAt, emailDelivery, inviteUrl } });
+    response.json({ invitation: { id: invitation.id, status: "SETUP_REQUIRED", expiresAt, inviteUrl } });
   } catch (error) { next(error); }
 });
 
@@ -148,7 +145,7 @@ staffAccessRouter.post("/:shopId/staff-invites/:inviteId/link", async (request, 
       await writeAuditLog(transaction, { shopId, actorId: auth.id, action: "staff.inviteResent", entity: "StaffInvite", entityId: updated.id, metadata: { email: updated.email, role: updated.role, expiresAt: expiresAt.toISOString(), delivery: "copy-link" } });
       return updated;
     });
-    response.json({ invitation: { id: invitation.id, status: "SETUP_REQUIRED", expiresAt, emailDelivery: { state: "disabled" }, inviteUrl: staffInviteUrl(rawToken) } });
+    response.json({ invitation: { id: invitation.id, status: "SETUP_REQUIRED", expiresAt, inviteUrl: staffInviteUrl(rawToken) } });
   } catch (error) { next(error); }
 });
 
@@ -215,8 +212,7 @@ staffAccessRouter.post("/:shopId/staff/:memberId/reset-login", async (request, r
       return created;
     });
     const resetUrl = staffResetUrl(rawToken);
-    const emailDelivery = await sendResetLogin({ email: member.user.email, name: member.user.name, shopName: member.shop.name, url: resetUrl, expiresAt });
-    response.status(201).json({ reset: { id: reset.id, expiresAt, emailDelivery, resetUrl } });
+    response.status(201).json({ reset: { id: reset.id, expiresAt, resetUrl } });
   } catch (error) { next(error); }
 });
 

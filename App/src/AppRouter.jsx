@@ -15,10 +15,11 @@ import {
   loadPricePage, loadProductDetailsPage, loadProductReportPage, loadRecordSupplierPaymentPage,
   loadReportPage, loadSalePage, loadSaleRecordPage, loadSalesReportPage, loadSettingsPage,
   loadShopDetailsPage, loadStockHistoryPage, loadStockPage, loadSupplierDetailsPage,
-  loadSupplierHistoryPage, loadSuppliersPage, loadAddSupplierPage, loadStaffAccessPage, loadBranchesPage, loadPaymentReportPage, loadOperationsPage,
+  loadSupplierHistoryPage, loadSuppliersPage, loadAddSupplierPage, loadStaffAccessPage, loadStaffLinkPage, loadBranchesPage, loadPaymentReportPage, loadOperationsPage,
 } from "./routeChunks";
 
 const AuthPage = lazy(loadAuthPage);
+const StaffLinkPage = lazy(loadStaffLinkPage);
 const Sale = lazy(loadSalePage);
 const Stock = lazy(loadStockPage);
 const AddProduct = lazy(loadAddProductPage);
@@ -65,6 +66,8 @@ function FeatureRoute({ rule, children }) {
 const router = createBrowserRouter([
   { path: "/login", element: <RouteContent><AuthPage mode="login" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
   { path: "/register", element: <RouteContent><AuthPage mode="register" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
+  { path: "/staff/invite", element: <RouteContent><StaffLinkPage mode="invite" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
+  { path: "/staff/reset-login", element: <RouteContent><StaffLinkPage mode="reset" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
   {
     path: "/",
     element: <App />,

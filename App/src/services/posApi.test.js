@@ -44,4 +44,21 @@ describe("authenticated POS requests", () => {
     expect(apiRequest).toHaveBeenNthCalledWith(1, "/shops/main/inventory", { token: "token" });
     expect(apiRequest).toHaveBeenNthCalledWith(2, "/shops/hledan/inventory", { token: "token" });
   });
+
+  it("wires the Staff lifecycle to the selected shop", async () => {
+    apiRequest.mockResolvedValue({});
+    const api = createPosApi({ token: "token", shopId: "shop-1" });
+
+    await api.staff.add({ name: "New Staff", email: "staff@example.test", role: "CASHIER" });
+    await api.staff.generateInviteLink("invite-1");
+    await api.staff.cancelInvite("invite-1");
+    await api.staff.resetLogin("member-1");
+    await api.staff.update("member-1", { active: false });
+
+    expect(apiRequest).toHaveBeenNthCalledWith(1, "/shops/shop-1/staff", { token: "token", method: "POST", body: { name: "New Staff", email: "staff@example.test", role: "CASHIER" } });
+    expect(apiRequest).toHaveBeenNthCalledWith(2, "/shops/shop-1/staff-invites/invite-1/link", { token: "token", method: "POST" });
+    expect(apiRequest).toHaveBeenNthCalledWith(3, "/shops/shop-1/staff-invites/invite-1", { token: "token", method: "DELETE" });
+    expect(apiRequest).toHaveBeenNthCalledWith(4, "/shops/shop-1/staff/member-1/reset-login", { token: "token", method: "POST" });
+    expect(apiRequest).toHaveBeenNthCalledWith(5, "/shops/shop-1/staff/member-1", { token: "token", method: "PATCH", body: { active: false } });
+  });
 });

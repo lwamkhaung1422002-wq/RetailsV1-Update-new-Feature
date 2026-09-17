@@ -22,7 +22,7 @@ describe("Staff & Access model", () => {
     Object.values(DEFAULT_ROLE_PERMISSIONS).flat().forEach((permission) => expect(realPermissions.has(permission)).toBe(true));
   });
 
-  it("shows an owner once across branches and protects its all-branch identity", () => {
+  it("shows an owner once without adding branch UI data", () => {
     const owner = { id: "owner:user-1", role: "OWNER", active: true, user: { id: "user-1", name: "Owner" } };
     const staff = { id: "member-1", role: "CASHIER", active: true, user: { id: "user-2", name: "Cashier" }, branch: { id: "branch-1", name: "Main" } };
     const rows = uniqueStaffRows([
@@ -32,7 +32,9 @@ describe("Staff & Access model", () => {
     ]);
 
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({ role: "OWNER", branch: { id: "all", name: "All Branches" } });
-    expect(rows[1]).toEqual(staff);
+    expect(rows[0]).toMatchObject({ role: "OWNER" });
+    expect(rows[0]).not.toHaveProperty("branch");
+    expect(rows[1]).toEqual(expect.objectContaining({ id: "member-1", role: "CASHIER" }));
+    expect(rows[1]).not.toHaveProperty("branch");
   });
 });

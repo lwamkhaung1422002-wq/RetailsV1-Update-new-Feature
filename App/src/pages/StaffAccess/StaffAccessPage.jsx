@@ -10,7 +10,6 @@ import {
   DialogTitle,
   Divider,
   FormControl,
-  FormControlLabel,
   IconButton,
   InputAdornment,
   InputLabel,
@@ -19,7 +18,6 @@ import {
   Radio,
   Select,
   Stack,
-  Switch,
   TextField,
   Toolbar,
   Typography,
@@ -50,7 +48,7 @@ import {
 import { ROLE_META, STAFF_ROLES, uniqueStaffRows } from "./staffAccessModel";
 import { useStagedPermissions } from "./useStagedPermissions";
 
-const emptyStaffForm = { name: "", email: "", password: "", role: "CASHIER", branchId: "", active: true };
+const emptyStaffForm = { name: "", email: "", role: "CASHIER" };
 const emptyPinForm = { currentPin: "", pin: "", confirmPin: "" };
 
 export default function StaffAccessPage() {
@@ -63,7 +61,7 @@ export default function StaffAccessPage() {
 
 function OwnerStaffAccess() {
   const api = usePosApi();
-  const { shop, user, logout } = useAuth();
+  const { shop } = useAuth();
   const navigate = useNavigate();
   const isMobile = useMediaQuery("(max-width:768px)");
   const shopId = shop?.id;
@@ -77,19 +75,16 @@ function OwnerStaffAccess() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [staffRole, setStaffRole] = useState("all");
   const [staffStatus, setStaffStatus] = useState("all");
+  const [linkResult, setLinkResult] = useState(null);
+  const [actionError, setActionError] = useState("");
 
-  const ownedBranches = useMemo(() => {
-    const candidates = (user?.shops || []).filter((branch) => branch.isOwner || branch.role === "OWNER");
-    const withCurrent = shop?.id && !candidates.some((branch) => branch.id === shop.id) ? [shop, ...candidates] : candidates;
-    return [...new Map(withCurrent.map((branch) => [branch.id, branch])).values()];
-  }, [shop, user?.shops]);
-  const initialBranchId = shop?.id || ownedBranches[0]?.id || "";
-  const staged = useStagedPermissions(api, initialBranchId);
+  const staged = useStagedPermissions(api, shopId);
 
   const loadStaff = useCallback(async () => {
-    const results = await Promise.all(ownedBranches.map(async (branch) => ({ branchId: branch.id, ...(await api.staff.list(branch.id)) })));
-    return { assignments: results.flatMap((result) => result.staff || []) };
-  }, [api, ownedBranches]);
+    if (!shopId) return { assignments: [] };
+    const result = await api.staff.list(shopId);
+    return { assignments: result.staff || [] };
+  }, [api, shopId]);
   const staffResource = useApiResource(loadStaff);
   const assignments = useMemo(() => staffResource.data?.assignments || [], [staffResource.data?.assignments]);
   const staffRows = useMemo(() => uniqueStaffRows(assignments), [assignments]);
@@ -105,13 +100,13 @@ function OwnerStaffAccess() {
   };
   const openAdd = () => {
     setSaveError("");
-    setStaffForm({ ...emptyStaffForm, branchId: shop?.id || ownedBranches[0]?.id || "" });
+    setStaffForm(emptyStaffForm);
     setStaffDialog({ mode: "add" });
   };
   const openEdit = (member) => {
     if (member.role === "OWNER") return;
     setSaveError("");
-    setStaffForm({ name: member.user.name, email: member.user.email, password: "", role: member.role, branchId: member.branch.id, active: member.active });
+    setStaffForm({ name: member.user.name, email: member.user.email, role: member.role });
     setStaffDialog({ mode: "edit", member });
   };
   const saveStaff = async () => {
@@ -120,10 +115,10 @@ function OwnerStaffAccess() {
     setSaveError("");
     try {
       if (staffDialog.mode === "add") {
-        const result = await api.staff.add({ name: staffForm.name.trim(), email: staffForm.email.trim(), ...(staffForm.password ? { password: staffForm.password } : {}), role: staffForm.role }, staffForm.branchId);
-        if (!staffForm.active && result.member?.id) await api.staff.update(result.member.id, { active: false }, staffForm.branchId);
+        const result = await api.staff.add({ name: staffForm.name.trim(), email: staffForm.email.trim(), role: staffForm.role }, shopId);
+        setLinkResult({ type: "invite", title: "Staff Invitation Created", name: staffForm.name.trim(), email: staffForm.email.trim(), role: ROLE_META[staffForm.role].label, url: result.invitation.inviteUrl });
       } else {
-        await api.staff.update(staffDialog.member.id, { role: staffForm.role, active: staffForm.active }, staffDialog.member.branch.id);
+        await api.staff.update(staffDialog.member.id, { role: staffForm.role }, shopId);
       }
       await staffResource.reload();
       void approvalResource.reload().catch(() => {});
@@ -134,6 +129,26 @@ function OwnerStaffAccess() {
       setSaving(false);
     }
   };
+  const runStaffAction = async (action, fallbackMessage) => {
+    setActionError("");
+    try {
+      await action();
+      await staffResource.reload();
+    } catch (error) {
+      setActionError(error.message || fallbackMessage);
+    }
+  };
+  const handleResetLogin = (member) => runStaffAction(async () => {
+    const result = await api.staff.resetLogin(member.id, shopId);
+    setLinkResult({ type: "reset", title: "Login Reset Required", url: result.reset.resetUrl });
+  }, "Unable to reset this Staff login.");
+  const handleDeactivate = (member) => runStaffAction(() => api.staff.update(member.id, { active: false }, shopId), "Unable to deactivate this Staff member.");
+  const handleReactivate = (member) => runStaffAction(() => api.staff.update(member.id, { active: true }, shopId), "Unable to reactivate this Staff member.");
+  const handleGenerateNewInviteLink = (member) => runStaffAction(async () => {
+    const result = await api.staff.generateInviteLink(member.inviteId, shopId);
+    setLinkResult({ type: "rotated", title: "New Invite Link Generated", url: result.invitation.inviteUrl });
+  }, "Unable to generate a new invitation link.");
+  const handleCancelInvite = (member) => runStaffAction(() => api.staff.cancelInvite(member.inviteId, shopId), "Unable to cancel this invitation.");
   const openOwnerPin = () => {
     setSaveError("");
     setPinForm(emptyPinForm);
@@ -158,7 +173,6 @@ function OwnerStaffAccess() {
     }
   };
 
-  const passwordInvalid = Boolean(staffForm.password && staffForm.password.length < 8);
   return (
     <Box sx={{ width: "100%", maxWidth: "none", mx: 0, px: { xs: 1.5, sm: 2, md: 0 }, pt: 0, pb: { xs: tab === 0 ? 11 : 2, md: 0 }, overflowX: "hidden" }}>
       {isMobile && <MobileStaffAccessHeader tab={tab} onBack={() => navigate(-1)} onFilter={() => setFilterOpen(true)} onApprovalPin={openOwnerPin} filtersActive={staffRole !== "all" || staffStatus !== "all"} />}
@@ -166,11 +180,13 @@ function OwnerStaffAccess() {
         <Box sx={{ position: "relative", borderBottom: { md: "1px solid" }, borderColor: { md: "#e5ebf3" }, mb: { md: 1 } }}>
           <AccessTabs value={tab} onChange={changeTab} onAddStaff={openAdd} onApprovalPin={openOwnerPin} />
         </Box>
-      {tab === 0 && <StaffTab rows={staffRows} role={staffRole} status={staffStatus} onRoleChange={setStaffRole} onStatusChange={setStaffStatus} loading={staffResource.loading} error={staffResource.error} onRetry={staffResource.reload} onEdit={openEdit} onLogout={logout} />}
+      {actionError && <Alert severity="error" sx={{ mb: 1.5 }}>{actionError}</Alert>}
+      {tab === 0 && <StaffTab rows={staffRows} role={staffRole} status={staffStatus} onRoleChange={setStaffRole} onStatusChange={setStaffStatus} loading={staffResource.loading} error={staffResource.error} onRetry={staffResource.reload} onEditRole={openEdit} onResetLogin={handleResetLogin} onDeactivate={handleDeactivate} onReactivate={handleReactivate} onGenerateNewInviteLink={handleGenerateNewInviteLink} onCancelInvite={handleCancelInvite} />}
       {tab === 1 && <PermissionsTab staged={staged} />}
       </Box>
 
-      <StaffDialog open={Boolean(staffDialog)} mode={staffDialog?.mode} form={staffForm} setForm={setStaffForm} saving={saving} error={saveError} passwordInvalid={passwordInvalid} onClose={() => { if (!saving) setStaffDialog(null); }} onSave={saveStaff} />
+      <StaffDialog open={Boolean(staffDialog)} mode={staffDialog?.mode} form={staffForm} setForm={setStaffForm} saving={saving} error={saveError} onClose={() => { if (!saving) setStaffDialog(null); }} onSave={saveStaff} />
+      <LinkResultDialog result={linkResult} onClose={() => setLinkResult(null)} />
       <OwnerPinFlowDialog mode={pinFlow} configured={ownerPinConfigured} form={pinForm} setForm={setPinForm} saving={saving} error={saveError || approvalResource.error?.message} onModeChange={(mode) => { setSaveError(""); setPinForm(emptyPinForm); setPinFlow(mode); }} onClose={() => { if (!saving) setPinFlow(null); }} onSave={saveOwnerPin} />
       <StaffFilterDialog open={filterOpen} role={staffRole} status={staffStatus} onRoleChange={setStaffRole} onStatusChange={setStaffStatus} onClose={() => setFilterOpen(false)} />
       {isMobile && tab === 0 && <MobileStaffActions onAddStaff={openAdd} onApprovalPin={openOwnerPin} />}
@@ -213,7 +229,7 @@ function StaffFilterDialog({ open, role, status, onRoleChange, onStatusChange, o
       <DialogContent sx={{ px: 2.5, pt: "8px !important", pb: 2.5 }}>
         <Stack spacing={2}>
           <FormControl fullWidth><InputLabel>Role</InputLabel><Select label="Role" value={role} onChange={(event) => onRoleChange(event.target.value)}><MenuItem value="all">All Roles</MenuItem><MenuItem value="OWNER">Owner</MenuItem>{STAFF_ROLES.map((item) => <MenuItem key={item} value={item}>{ROLE_META[item].label}</MenuItem>)}</Select></FormControl>
-          <FormControl fullWidth><InputLabel>Status</InputLabel><Select label="Status" value={status} onChange={(event) => onStatusChange(event.target.value)}><MenuItem value="all">All Status</MenuItem><MenuItem value="active">Active</MenuItem><MenuItem value="inactive">Inactive</MenuItem></Select></FormControl>
+          <FormControl fullWidth><InputLabel>Status</InputLabel><Select label="Status" value={status} onChange={(event) => onStatusChange(event.target.value)}><MenuItem value="all">All Status</MenuItem><MenuItem value="SETUP_REQUIRED">Setup Required</MenuItem><MenuItem value="ACTIVE">Active</MenuItem><MenuItem value="DEACTIVATED">Deactivated</MenuItem></Select></FormControl>
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 1 }}><Button variant="outlined" onClick={clear} disabled={role === "all" && status === "all"} sx={{ minHeight: 46, textTransform: "none", fontWeight: 600 }}>Clear</Button><Button variant="contained" onClick={onClose} sx={{ minHeight: 46, textTransform: "none", fontWeight: 650, boxShadow: "none" }}>Apply Filters</Button></Box>
         </Stack>
       </DialogContent>
@@ -252,16 +268,15 @@ function ManagerStaffAccess() {
   return <Box sx={{ maxWidth: 1440, mx: "auto", px: { xs: 1.5, sm: 2, md: 0 }, py: { xs: 2, md: 1 } }}><Box sx={{ mb: 2 }}><Typography component="h1" sx={{ color: "#101744", fontSize: { xs: 25, md: 30 }, fontWeight: 800 }}>Staff &amp; Access</Typography><Typography color="text.secondary" sx={{ fontSize: 14 }}>Manage your approval credential for this branch.</Typography></Box>{approverResource.error && <Alert severity="warning" sx={{ mb: 2 }}>PIN status could not be loaded. You can still open the PIN form.</Alert>}<ManagerPinPanel onSetPin={() => { setSaveError(""); setPinForm(emptyPinForm); setPinDialog(true); }} /><PinDialog open={pinDialog} configured={configured} form={pinForm} setForm={setPinForm} saving={saving} error={saveError} onClose={() => { if (!saving) setPinDialog(false); }} onSave={savePin} /></Box>;
 }
 
-function StaffDialog({ open, mode, form, setForm, saving, error, passwordInvalid, onClose, onSave }) {
+export function StaffDialog({ open, mode, form, setForm, saving, error, onClose, onSave }) {
   const isMobile = useMediaQuery("(max-width:768px)");
   const update = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
-  const valid = form.name.trim() && form.email.trim() && form.branchId && !passwordInvalid;
+  const valid = form.name.trim() && form.email.trim() && form.role;
   if (mode === "add" && !isMobile) return (
     <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="md" slotProps={{ paper: { sx: { width: 880, maxWidth: "calc(100vw - 48px)", borderRadius: 2.5, overflow: "hidden", boxShadow: "0 20px 56px rgba(15,23,42,.28)" } } }}>
-      <DialogTitle sx={{ px: 3.5, py: 2, display: "grid", gridTemplateColumns: "56px minmax(0,1fr) auto 44px", gap: 1.75, alignItems: "center" }}>
+      <DialogTitle sx={{ px: 3.5, py: 2, display: "grid", gridTemplateColumns: "56px minmax(0,1fr) 44px", gap: 1.75, alignItems: "center" }}>
         <Box sx={{ width: 52, height: 52, display: "grid", placeItems: "center", borderRadius: 2, bgcolor: "#eaf3ff", color: "primary.main" }}><PersonAddAlt1RoundedIcon sx={{ fontSize: 30 }} /></Box>
         <Typography component="span" sx={{ color: "#101744", fontSize: 24, lineHeight: 1.25, fontWeight: 700 }}>Add Staff Member</Typography>
-        <Stack direction="row" spacing={.65} sx={{ alignItems: "center", whiteSpace: "nowrap" }}><Switch checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} size="small" slotProps={{ input: { "aria-label": "Account status" } }} /><Typography sx={{ color: "#101744", fontSize: 13.5, fontWeight: 600 }}>{form.active ? "Active" : "Inactive"}</Typography></Stack>
         <IconButton aria-label="Close add staff" onClick={onClose} disabled={saving} sx={{ color: "#101744" }}><CloseRoundedIcon sx={{ fontSize: 29 }} /></IconButton>
       </DialogTitle>
       <Divider sx={{ mx: 3.5 }} />
@@ -271,14 +286,9 @@ function StaffDialog({ open, mode, form, setForm, saving, error, passwordInvalid
           <LabeledStaffField label="Full Name" required>
             <TextField autoFocus value={form.name} onChange={update("name")} placeholder="Enter full name" fullWidth slotProps={{ input: { startAdornment: <InputAdornment position="start"><PersonOutlineRoundedIcon /></InputAdornment> } }} sx={desktopStaffFieldSx} />
           </LabeledStaffField>
-          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 2 }}>
-            <LabeledStaffField label="Email Address" required>
-              <TextField type="email" value={form.email} onChange={update("email")} placeholder="Enter email address" fullWidth slotProps={{ input: { startAdornment: <InputAdornment position="start"><EmailOutlinedIcon /></InputAdornment> } }} sx={desktopStaffFieldSx} />
-            </LabeledStaffField>
-            <LabeledStaffField label="Temporary Password">
-              <TextField type="password" value={form.password} onChange={update("password")} placeholder="At least 8 characters" error={passwordInvalid} fullWidth slotProps={{ input: { startAdornment: <InputAdornment position="start"><LockOutlinedIcon /></InputAdornment> } }} sx={desktopStaffFieldSx} />
-            </LabeledStaffField>
-          </Box>
+          <LabeledStaffField label="Email Address" required>
+            <TextField type="email" value={form.email} onChange={update("email")} placeholder="Enter email address" fullWidth slotProps={{ input: { startAdornment: <InputAdornment position="start"><EmailOutlinedIcon /></InputAdornment> } }} sx={desktopStaffFieldSx} />
+          </LabeledStaffField>
           <Divider />
           <LabeledStaffField label="Role" required>
             <Box role="radiogroup" aria-label="Role" sx={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 2 }}>
@@ -292,9 +302,34 @@ function StaffDialog({ open, mode, form, setForm, saving, error, passwordInvalid
   );
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: 2.5 } } }}>
-      <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, fontWeight: 800 }}><Box component="span">{mode === "add" ? "Add Staff" : "Edit Staff"}</Box>{mode === "add" && <Stack direction="row" spacing={.5} sx={{ alignItems: "center", flexShrink: 0 }}><Switch checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} size="small" slotProps={{ input: { "aria-label": "Account status" } }} /><Typography sx={{ fontSize: 13, fontWeight: 600 }}>{form.active ? "Active" : "Inactive"}</Typography></Stack>}</DialogTitle>
-      <DialogContent dividers><Stack spacing={2}>{error && <Alert severity="error">{error}</Alert>}<TextField label="Name" value={form.name} disabled={mode === "edit"} onChange={update("name")} /><TextField label="Email" type="email" value={form.email} disabled={mode === "edit"} onChange={update("email")} />{mode === "add" && <TextField label="Password for new account" type="password" value={form.password} error={passwordInvalid} onChange={update("password")} helperText={passwordInvalid ? "Password must contain at least 8 characters." : undefined} />}<FormControl fullWidth><InputLabel>Role</InputLabel><Select label="Role" value={form.role} onChange={update("role")}>{STAFF_ROLES.map((role) => <MenuItem key={role} value={role}>{ROLE_META[role].label}</MenuItem>)}</Select></FormControl>{mode === "edit" && <FormControlLabel control={<Switch checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />} label={form.active ? "Active" : "Inactive"} />}</Stack></DialogContent>
+      <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, fontWeight: 800 }}><Box component="span">{mode === "add" ? "Add Staff" : "Edit Role"}</Box></DialogTitle>
+      <DialogContent dividers><Stack spacing={2}>{error && <Alert severity="error">{error}</Alert>}<TextField label="Name" value={form.name} disabled={mode === "edit"} onChange={update("name")} /><TextField label="Email" type="email" value={form.email} disabled={mode === "edit"} onChange={update("email")} /><FormControl fullWidth><InputLabel>Role</InputLabel><Select label="Role" value={form.role} onChange={update("role")}>{STAFF_ROLES.map((role) => <MenuItem key={role} value={role}>{ROLE_META[role].label}</MenuItem>)}</Select></FormControl></Stack></DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}><Button onClick={onClose} disabled={saving}>Cancel</Button><Button variant="contained" disabled={saving || !valid} onClick={() => void onSave()}>{saving ? "Saving…" : mode === "add" ? "Add Staff" : "Save Changes"}</Button></DialogActions>
+    </Dialog>
+  );
+}
+
+export function LinkResultDialog({ result, onClose }) {
+  const [copied, setCopied] = useState(false);
+  if (!result) return null;
+  const copy = async () => {
+    await navigator.clipboard.writeText(result.url);
+    setCopied(true);
+  };
+  const close = () => { setCopied(false); onClose(); };
+  return (
+    <Dialog open onClose={close} fullWidth maxWidth="sm" slotProps={{ paper: { sx: { borderRadius: 2.5 } } }}>
+      <DialogTitle sx={{ color: "#101744", fontWeight: 800 }}>{result.title}</DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={1.5}>
+          {result.type === "invite" && <Box><Typography sx={{ fontWeight: 700 }}>{result.name}</Typography><Typography color="text.secondary">{result.role}</Typography><Typography color="text.secondary">{result.email}</Typography></Box>}
+          {result.type === "invite" && <Alert severity="warning">Status: Setup Required<br />Invite expires in 24 hours.</Alert>}
+          {result.type === "rotated" && <Alert severity="info">The previous invitation link is no longer valid.</Alert>}
+          {result.type === "reset" && <Alert severity="warning">All active sessions for this Staff member have been revoked.</Alert>}
+          <Box><Typography sx={{ mb: .75, color: "#101744", fontSize: 13, fontWeight: 700 }}>{result.type === "reset" ? "Reset Link" : "Invite Link"}</Typography><TextField value={result.url} fullWidth multiline maxRows={3} slotProps={{ htmlInput: { readOnly: true } }} /></Box>
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, py: 2 }}><Button variant="outlined" onClick={() => void copy()}>{copied ? "Copied" : result.type === "reset" ? "Copy Reset Link" : result.type === "rotated" ? "Copy Link" : "Copy Invite Link"}</Button><Button variant="contained" onClick={close}>Done</Button></DialogActions>
     </Dialog>
   );
 }

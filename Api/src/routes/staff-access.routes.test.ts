@@ -23,8 +23,6 @@ const mocks = vi.hoisted(() => ({
   updateUser: vi.fn(),
   upsertPolicy: vi.fn(),
   audit: vi.fn(),
-  sendInvite: vi.fn(),
-  sendReset: vi.fn(),
 }));
 
 const tx = {
@@ -52,7 +50,6 @@ vi.mock("../lib/shop-access.js", () => ({
   assertShopOwner: mocks.assertOwner,
 }));
 vi.mock("../lib/audit-log.js", () => ({ writeAuditLog: mocks.audit }));
-vi.mock("../lib/staff-email.js", () => ({ sendStaffInvite: mocks.sendInvite, sendResetLogin: mocks.sendReset }));
 vi.mock("../lib/staff-tokens.js", () => ({
   createStaffToken: () => "raw-secret-token",
   hashStaffToken: (token: string) => `hash:${token}`,
@@ -93,14 +90,13 @@ describe("owner staff lifecycle routes", () => {
     mocks.txInviteUpdate.mockResolvedValue(invitation);
     mocks.txInviteFindUnique.mockResolvedValue(invitation);
     mocks.audit.mockResolvedValue(undefined);
-    mocks.sendInvite.mockResolvedValue({ state: "disabled" });
-    mocks.sendReset.mockResolvedValue({ state: "disabled" });
     mocks.upsertPolicy.mockResolvedValue({ id: "policy-1", role: "CASHIER", permissions: ["staff.manage"] });
   });
 
   it("lets the Owner create a setup-required invitation without supplying a password", async () => {
     const result = await request(app).post("/shop-1/staff").send({ name: "New Staff", email: "staff@example.test", role: "CASHIER" }).expect(201);
-    expect(result.body.invitation).toEqual(expect.objectContaining({ id: "invite-1", status: "SETUP_REQUIRED", emailDelivery: { state: "disabled" } }));
+    expect(result.body.invitation).toEqual(expect.objectContaining({ id: "invite-1", status: "SETUP_REQUIRED", inviteUrl: expect.stringContaining("raw-secret-token") }));
+    expect(result.body.invitation).not.toHaveProperty("emailDelivery");
     const data = mocks.txInviteCreate.mock.calls[0]![0].data;
     expect(data).toEqual(expect.objectContaining({ tokenHash: "hash:raw-secret-token", createdById: "owner-1" }));
     expect(data).not.toHaveProperty("password");
@@ -154,10 +150,10 @@ describe("owner staff lifecycle routes", () => {
     await request(app).post("/shop-1/staff").send({ name: "Staff", email: "staff@example.test", role: "MANAGER" }).expect(409);
   });
 
-  it("does not roll back a committed invitation when email delivery fails", async () => {
-    mocks.sendInvite.mockResolvedValue({ state: "failed" });
+  it("creates an invitation for manual-link delivery without email state", async () => {
     const result = await request(app).post("/shop-1/staff").send({ name: "New Staff", email: "staff@example.test", role: "CASHIER" }).expect(201);
-    expect(result.body.invitation.emailDelivery).toEqual({ state: "failed" });
+    expect(result.body.invitation.inviteUrl).toContain("raw-secret-token");
+    expect(result.body.invitation).not.toHaveProperty("emailDelivery");
     expect(mocks.txInviteCreate).toHaveBeenCalledOnce();
   });
 
@@ -173,7 +169,7 @@ describe("owner staff lifecycle routes", () => {
     expect(mocks.txInviteUpdateMany).toHaveBeenCalledWith({ where: { id: "invite-1", shopId: "shop-1", acceptedAt: null, revokedAt: null }, data: { tokenHash: "hash:raw-secret-token", expiresAt: expect.any(Date) } });
     expect(mocks.txInviteUpdateMany.mock.calls.at(-1)![0].data.tokenHash).not.toBe("hash:old-token");
     expect(result.body.invitation.inviteUrl).toContain("raw-secret-token");
-    expect(mocks.sendInvite).not.toHaveBeenCalled();
+    expect(result.body.invitation).not.toHaveProperty("emailDelivery");
   });
 
   it("cancels an invitation by revoking it instead of deleting history", async () => {
@@ -214,6 +210,7 @@ describe("owner staff lifecycle routes", () => {
     expect(mocks.revokeResetTokens).toHaveBeenCalled();
     expect(mocks.createResetToken.mock.calls[0]![0].data.tokenHash).toBe("hash:raw-secret-token");
     expect(result.body.reset.resetUrl).toContain("raw-secret-token");
+    expect(result.body.reset).not.toHaveProperty("emailDelivery");
   });
 
   it("cannot reset the Owner through Staff management", async () => {

@@ -167,14 +167,16 @@ export function avatarTone(value = "") {
 export function uniqueStaffRows(assignments = []) {
   const ownerIds = new Set();
   return assignments.reduce((rows, member) => {
+    const singleStoreMember = { ...member };
+    delete singleStoreMember.branch;
     if (member.role === "OWNER") {
       const ownerId = member.user?.id || member.id;
       if (ownerIds.has(ownerId)) return rows;
       ownerIds.add(ownerId);
-      rows.push({ ...member, id: `owner:${ownerId}`, branch: { id: "all", name: "All Branches" } });
+      rows.push({ ...singleStoreMember, id: `owner:${ownerId}` });
       return rows;
     }
-    rows.push(member);
+    rows.push(singleStoreMember);
     return rows;
   }, []);
 }

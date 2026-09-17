@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Chip,
+  Divider,
   FormControl,
   IconButton,
   InputAdornment,
@@ -31,7 +32,8 @@ import Inventory2OutlinedIcon from "@mui/icons-material/Inventory2Outlined";
 import LocalOfferOutlinedIcon from "@mui/icons-material/LocalOfferOutlined";
 import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
-import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
+import LinkRoundedIcon from "@mui/icons-material/LinkRounded";
+import LockResetRoundedIcon from "@mui/icons-material/LockResetRounded";
 import MoreVertRoundedIcon from "@mui/icons-material/MoreVertRounded";
 import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import PersonAddAlt1RoundedIcon from "@mui/icons-material/PersonAddAlt1Rounded";
@@ -114,14 +116,17 @@ export function RoleChip({ role, compact = false }) {
   return <Chip label={meta.label} size="small" sx={{ width: "fit-content", height: compact ? 28 : 25, borderRadius: 1.1, bgcolor: meta.background, color: meta.color, fontSize: compact ? 12 : 11.75, fontWeight: 600, "& .MuiChip-label": { px: compact ? .9 : 1.1 } }} />;
 }
 
-export function StatusPill({ active, setLabel = false, compact = false }) {
-  const good = Boolean(active);
+export function StatusPill({ active, status, setLabel = false, compact = false }) {
+  const normalizedStatus = status || (active ? "ACTIVE" : "DEACTIVATED");
+  const setupRequired = normalizedStatus === "SETUP_REQUIRED";
+  const good = normalizedStatus === "ACTIVE";
+  const label = setLabel ? (good ? "Set" : "Setup Needed") : setupRequired ? "Setup Required" : good ? "Active" : "Deactivated";
   return (
     <Chip
       size="small"
-      label={setLabel ? (good ? "Set" : "Setup Needed") : (good ? "Active" : "Inactive")}
-      icon={<Box component="span" sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: good ? "#079455" : setLabel ? "#f59e0b" : "#f04438" }} />}
-      sx={{ height: compact ? 25 : 28, width: "fit-content", borderRadius: 1.5, bgcolor: good ? "#e3f8ec" : setLabel ? "#fff3df" : "#ffe9ec", color: good ? "#067647" : setLabel ? "#ad5f00" : "#d92d20", fontSize: compact ? 11.25 : 12, fontWeight: 600, "& .MuiChip-icon": { width: compact ? 7 : 8, height: compact ? 7 : 8, ml: compact ? .65 : .8, mr: compact ? -.3 : -.15 }, "& .MuiChip-label": { px: compact ? .65 : .9 } }}
+      label={label}
+      icon={<Box component="span" sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: good ? "#079455" : setupRequired || setLabel ? "#f59e0b" : "#f04438" }} />}
+      sx={{ height: compact ? 25 : 28, width: "fit-content", borderRadius: 1.5, bgcolor: good ? "#e3f8ec" : setupRequired || setLabel ? "#fff3df" : "#ffe9ec", color: good ? "#067647" : setupRequired || setLabel ? "#ad5f00" : "#d92d20", fontSize: compact ? 11.25 : 12, fontWeight: 600, "& .MuiChip-icon": { width: compact ? 7 : 8, height: compact ? 7 : 8, ml: compact ? .65 : .8, mr: compact ? -.3 : -.15 }, "& .MuiChip-label": { px: compact ? .65 : .9 } }}
     />
   );
 }
@@ -135,7 +140,7 @@ function SummaryCard({ label, value, icon, color, background }) {
   );
 }
 
-export function StaffTab({ rows, role, status, onRoleChange, onStatusChange, loading, error, onRetry, onEdit, onLogout }) {
+export function StaffTab({ rows, role, status, onRoleChange, onStatusChange, loading, error, onRetry, onEditRole, onResetLogin, onDeactivate, onReactivate, onGenerateNewInviteLink, onCancelInvite }) {
   const isMobile = useMediaQuery("(max-width:768px)");
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
@@ -143,13 +148,13 @@ export function StaffTab({ rows, role, status, onRoleChange, onStatusChange, loa
     return rows.filter((member) => {
       const matchesQuery = !query || member.user?.name?.toLowerCase().includes(query) || member.user?.email?.toLowerCase().includes(query);
       const matchesRole = role === "all" || member.role === role;
-      const matchesStatus = status === "all" || (status === "active" ? member.active : !member.active);
+      const matchesStatus = status === "all" || member.status === status;
       return matchesQuery && matchesRole && matchesStatus;
     });
   }, [role, rows, search, status]);
   const visibleRows = filtered;
-  const activeCount = rows.filter((member) => member.active).length;
-  const inactiveCount = rows.length - activeCount;
+  const activeCount = rows.filter((member) => member.status === "ACTIVE").length;
+  const inactiveCount = rows.filter((member) => member.status === "DEACTIVATED").length;
   const filtersActive = Boolean(search || role !== "all" || status !== "all");
   const clearFilters = () => { setSearch(""); onRoleChange("all"); onStatusChange("all"); };
 
@@ -168,7 +173,7 @@ export function StaffTab({ rows, role, status, onRoleChange, onStatusChange, loa
           <TextField value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name or email..." fullWidth slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon sx={{ color: "#42578b" }} /></InputAdornment> } }} sx={{ "& .MuiOutlinedInput-root": { height: 44, borderRadius: 1.6, bgcolor: "#fff", fontSize: { xs: 13.5, md: 14 } } }} />
           <Box sx={{ display: { xs: "none", md: "contents" } }}>
             <Select value={role} onChange={(event) => onRoleChange(event.target.value)} sx={selectSx} inputProps={{ "aria-label": "Filter by role" }}><MenuItem value="all">All Roles</MenuItem>{Object.entries(ROLE_META).map(([key, meta]) => <MenuItem key={key} value={key}>{meta.label}</MenuItem>)}</Select>
-            <Select value={status} onChange={(event) => onStatusChange(event.target.value)} sx={selectSx} inputProps={{ "aria-label": "Filter by status" }}><MenuItem value="all">All Status</MenuItem><MenuItem value="active">Active</MenuItem><MenuItem value="inactive">Inactive</MenuItem></Select>
+            <Select value={status} onChange={(event) => onStatusChange(event.target.value)} sx={selectSx} inputProps={{ "aria-label": "Filter by status" }}><MenuItem value="all">All Status</MenuItem><MenuItem value="SETUP_REQUIRED">Setup Required</MenuItem><MenuItem value="ACTIVE">Active</MenuItem><MenuItem value="DEACTIVATED">Deactivated</MenuItem></Select>
           </Box>
           <Button onClick={clearFilters} disabled={!filtersActive} sx={{ display: { xs: "none", md: "inline-flex" }, minWidth: 72, minHeight: 42, textTransform: "none" }}>Clear</Button>
         </Box>
@@ -176,16 +181,16 @@ export function StaffTab({ rows, role, status, onRoleChange, onStatusChange, loa
 
       {!filtered.length ? <EmptyState title={rows.length ? "No staff match these filters." : "No staff yet."} /> : <Box>
         {!isMobile && <Box sx={{ px: 2, pb: 1, display: "grid", gridTemplateColumns: "minmax(44px,.5fr) repeat(5,minmax(0,1fr))", columnGap: 1.5, alignItems: "center" }}><Typography sx={desktopStaffCardLabelSx}>No</Typography><Typography sx={desktopStaffCardLabelSx}>Staff</Typography><Typography sx={desktopStaffCardLabelSx}>Role</Typography><Typography sx={desktopStaffCardLabelSx}>Status</Typography><Typography sx={desktopStaffCardLabelSx}>Last Login</Typography><Typography sx={{ ...desktopStaffCardLabelSx, textAlign: "right", pr: 1 }}>Actions</Typography></Box>}
-        <Stack spacing={{ xs: 1, md: 1.15 }}>{visibleRows.map((member, index) => <StaffMemberCard key={member.id} member={member} number={index + 1} onEdit={onEdit} onLogout={onLogout} compact={isMobile} />)}</Stack>
+        <Stack spacing={{ xs: 1, md: 1.15 }}>{visibleRows.map((member, index) => <StaffMemberCard key={member.id} member={member} number={index + 1} onEditRole={onEditRole} onResetLogin={onResetLogin} onDeactivate={onDeactivate} onReactivate={onReactivate} onGenerateNewInviteLink={onGenerateNewInviteLink} onCancelInvite={onCancelInvite} compact={isMobile} />)}</Stack>
       </Box>}
     </Stack>
   );
 }
 
-function StaffMemberCard({ member, number, onEdit, onLogout, compact }) {
+export function StaffMemberCard({ member, number, onEditRole, onResetLogin, onDeactivate, onReactivate, onGenerateNewInviteLink, onCancelInvite, compact }) {
   const owner = member.role === "OWNER";
   const [menuAnchor, setMenuAnchor] = useState(null);
-  const lastLogin = member.user?.lastLoginAt ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(member.user.lastLoginAt)) : "Not available";
+  const lastLogin = member.status === "SETUP_REQUIRED" || !member.lastLoginAt ? "Never" : new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(member.lastLoginAt));
   if (!compact) {
     return (
       <Paper elevation={0} sx={{ ...surface, px: 2, py: 1.25, minWidth: 0, boxShadow: "0 2px 9px rgba(24,52,82,.07)" }}>
@@ -193,9 +198,9 @@ function StaffMemberCard({ member, number, onEdit, onLogout, compact }) {
           <Typography sx={{ color: "#61708d", fontSize: 13, fontWeight: 650 }}>{number}</Typography>
           <Stack direction="row" spacing={1.5} sx={{ minWidth: 0, alignItems: "center" }}><StaffAvatar name={member.user?.name} size={50} /><Box sx={{ minWidth: 0 }}><Typography noWrap sx={{ color: "#101744", fontSize: 14.5, lineHeight: 1.3, fontWeight: 650 }}>{member.user?.name}</Typography><Typography noWrap color="text.secondary" sx={{ mt: .2, fontSize: 12 }}>{member.user?.email}</Typography></Box></Stack>
           <Box sx={{ justifySelf: "start" }}><RoleChip role={member.role} compact /></Box>
-          <StatusPill active={member.active} />
+          <StatusPill status={member.status} />
           <Stack direction="row" spacing={.75} sx={{ minWidth: 0, alignItems: "center", color: "#61708d" }}><AccessTimeRoundedIcon sx={{ fontSize: 18, flexShrink: 0 }} /><Typography noWrap sx={{ fontSize: 12.25 }}>{lastLogin}</Typography></Stack>
-          <Box sx={{ minHeight: 38, display: "grid", alignItems: "center", justifyItems: "end", pr: 1 }}><StaffActionsMenu member={member} owner={owner} anchor={menuAnchor} setAnchor={setMenuAnchor} onEdit={onEdit} onLogout={onLogout} /></Box>
+          <Box sx={{ minHeight: 38, display: "grid", alignItems: "center", justifyItems: "end", pr: 1 }}><StaffActionsMenu member={member} owner={owner} anchor={menuAnchor} setAnchor={setMenuAnchor} onEditRole={onEditRole} onResetLogin={onResetLogin} onDeactivate={onDeactivate} onReactivate={onReactivate} onGenerateNewInviteLink={onGenerateNewInviteLink} onCancelInvite={onCancelInvite} /></Box>
         </Box>
       </Paper>
     );
@@ -205,10 +210,10 @@ function StaffMemberCard({ member, number, onEdit, onLogout, compact }) {
       <Box sx={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) auto", alignItems: "center", gap: { xs: .75, sm: 1 } }}>
         <StaffAvatar name={member.user?.name} size={42} />
         <Box sx={{ minWidth: 0 }}><Typography noWrap sx={{ color: "#101744", fontSize: { xs: 13.25, sm: 14.25 }, lineHeight: 1.3, fontWeight: 650 }}>{member.user?.name}</Typography><Typography noWrap color="text.secondary" sx={{ mt: .1, fontSize: { xs: 10.75, sm: 11.75 } }}>{member.user?.email}</Typography></Box>
-        <StaffActionsMenu member={member} owner={owner} anchor={menuAnchor} setAnchor={setMenuAnchor} onEdit={onEdit} onLogout={onLogout} />
+        <StaffActionsMenu member={member} owner={owner} anchor={menuAnchor} setAnchor={setMenuAnchor} onEditRole={onEditRole} onResetLogin={onResetLogin} onDeactivate={onDeactivate} onReactivate={onReactivate} onGenerateNewInviteLink={onGenerateNewInviteLink} onCancelInvite={onCancelInvite} />
       </Box>
       <Box sx={{ mt: 1.25, pt: 1.15, display: "grid", gridTemplateColumns: "minmax(0,1fr) 1px minmax(0,1fr)", alignItems: "center", gap: { xs: .75, sm: 1.15 }, borderTop: "1px solid #edf1f6" }}>
-        <StatusPill active={member.active} compact />
+        <StatusPill status={member.status} compact />
         <Box sx={{ width: 1, height: 34, bgcolor: "#e5ebf3" }} />
         <Box sx={{ minWidth: 0 }}><Stack direction="row" spacing={.6} sx={{ alignItems: "center", color: "#61708d" }}><AccessTimeRoundedIcon sx={{ fontSize: 16 }} /><Typography sx={{ fontSize: 11.25, fontWeight: 600 }}>Last Login</Typography></Stack><Typography noWrap color="text.secondary" sx={{ mt: .2, pl: 2.7, fontSize: 11.25 }}>{lastLogin}</Typography></Box>
       </Box>
@@ -216,9 +221,15 @@ function StaffMemberCard({ member, number, onEdit, onLogout, compact }) {
   );
 }
 
-function StaffActionsMenu({ member, owner, anchor, setAnchor, onEdit, onLogout }) {
+export function StaffActionsMenu({ member, owner, anchor, setAnchor, onEditRole, onResetLogin, onDeactivate, onReactivate, onGenerateNewInviteLink, onCancelInvite }) {
   const close = () => setAnchor(null);
-  return <><IconButton aria-label={`Actions for ${member.user?.name}`} onClick={(event) => setAnchor(event.currentTarget)} sx={{ width: 36, height: 36, borderRadius: 1.2, color: "#405587", bgcolor: "#edf3ff", "&:hover": { bgcolor: "#dfeaff" } }}><MoreVertRoundedIcon /></IconButton><Menu anchorEl={anchor} open={Boolean(anchor)} onClose={close}>{!owner && <MenuItem onClick={() => { close(); onEdit(member); }}><EditOutlinedIcon sx={{ mr: 1, fontSize: 19 }} />Edit</MenuItem>}<MenuItem disabled={!owner || !onLogout} title={owner ? "Sign out of this account" : "Remote staff logout requires backend session support"} onClick={() => { if (!owner || !onLogout) return; close(); void onLogout(); }}><LogoutRoundedIcon sx={{ mr: 1, fontSize: 19 }} />Logout</MenuItem></Menu></>;
+  if (owner) return null;
+  const run = (callback) => { close(); callback?.(member); };
+  return <><IconButton aria-label={`Actions for ${member.user?.name}`} onClick={(event) => setAnchor(event.currentTarget)} sx={{ width: 36, height: 36, borderRadius: 1.2, color: "#405587", bgcolor: "#edf3ff", "&:hover": { bgcolor: "#dfeaff" } }}><MoreVertRoundedIcon /></IconButton><Menu anchorEl={anchor} open={Boolean(anchor)} onClose={close}>
+    {member.status === "SETUP_REQUIRED" && [<MenuItem key="link" onClick={() => run(onGenerateNewInviteLink)}><LinkRoundedIcon sx={{ mr: 1, fontSize: 19 }} />Generate New Invite Link</MenuItem>, <Divider key="divider" />, <MenuItem key="cancel" onClick={() => run(onCancelInvite)} sx={{ color: "error.main" }}><PersonOffOutlinedIcon sx={{ mr: 1, fontSize: 19 }} />Cancel Invite</MenuItem>]}
+    {member.status === "ACTIVE" && [<MenuItem key="edit" onClick={() => run(onEditRole)}><EditOutlinedIcon sx={{ mr: 1, fontSize: 19 }} />Edit Role</MenuItem>, <MenuItem key="reset" onClick={() => run(onResetLogin)}><LockResetRoundedIcon sx={{ mr: 1, fontSize: 19 }} />Reset Login</MenuItem>, <Divider key="divider" />, <MenuItem key="deactivate" onClick={() => run(onDeactivate)} sx={{ color: "error.main" }}><PersonOffOutlinedIcon sx={{ mr: 1, fontSize: 19 }} />Deactivate</MenuItem>]}
+    {member.status === "DEACTIVATED" && <MenuItem onClick={() => run(onReactivate)}><RestartAltRoundedIcon sx={{ mr: 1, fontSize: 19 }} />Reactivate</MenuItem>}
+  </Menu></>;
 }
 
 const desktopStaffCardLabelSx = { color: "#61708d", fontSize: 11.5, lineHeight: 1.2, fontWeight: 600 };
