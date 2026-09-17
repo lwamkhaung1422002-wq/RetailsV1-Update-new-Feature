@@ -21,3 +21,6 @@ jobs:
         working-directory: App
       - run: npm ci && npm run prisma:validate && npm run typecheck && npm run test:unit && npm run build
         working-directory: Api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/retail_pos_ci?schema=public
+          JWT_SECRET: ci-only-jwt-secret-not-for-production-2026
