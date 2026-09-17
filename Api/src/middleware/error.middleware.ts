@@ -26,6 +26,11 @@ export function errorHandler(
     return;
   }
 
+  if (error instanceof Error && error.name === "RateLimitError") {
+    response.status(429).json({ message: error.message });
+    return;
+  }
+
   if (error instanceof ZodError) {
     response.status(400).json({
       message: "Validation error.",

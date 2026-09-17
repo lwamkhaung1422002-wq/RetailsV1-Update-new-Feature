@@ -15,11 +15,16 @@ model User {
   name      String
   email     String   @unique
   password  String
+  lastLoginAt DateTime?
+  loginResetRequired Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   shops     Shop[]
   sessions  AuthSession[]
   shopMemberships ShopMember[]
+  staffInvitesCreated StaffInvite[] @relation("StaffInviteCreator")
+  passwordResetTokens StaffPasswordResetToken[] @relation("StaffPasswordResetTarget")
+  passwordResetTokensCreated StaffPasswordResetToken[] @relation("StaffPasswordResetCreator")
 }
 
 model AuthSession {
@@ -94,6 +99,8 @@ model Shop {
   notifications       Notification[]
   members             ShopMember[]
   rolePolicies        ShopRolePolicy[]
+  staffInvites        StaffInvite[]
+  passwordResetTokens StaffPasswordResetToken[]
 
   @@index([ownerId])
 }
@@ -113,6 +120,45 @@ model ShopMember {
   @@unique([shopId, userId])
   @@index([shopId, active])
   @@index([userId, active])
+}
+
+model StaffInvite {
+  id          String   @id @default(cuid())
+  shopId      String
+  name        String
+  email       String
+  role        String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdById String
+  lastSentAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation("StaffInviteCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([shopId, email])
+  @@index([shopId, expiresAt])
+}
+
+model StaffPasswordResetToken {
+  id          String   @id @default(cuid())
+  shopId      String
+  userId      String
+  createdById String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user        User     @relation("StaffPasswordResetTarget", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation("StaffPasswordResetCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([shopId, userId])
+  @@index([userId, expiresAt])
 }
 
 model ShopRolePolicy {

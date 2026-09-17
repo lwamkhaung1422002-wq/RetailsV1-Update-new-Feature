@@ -15,7 +15,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test:api": "tsx scripts/local-api-test.ts",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run src",
     "prisma:validate": "prisma validate",
     "prisma:format": "prisma format",
     "prisma:generate": "prisma generate",
