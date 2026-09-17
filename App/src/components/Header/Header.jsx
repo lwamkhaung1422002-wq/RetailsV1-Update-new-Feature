@@ -71,7 +71,7 @@ export default function Header() {
         <Toolbar sx={{ minHeight: 64, px: 2, display: "flex", justifyContent: "space-between", gap: 1.5 }}>
           <Stack direction="row" alignItems="center" spacing={1.15} onClick={hasBranchSelector ? (event) => setShopAnchor(event.currentTarget) : undefined} sx={{ minWidth: 0, cursor: hasBranchSelector ? "pointer" : "default" }}>
             <Avatar src={shop?.logoUrl || undefined} alt={shop?.name || "Shop"} sx={{ width: 34, height: 34, bgcolor: "common.white", color: "primary.main", border: "1px solid rgba(255,255,255,.55)" }}><StorefrontRoundedIcon fontSize="small" /></Avatar>
-            <Typography noWrap sx={{ minWidth: 0, color: "common.white", fontSize: 17, fontWeight: 750 }}>{shop?.name || "POS System"}</Typography>
+            <Typography noWrap sx={{ minWidth: 0, color: "common.white", fontSize: 17, fontWeight: 750 }}>{pathname === "/settings" ? t("More") : shop?.name || "POS System"}</Typography>
             {hasBranchSelector && <KeyboardArrowDownRoundedIcon sx={{ color: "common.white", flexShrink: 0 }} />}
           </Stack>
           {action ? <IconButton aria-label={action.label} onClick={(event) => action.event === "inventory-sort" ? setSortAnchor(event.currentTarget) : window.dispatchEvent(new Event(action.event))} sx={{ flexShrink: 0, color: "common.white" }}>{action.icon}</IconButton> : <Box sx={{ width: 40, flexShrink: 0 }} />}

@@ -24,7 +24,7 @@ export default function StaffLinkPage({ mode }) {
         return;
       }
       try {
-        const result = await apiRequest(resetMode ? "/staff-login-reset/validate" : "/staff-invites/validate", { method: "POST", body: { token } });
+        const result = await apiRequest(resetMode ? "/auth/staff-login-reset/validate" : "/auth/staff-invites/validate", { method: "POST", body: { token } });
         if (active) setState({ loading: false, data: resetMode ? result.reset : result.invitation, error: "", success: false });
       } catch {
         if (active) setState({ loading: false, data: null, error: `This ${resetMode ? "reset" : "invitation"} link is invalid, expired, revoked, or already used.`, success: false });
@@ -43,7 +43,7 @@ export default function StaffLinkPage({ mode }) {
     setSubmitting(true);
     setState((current) => ({ ...current, error: "" }));
     try {
-      await apiRequest(resetMode ? "/staff-login-reset/complete" : "/staff-invites/accept", { method: "POST", body: { token, password: form.password } });
+      await apiRequest(resetMode ? "/auth/staff-login-reset/complete" : "/auth/staff-invites/accept", { method: "POST", body: { token, password: form.password } });
       setState((current) => ({ ...current, success: true }));
     } catch (error) {
       setState((current) => ({ ...current, error: error.message || "Unable to complete this request." }));

@@ -11,7 +11,7 @@ const navigationItems = [
   { label: "Home", value: "/", icon: <DashboardRoundedIcon /> },
   { label: "Orders", value: "/sale", icon: <ShoppingCartRoundedIcon />, permission: "order.view" },
   { label: "Inventory", value: "/stock", icon: <Inventory2RoundedIcon />, permission: "stock.view" },
-  { label: "Settings", value: "/settings", icon: <SettingsRoundedIcon />, permission: "settings.manage" },
+  { label: "More", value: "/settings", icon: <SettingsRoundedIcon /> },
 ];
 
 export default function MobileBottomNavigation() {
@@ -19,8 +19,8 @@ export default function MobileBottomNavigation() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { t } = useAppPreferences();
-  const { hasPermission, shop } = useAuth();
-  const visibleItems = navigationItems.filter((item) => !item.permission || hasPermission(item.permission) || (item.label === "Settings" && shop?.role === "MANAGER"));
+  const { hasPermission } = useAuth();
+  const visibleItems = navigationItems.filter((item) => !item.permission || hasPermission(item.permission));
 
   if (!isMobile) return null;
 

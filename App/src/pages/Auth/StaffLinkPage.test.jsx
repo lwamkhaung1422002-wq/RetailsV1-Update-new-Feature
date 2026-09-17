@@ -18,9 +18,10 @@ describe("public Staff secure-link pages", () => {
     apiRequest.mockResolvedValueOnce({ invitation: { email: "new@example.test", role: "CASHIER", shopName: "Main Shop", newPasswordRequired: true } }).mockResolvedValueOnce({ status: "ACTIVE" });
     renderPage();
     fireEvent.change(await screen.findByLabelText(/New Password/), { target: { value: "Password123!" } });
+    expect(apiRequest).toHaveBeenNthCalledWith(1, "/auth/staff-invites/validate", expect.objectContaining({ method: "POST" }));
     fireEvent.change(screen.getByLabelText(/Confirm Password/), { target: { value: "Password123!" } });
     fireEvent.click(screen.getByRole("button", { name: "Set Up Account" }));
-    await waitFor(() => expect(apiRequest).toHaveBeenLastCalledWith("/staff-invites/accept", expect.objectContaining({ method: "POST", body: expect.objectContaining({ password: "Password123!" }) })));
+    await waitFor(() => expect(apiRequest).toHaveBeenLastCalledWith("/auth/staff-invites/accept", expect.objectContaining({ method: "POST", body: expect.objectContaining({ password: "Password123!" }) })));
     expect(await screen.findByText("Your Staff invitation has been accepted.")).toBeTruthy();
   });
 
@@ -31,7 +32,7 @@ describe("public Staff secure-link pages", () => {
     expect(screen.queryByLabelText(/Confirm Password/)).toBeNull();
     fireEvent.change(field, { target: { value: "ExistingPassword!" } });
     fireEvent.click(screen.getByRole("button", { name: "Accept Invitation" }));
-    await waitFor(() => expect(apiRequest).toHaveBeenLastCalledWith("/staff-invites/accept", expect.objectContaining({ body: expect.objectContaining({ password: "ExistingPassword!" }) })));
+    await waitFor(() => expect(apiRequest).toHaveBeenLastCalledWith("/auth/staff-invites/accept", expect.objectContaining({ body: expect.objectContaining({ password: "ExistingPassword!" }) })));
   });
 
   it("handles invalid, expired, revoked, or already-used links", async () => {
@@ -45,9 +46,10 @@ describe("public Staff secure-link pages", () => {
     apiRequest.mockResolvedValueOnce({ reset: { email: "staff@example.test", shopName: "Main Shop" } }).mockResolvedValueOnce(null);
     renderPage("reset");
     fireEvent.change(await screen.findByLabelText(/New Password/), { target: { value: "NewPassword123!" } });
+    expect(apiRequest).toHaveBeenNthCalledWith(1, "/auth/staff-login-reset/validate", expect.objectContaining({ method: "POST" }));
     fireEvent.change(screen.getByLabelText(/Confirm Password/), { target: { value: "NewPassword123!" } });
     fireEvent.click(screen.getByRole("button", { name: "Set New Password" }));
-    await waitFor(() => expect(apiRequest).toHaveBeenLastCalledWith("/staff-login-reset/complete", expect.objectContaining({ method: "POST" })));
+    await waitFor(() => expect(apiRequest).toHaveBeenLastCalledWith("/auth/staff-login-reset/complete", expect.objectContaining({ method: "POST" })));
     expect(await screen.findByText("Your password has been reset.")).toBeTruthy();
   });
 });
