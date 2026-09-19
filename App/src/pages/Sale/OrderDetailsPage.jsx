@@ -22,7 +22,9 @@ import { usePosApi } from "../../hooks/useApiResource";
 import { useOrderQuery } from "../../hooks/usePosQueries";
 import { buildExchangeReceiptHtml, buildInvoiceReceiptHtml } from "../../lib/receipt";
 import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
-import ExchangeDialog from "../../components/ExchangeDialog";
+import ReturnRefundDialog from "../../components/ReturnRefundDialog";
+import { previewReturnedValue } from "../../lib/exchangePreview";
+import { refundableSalePayments } from "../../lib/refundablePayments";
 
 const formatKyat = (amount) =>
   `${new Intl.NumberFormat("en-US").format(amount)} ကျပ်`;
@@ -34,7 +36,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
   const location = useLocation();
   const api = usePosApi();
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [exchangeOpen, setExchangeOpen] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
   const {
     data: orderResult,
     error: orderError,
@@ -157,8 +159,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
   });
   const subtotal = Number(receipt?.totals?.subtotal ?? record.subtotal ?? 0);
   const discount = Number(receipt?.totals?.orderDiscount ?? record.discount ?? 0);
-  const paymentRecords = [...(record.payments || [])]
-    .filter((payment) => Number(payment.amount || 0) > 0)
+  const paymentRecords = refundableSalePayments(record.payments || [])
     .sort(
       (left, right) =>
         new Date(left.paidAt || left.createdAt) -
@@ -169,16 +170,11 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
       new Date(left.paidAt || left.createdAt) -
       new Date(right.paidAt || right.createdAt),
   );
-  const paidAmount = Number(receipt?.totals?.paid ?? 0);
-  const activePaymentRecordCount = paymentRecords.filter(
-    (payment) =>
-      !(record.payments || []).some(
-        (reversal) =>
-          Number(reversal.amount || 0) < 0 &&
-          reversal.originalPaymentId === payment.id,
-      ),
-  ).length;
-  const remainingAmount = Number(receipt?.totals?.outstanding ?? 0);
+  const paidAmount = (record.payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const activePaymentRecordCount = paymentRecords.length;
+  const returnedQuantities = Object.fromEntries((record.items || []).map((item) => [item.id, (item.returns || []).reduce((sum, entry) => sum + Number(entry.quantity || 0), 0)]));
+  const effectiveTotal = Math.max(0, Number(record.total || 0) - previewReturnedValue(record, returnedQuantities));
+  const remainingAmount = Math.max(0, effectiveTotal - paidAmount);
   const showPaymentSummary =
     paymentActivity.length > 0 ||
     ["unpaid", "partial"].includes(
@@ -479,7 +475,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
       }}
     >
       {cancelOpen && <PaymentCancellationDialog kind="sale" recordId={record.id} onClose={() => setCancelOpen(false)} onSaved={() => void refetchOrder()} />}
-      {exchangeOpen && <ExchangeDialog open order={record} onClose={() => setExchangeOpen(false)} onSaved={async () => { setExchangeOpen(false); await refetchOrder(); }} />}
+      {returnOpen && <ReturnRefundDialog open order={record} onClose={() => setReturnOpen(false)} onSaved={async () => { setReturnOpen(false); await refetchOrder(); }} />}
       <Box sx={{ maxWidth: isMobile ? "none" : 880, mx: "auto" }}>
         <Box
           sx={{
@@ -632,10 +628,10 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                 fullWidth
                 variant="outlined"
                 disabled={record.fulfillmentStatus !== "completed"}
-                onClick={() => setExchangeOpen(true)}
+                onClick={() => setReturnOpen(true)}
                 sx={{ mt: 2.25, minHeight: 46, textTransform: "none", fontSize: 16, fontWeight: 700 }}
               >
-                Exchange
+                Return / Refund
               </Button>
               <Button
                 fullWidth
@@ -653,7 +649,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                   fontWeight: 700,
                 }}
               >
-                {activePaymentRecordCount > 0 ? "Cancel Payment" : "Cancel Order"}
+                {activePaymentRecordCount > 0 ? "Refund Payment" : "Cancel Order"}
               </Button>
             </CardContent>
           </Card>
@@ -787,7 +783,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                     </Typography>
                     <Stack spacing={1.25}>
                       {paymentActivity.map((payment) => {
-                        const isCancelled = Number(payment.amount || 0) < 0;
+                        const isRefund = Number(payment.amount || 0) < 0;
                         const timestamp = new Date(payment.paidAt || payment.createdAt);
                         return (
                         <Box
@@ -795,17 +791,17 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                           sx={{
                             p: 1.25,
                             borderRadius: 1.5,
-                            bgcolor: isCancelled
+                            bgcolor: isRefund
                               ? isDark ? "rgba(209,67,67,.14)" : "#fff1f0"
                               : isDark ? "rgba(255,255,255,.05)" : "#f7f9fc",
                           }}
                         >
                           <DetailRow
-                            label={`${payment.method || "Cash"} ${isCancelled ? "cancelled" : "payment"}`}
-                            value={`${isCancelled ? "-" : "+"}${formatKyat(Math.abs(Number(payment.amount || 0)))}`}
-                            tone={isCancelled ? "#d14343" : "#278a45"}
+                            label={`${payment.method || "Cash"} ${isRefund ? "refund" : "payment"}`}
+                            value={`${isRefund ? "-" : "+"}${formatKyat(Math.abs(Number(payment.amount || 0)))}`}
+                            tone={isRefund ? "#d14343" : "#278a45"}
                           />
-                          {isCancelled && <Typography sx={{ mt: 0.5, color: "#d14343", fontSize: 13 }}>
+                          {isRefund && <Typography sx={{ mt: 0.5, color: "#d14343", fontSize: 13 }}>
                             Reason: {payment.reason || payment.note || "-"}
                           </Typography>}
                           <Typography

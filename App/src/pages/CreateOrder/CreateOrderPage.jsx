@@ -40,6 +40,7 @@ import BarcodeScannerDialog from "../../components/BarcodeScanner/BarcodeScanner
 import { usePosApi } from "../../hooks/useApiResource";
 import { useProductsQuery } from "../../hooks/usePosQueries";
 import { queryKeys } from "../../lib/queryKeys";
+import { toPricedCartItem } from "../../lib/cartPricing";
 import { useAuth } from "../../context/AuthContext";
 
 const initialItems = [];
@@ -71,8 +72,6 @@ function escapeHtml(value) {
   );
 }
 void printReceipt;
-
-const toPricedCartItem = (product, quantity, pricing) => ({ ...product, price: Number(pricing.regularUnitPrice ?? product.price ?? 0), quantity, promotion: pricing.promotionId ? { type: "discount", value: Number(pricing.promotionDiscount || 0) * quantity, text: `Promotion${pricing.promotionName ? `: ${pricing.promotionName}` : ""}` } : { type: "regular", text: "Regular price" } });
 
 const formatMoney = (amount) =>
   `${new Intl.NumberFormat("en-US").format(amount)} ကျပ်`;

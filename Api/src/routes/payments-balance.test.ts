@@ -34,8 +34,8 @@ describe("payment route canonical balance reuse", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.orderFind
-      .mockResolvedValueOnce({ id: "order-1", total: 90_000, paymentStatus: "partial", fulfillmentStatus: "completed" })
-      .mockResolvedValueOnce({ id: "order-1", total: 90_000 });
+      .mockResolvedValueOnce({ id: "order-1", total: 90_000, subtotal: 90_000, discount: 0, paymentStatus: "partial", fulfillmentStatus: "completed", items: [], payments: [] })
+      .mockResolvedValueOnce({ id: "order-1", total: 90_000, subtotal: 90_000, discount: 0, items: [] });
     mocks.paymentFind
       .mockResolvedValueOnce([{ amount: 40_000 }])
       .mockResolvedValueOnce([])

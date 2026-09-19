@@ -73,6 +73,7 @@ export function createPosApi({
       list: (query) => shopRequest(`/products${queryString(query)}`),
       get: (id) => shopRequest(`/products/${id}`),
       costHistory: (id) => shopRequest(`/products/${id}/cost-history`),
+      sourceHistory: (id) => shopRequest(`/products/${id}/source-history`),
       create: (body) => shopRequest("/products", { method: "POST", body }),
       update: (id, body) =>
         shopRequest(`/products/${id}`, { method: "PATCH", body }),
@@ -86,6 +87,8 @@ export function createPosApi({
     inventory: {
       list: (query) => shopRequest(`/inventory${queryString(query)}`),
       create: (body) => shopRequest("/inventory", { method: "POST", body }),
+      update: (inventoryBatchId, body) =>
+        shopRequest(`/inventory/${inventoryBatchId}`, { method: "PATCH", body }),
       adjust: (inventoryBatchId, body, approvalToken) =>
         shopRequest(`/inventory/${inventoryBatchId}/adjustments`, {
           method: "POST",
@@ -178,6 +181,15 @@ export function createPosApi({
         shopRequest(`/orders/${id}/cancel`, { method: "POST", body, ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}) }),
       exchange: (id, body, idempotencyKey, approvalToken) =>
         shopRequest(`/orders/${id}/exchanges`, {
+          method: "POST",
+          body,
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            ...(approvalToken ? { "x-manager-approval": approvalToken } : {}),
+          },
+        }),
+      returnProducts: (id, body, idempotencyKey, approvalToken) =>
+        shopRequest(`/orders/${id}/product-returns`, {
           method: "POST",
           body,
           headers: {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { initialStockReceiptPayload, stockInReceiptPayload } from "./stockReceiptSource";
+import { initialStockReceiptPayload, stockInReceiptPayload, supplierNameOptions } from "./stockReceiptSource";
 
 describe("stock receipt source payloads", () => {
   it("attaches source metadata to a positive initial stock receipt", () => {
@@ -65,5 +65,14 @@ describe("stock receipt source payloads", () => {
       invoiceReference,
     });
     expect(payload).toMatchObject(expected);
+  });
+
+  it("offers normalized supplier suggestions with the selected product first", () => {
+    expect(supplierNameOptions([
+      { productId: "other", supplierName: " Other Supplier " },
+      { productId: "selected", supplierName: "Golden Supply" },
+      { productId: "selected", supplierName: " golden supply " },
+      { productId: "other", supplierName: "" },
+    ], "selected")).toEqual(["Golden Supply", "Other Supplier"]);
   });
 });

@@ -27,3 +27,17 @@ export function stockInReceiptPayload({ productId, quantity, cost, notes, suppli
     ...optionalSourceFields(supplierName, invoiceReference),
   };
 }
+
+export function supplierNameOptions(batches = [], productId) {
+  const preferred = [];
+  const other = [];
+  const seen = new Set();
+  for (const batch of batches) {
+    const value = String(batch?.supplierName || "").trim();
+    const key = value.toLocaleLowerCase();
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    (productId && batch.productId === productId ? preferred : other).push(value);
+  }
+  return [...preferred, ...other];
+}

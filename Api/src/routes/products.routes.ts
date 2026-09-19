@@ -86,7 +86,7 @@ const productSchema = z.object({
   minimumStock: z.coerce.number().int().nonnegative().optional(),
 });
 
-const updateProductSchema = productSchema.partial();
+const updateProductSchema = productSchema.omit({ stockQuantity: true }).partial();
 
 const variantSchema = z.object({
   name: z.string().trim().min(1, "Variant name is required.").optional(),
@@ -421,6 +421,22 @@ productsRouter.get("/:shopId/products/:productId/cost-history", async (request, 
   }
 });
 
+productsRouter.get("/:shopId/products/:productId/source-history", async (request, response, next) => {
+  try {
+    const authUser = getAuthUser(request);
+    const { shopId } = paramsSchema.parse(request.params);
+    const productId = z.string().min(1).parse(request.params.productId);
+    await assertUserOwnsShop(authUser.id, shopId);
+    await assertProductBelongsToShop(productId, shopId);
+    const sources = await prisma.inventoryBatch.findMany({
+      where: { shopId, productId },
+      select: { id: true, supplierName: true, invoiceReference: true, quantity: true, unitCost: true, receivedAt: true },
+      orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
+    });
+    response.json({ sources });
+  } catch (error) { next(error); }
+});
+
 productsRouter.get("/:shopId/variants", async (request, response, next) => {
   try {
     const authUser = getAuthUser(request);
@@ -572,6 +588,9 @@ productsRouter.patch("/:shopId/products/:productId", async (request, response, n
     const authUser = getAuthUser(request);
     const { shopId } = paramsSchema.parse(request.params);
     const productId = z.string().min(1).parse(request.params.productId);
+    if (request.body && typeof request.body === "object" && "stockQuantity" in request.body) {
+      throw badRequest("Stock quantity must be changed through inventory movements.");
+    }
     const input = updateProductSchema.parse(request.body);
 
     await assertUserOwnsShop(authUser.id, shopId);
@@ -581,9 +600,6 @@ productsRouter.patch("/:shopId/products/:productId", async (request, response, n
     const nextCost = input.cost ?? currentProduct?.cost ?? 0;
     const nextPrice = input.price ?? currentProduct?.price ?? 0;
     if (nextPrice < nextCost) throw badRequest("Selling price cannot be lower than cost price.");
-
-    const activeSaleCount = await prisma.orderItem.count({ where: { productId, order: { shopId, cancelledAt: null } } });
-    if (activeSaleCount > 0) throw badRequest("Products with sale history cannot be edited.");
 
     const data: Prisma.ProductUncheckedUpdateInput = {
       ...(input.name !== undefined ? { name: input.name } : {}),
@@ -604,8 +620,8 @@ productsRouter.patch("/:shopId/products/:productId", async (request, response, n
     const product = await prisma.$transaction(async (tx) => {
       const costChanged = input.cost !== undefined && input.cost !== currentProduct?.cost;
       if (costChanged) {
-        // Product edits are blocked after a sale. Revalue only current, unsold
-        // inventory so historical order COGS remains immutable.
+        // Revalue only current inventory. Historical OrderItem cost snapshots
+        // remain immutable after a sale.
         await tx.inventoryBatch.updateMany({
           where: { shopId, productId, quantity: { gt: 0 } },
           data: { unitCost: input.cost! },

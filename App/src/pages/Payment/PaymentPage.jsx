@@ -42,6 +42,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
 import { useManagerApproval } from "../../context/approval-context";
 import { queryKeys } from "../../lib/queryKeys";
+import { refundableSalePayments } from "../../lib/refundablePayments";
 
 const payments = [
   {
@@ -364,6 +365,8 @@ export default function PaymentPage() {
               ? payment.kind === "expense"
               : status === "Cancel"
                 ? ["Cancel", "Cancelled"].includes(payment.status)
+                : status === "Refund"
+                  ? payment.status === "Refund"
                 : payment.status === status)) &&
         (!query ||
           payment.name.toLowerCase().includes(query) ||
@@ -480,6 +483,7 @@ export default function PaymentPage() {
             color="#ef6c00"
           />
           <StatusButton label="Cancel" active={status === "Cancel"} onClick={() => setStatus("Cancel")} color="error.main" />
+          <StatusButton label="Refund" active={status === "Refund"} onClick={() => setStatus("Refund")} color="error.main" />
         </Box>
         <Box
           sx={{
@@ -773,7 +777,7 @@ export default function PaymentPage() {
               <DeleteOutlineRoundedIcon
                 sx={{ fontSize: 15, color: "error.main" }}
               />
-              Cancel Payment
+              Refund Payment
             </MenuItem>
           )}
         {menuPayment?.kind === "sale" &&
@@ -862,15 +866,7 @@ export default function PaymentPage() {
               return;
             }
             const { order } = await api.orders.get(record.apiId);
-            const activePayments = (order.payments || []).filter(
-              (payment) =>
-                Number(payment.amount || 0) > 0 &&
-                !(order.payments || []).some(
-                  (reversal) =>
-                    Number(reversal.amount || 0) < 0 &&
-                    reversal.originalPaymentId === payment.id,
-                ),
-            );
+            const activePayments = refundableSalePayments(order.payments || []);
             if (activePayments.length > 0)
               throw new Error(
                 "Cancel later payment records from Payment before cancelling this order.",
@@ -897,7 +893,7 @@ export default function PaymentPage() {
           try {
             const reason = String(
               suppliedReason ||
-                window.prompt("Cancel payment reason (required):") ||
+                window.prompt("Refund reason (required):") ||
                 "",
             ).trim();
             if (!reason) {
@@ -905,25 +901,16 @@ export default function PaymentPage() {
               return;
             }
             const { order } = await api.orders.get(record.apiId);
-            const activePayments = (order.payments || []).filter(
-              (payment) =>
-                Number(payment.amount || 0) > 0 &&
-                !(order.payments || []).some(
-                  (reversal) =>
-                    Number(reversal.amount || 0) < 0 &&
-                    reversal.originalPaymentId === payment.id,
-                ),
-            );
+            const activePayments = refundableSalePayments(order.payments || []);
             const selectedPayment = selectedPaymentId
               ? activePayments.find(
                   (payment) => payment.id === selectedPaymentId,
                 )
               : activePayments.at(-1);
             if (!selectedPayment)
-              throw new Error("This payment has already been cancelled.");
+              throw new Error("This payment has already been fully refunded.");
             const body = {
-              method: selectedPayment.method || "Cash",
-              amount: Number(selectedPayment.amount || 0),
+              amount: Number(selectedPayment.refundableAmount || 0),
               originalPaymentId: selectedPayment.id,
               note: reason,
             };
@@ -931,7 +918,7 @@ export default function PaymentPage() {
             await invalidatePaymentData(queryClient, paymentRefreshKeys.order(shop?.id));
             setMobileDialog(null);
           } catch (error) {
-            if (!error.approvalCancelled) setPaymentError(error.message || "Payment could not be cancelled.");
+            if (!error.approvalCancelled) setPaymentError(error.message || "Payment could not be refunded.");
           } finally {
             setSavingPayment(false);
           }
@@ -1059,6 +1046,7 @@ function DesktopPaymentsPage({ onAddPayment, onDetails, onMenu }) {
           icon={<CreditCardOutlinedIcon />}
         />
         <DesktopPaymentFilter label="Cancel" active={status === "Cancel"} onClick={() => setStatus("Cancel")} tone="error.main" icon={<CancelOutlinedIcon />} />
+        <DesktopPaymentFilter label="Refund" active={status === "Refund"} onClick={() => setStatus("Refund")} tone="error.main" icon={<CancelOutlinedIcon />} />
         <Button
           variant="outlined"
           startIcon={<HistoryRoundedIcon />}
@@ -2225,7 +2213,7 @@ function MobilePaymentDialog({
               : dialog.mode === "delete" || dialog.mode === "delete-sale"
                 ? "Delete Payment"
                 : dialog.mode === "cancel-sale-payment" || dialog.mode === "select-sale-payment"
-                  ? "Cancel Sale Payment"
+                  ? "Refund Sale Payment"
                   : dialog.mode === "select-supplier-payment"
                     ? "Cancel Supplier Payment"
                   : dialog.mode === "order-pay"
@@ -2263,7 +2251,7 @@ function MobilePaymentDialog({
             <Typography color="text.secondary">
               {dialog.mode === "cancel-sale-payment" ? (
                 <>
-                  Cancel this payment for <strong>{record.name}</strong>?
+                  Refund this payment for <strong>{record.name}</strong>?
                 </>
               ) : (
                 <>
@@ -2288,7 +2276,7 @@ function MobilePaymentDialog({
               {saving
                 ? "Saving…"
                 : dialog.mode === "cancel-sale-payment"
-                  ? "Cancel Payment"
+                  ? "Refund Payment"
                   : "Cancel"}
             </Button>
           </Stack>
@@ -2432,7 +2420,7 @@ function PaymentCancellationForm({
   return (
     <Stack spacing={1.5}>
       <Typography color="text.secondary">
-        Choose the payment to cancel and enter a cancellation reason.
+        {isSupplierPayment ? "Choose the payment to cancel and enter a cancellation reason." : "Choose the payment to refund and enter a refund reason."}
       </Typography>
       <TextField
         select
@@ -2448,27 +2436,25 @@ function PaymentCancellationForm({
           </MenuItem>
         ))}
       </TextField>
-      {isSupplierPayment && (
-        <TextField
-          label="Cancel Payment Reason"
+      <TextField
+          label={isSupplierPayment ? "Cancel Payment Reason" : "Refund Reason"}
           required
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           fullWidth
         />
-      )}
       <Button
         color="error"
         variant="contained"
-        disabled={saving || !selectedPaymentId || (isSupplierPayment && !reason.trim())}
+        disabled={saving || !selectedPaymentId || !reason.trim()}
         onClick={() =>
           isSupplierPayment
             ? onCancelSupplierPayment(record, selectedPaymentId, reason)
-            : onCancelSalePayment(record, selectedPaymentId)
+            : onCancelSalePayment(record, selectedPaymentId, reason)
         }
         sx={{ minHeight: 50, fontWeight: 700, textTransform: "none" }}
       >
-        {saving ? "Saving…" : "Cancel Payment"}
+        {saving ? "Saving…" : isSupplierPayment ? "Cancel Payment" : "Refund Payment"}
       </Button>
     </Stack>
   );

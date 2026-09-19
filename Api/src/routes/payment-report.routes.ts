@@ -39,7 +39,7 @@ paymentReportRouter.get("/:shopId/reports/payments", async (request, response, n
     const [shop, allPayments, periodPayments, audits, orders] = await Promise.all([
       prisma.shop.findUniqueOrThrow({ where: { id: targetShopId }, select: { id: true, name: true } }),
       prisma.payment.findMany({ where: { shopId: targetShopId }, select: { id: true, method: true, amount: true, type: true, scope: true, originalPaymentId: true } }),
-      prisma.payment.findMany({ where: { shopId: targetShopId, paidAt }, orderBy: { paidAt: "desc" } }),
+      prisma.payment.findMany({ where: { shopId: targetShopId, paidAt }, include: { order: { select: { id: true, orderNumber: true } } }, orderBy: { paidAt: "desc" } }),
       prisma.auditLog.findMany({ where: { shopId: targetShopId, entity: "Payment", createdAt: paidAt }, orderBy: { createdAt: "desc" } }),
       prisma.order.findMany({ where: { shopId: targetShopId, fulfillmentStatus: "completed" }, select: { id: true, total: true, completedAt: true, items: { select: { recognizedAt: true } }, payments: { select: { amount: true, type: true, scope: true } } } }),
     ]);
@@ -80,7 +80,7 @@ paymentReportRouter.get("/:shopId/reports/payments", async (request, response, n
       recent: methodFiltered.slice(0, 50).map(({ payment, audit }) => {
         const metadata = typeof audit?.metadata === "object" && audit.metadata !== null ? audit.metadata : {};
         const approvedById = "approvedById" in metadata ? String(metadata.approvedById) : null;
-        return { id: payment.id, paidAt: payment.paidAt, method: paymentMethodFor(payment, byId), amount: isFinancialRefund(payment) ? -Math.abs(payment.amount) : payment.amount, type: isFinancialRefund(payment) ? "Refund" : payment.scope === "cod-settlement-void" ? "Void" : "Collection", actor: audit?.actorId ? usersById.get(audit.actorId) ?? { id: audit.actorId, name: "Staff" } : null, approver: approvedById ? usersById.get(approvedById) ?? { id: approvedById, name: "Manager" } : null };
+        return { id: payment.id, paidAt: payment.paidAt, method: paymentMethodFor(payment, byId), amount: isFinancialRefund(payment) ? -Math.abs(payment.amount) : payment.amount, type: isFinancialRefund(payment) ? "Refund" : payment.scope === "cod-settlement-void" ? "Void" : "Collection", source: payment.order ? `Sale Invoice #${payment.order.orderNumber || payment.order.id}` : "—", actor: audit?.actorId ? usersById.get(audit.actorId) ?? { id: audit.actorId, name: "Staff" } : null, approver: approvedById ? usersById.get(approvedById) ?? { id: approvedById, name: "Manager" } : null };
       }),
     });
   } catch (error) { next(error); }

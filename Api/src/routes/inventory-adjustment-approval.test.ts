@@ -12,11 +12,13 @@ const mocks = vi.hoisted(() => ({
   createAdjustment: vi.fn(),
   recordMovement: vi.fn(),
   refreshCost: vi.fn(),
+  user: vi.fn(),
 }));
 
 vi.mock("../lib/prisma.js", () => ({
   prisma: {
     inventoryBatch: { findFirst: mocks.scopedBatch },
+    user: { findUnique: mocks.user },
     $transaction: async (run: (tx: unknown) => unknown) => run({
       inventoryBatch: { findFirst: mocks.transactionBatch, update: mocks.updateBatch },
       stockAdjustment: { create: mocks.createAdjustment },
@@ -42,7 +44,7 @@ vi.mock("../lib/costing.js", () => ({ refreshProductWeightedCost: mocks.refreshC
 vi.mock("../lib/shop-access.js", () => ({ assertUserOwnsShop: vi.fn() }));
 vi.mock("../middleware/auth.middleware.js", () => ({
   requireAuth: (_request: unknown, _response: unknown, next: () => void) => next(),
-  getAuthUser: () => ({ id: "cashier-1" }),
+  getAuthUser: () => ({ id: "cashier-1", email: "cashier@example.com" }),
 }));
 
 import { inventoryRouter } from "./inventory.routes.js";
@@ -81,6 +83,7 @@ describe("inventory batch adjustment approval metadata", () => {
     mocks.createAdjustment.mockResolvedValue({ id: "adjustment-1" });
     mocks.recordMovement.mockResolvedValue(null);
     mocks.refreshCost.mockResolvedValue(1_000);
+    mocks.user.mockResolvedValue({ name: "Authenticated Cashier" });
   });
 
   it.each([
@@ -91,7 +94,7 @@ describe("inventory batch adjustment approval metadata", () => {
 
     await request(app)
       .post("/shop-1/inventory/batch-1/adjustments")
-      .send({ action: "ADD", quantity: 2, reason: "Count correction", staffName: "Cashier" })
+      .send({ action: "ADD", quantity: 2, reason: "Count correction", staffName: "Spoofed Name" })
       .expect(201);
 
     expect(mocks.createAdjustment).toHaveBeenCalledWith({
@@ -104,7 +107,7 @@ describe("inventory batch adjustment approval metadata", () => {
         beforeQuantity: 10,
         afterQuantity: 12,
         reason: "Count correction",
-        staffName: "Cashier",
+        staffName: "Authenticated Cashier",
       },
     });
     expect(mocks.consume).toHaveBeenCalledWith(expect.anything(), authorization);
@@ -118,7 +121,6 @@ describe("inventory batch adjustment approval metadata", () => {
         action: "ADD",
         quantity: 2,
         reason: "Count correction",
-        staffName: "Cashier",
       },
     }));
   });
@@ -128,7 +130,7 @@ describe("inventory batch adjustment approval metadata", () => {
 
     await request(app)
       .post("/shop-1/inventory/batch-1/adjustments")
-      .send({ action: "ADD", quantity: 2, reason: "Count correction", staffName: "Cashier" })
+      .send({ action: "ADD", quantity: 2, reason: "Count correction", staffName: "Spoofed Name" })
       .expect(201);
 
     expect(mocks.audit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
@@ -147,5 +149,26 @@ describe("inventory batch adjustment approval metadata", () => {
     expect(adjustmentData).not.toHaveProperty("approvedById");
     expect(adjustmentData).not.toHaveProperty("approvedByRole");
     expect(adjustmentData).not.toHaveProperty("approvalReason");
+  });
+
+  it("corrects only the selected stock source record and audits the old values", async () => {
+    mocks.scopedBatch.mockResolvedValue({ id: "batch-1", supplierName: "Old Supplier", invoiceReference: "OLD-1" });
+    mocks.updateBatch.mockResolvedValue({ id: "batch-1", supplierName: "New Supplier", invoiceReference: "NEW-1" });
+
+    await request(app)
+      .patch("/shop-1/inventory/batch-1")
+      .send({ supplierName: "New Supplier", invoiceReference: "NEW-1" })
+      .expect(200);
+
+    expect(mocks.updateBatch).toHaveBeenCalledWith({
+      where: { id: "batch-1" },
+      data: { supplierName: "New Supplier", invoiceReference: "NEW-1" },
+      include: { product: true, variant: true },
+    });
+    expect(mocks.audit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      action: "inventory.update",
+      entityId: "batch-1",
+      metadata: expect.objectContaining({ previousSupplierName: "Old Supplier", previousInvoiceReference: "OLD-1" }),
+    }));
   });
 });

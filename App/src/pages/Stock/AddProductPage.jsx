@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   Alert,
+  Autocomplete,
   AppBar,
   Box,
   Button,
@@ -45,8 +46,7 @@ import { usePosApi } from "../../hooks/useApiResource";
 import { normalizeBarcode } from "../../lib/barcodeScanner";
 import { queryKeys } from "../../lib/queryKeys";
 import { useAuth } from "../../context/AuthContext";
-import { useManagerApproval } from "../../context/approval-context";
-import { initialStockReceiptPayload } from "./stockReceiptSource";
+import { initialStockReceiptPayload, supplierNameOptions } from "./stockReceiptSource";
 
 const emptyForm = {
   name: "",
@@ -77,8 +77,7 @@ export default function AddProductPage() {
   const isMobile = useMediaQuery("(max-width:600px)");
   const navigate = useNavigate();
   const api = usePosApi();
-  const { shop, user } = useAuth();
-  const { runWithApproval } = useManagerApproval();
+  const { shop } = useAuth();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const productId = searchParams.get("edit");
@@ -87,8 +86,6 @@ export default function AddProductPage() {
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState([]);
   const [inventoryBatches, setInventoryBatches] = useState([]);
-  const [initialStock, setInitialStock] = useState(0);
-  const [hasSaleHistory, setHasSaleHistory] = useState(false);
   const [activeBarcode, setActiveBarcode] = useState(null);
   const [activeShortCode, setActiveShortCode] = useState(null);
   const [barcodeDraft, setBarcodeDraft] = useState("");
@@ -106,16 +103,16 @@ export default function AddProductPage() {
     Promise.all([
       api.categories.list(),
       api.units.list(),
-      // A new product has no existing batches, so avoid an all-inventory read
-      // until edit mode actually needs the product's current stock history.
-      productId ? api.inventory.list() : Promise.resolve({ inventory: [] }),
+      api.inventory.list(),
       productId ? api.products.get(productId) : Promise.resolve(null),
     ])
       .then(([categoryResult, unitResult, inventoryResult, productResult]) => {
         if (!alive) return;
         const nextUnits = unitResult.units || [];
+        const allBatches = inventoryResult.inventory || [];
         setCategories(categoryResult.categories || []);
         setUnits(nextUnits);
+        setInventoryBatches(allBatches);
         if (productResult?.product) {
           const product = productResult.product;
           const baseUnit =
@@ -127,16 +124,14 @@ export default function AddProductPage() {
               /^[A-Z]{2}[0-9]{4}$/.test(item.value),
           );
           const shortCode = shortCodeRecord?.value || "";
-          const batches = (inventoryResult.inventory || []).filter(
+          const batches = allBatches.filter(
             (batch) => batch.productId === product.id,
           );
           const stock = batches.reduce(
             (total, batch) => total + Number(batch.quantity || 0),
             0,
           );
-          setInventoryBatches(batches);
-          setInitialStock(stock);
-          setHasSaleHistory(Boolean(productResult.hasSaleHistory));
+          const latestSource = batches[0];
           setForm({
             name: product.name || "",
             description: product.description || "",
@@ -147,8 +142,8 @@ export default function AddProductPage() {
             cost: String(product.cost ?? 0),
             price: String(product.price ?? 0),
             stock: String(stock),
-            supplierName: "",
-            invoiceReference: "",
+            supplierName: latestSource?.supplierName || "",
+            invoiceReference: latestSource?.invoiceReference || "",
             unitId: baseUnit?.unitId || nextUnits[0]?.id || "",
             minimum: "10",
           });
@@ -174,6 +169,11 @@ export default function AddProductPage() {
       alive = false;
     };
   }, [api, productId]);
+
+  const supplierOptions = useMemo(
+    () => supplierNameOptions(inventoryBatches, productId),
+    [inventoryBatches, productId],
+  );
 
   const update = (name) => (event) => {
     const value = event.target.value;
@@ -278,43 +278,20 @@ export default function AddProductPage() {
         price: Number(form.price),
         cost: Number(form.cost),
         categoryId: form.categoryId || undefined,
-        ...(isEditMode ? { stockQuantity: Number(form.stock) } : {}),
         minimumStock: Number(form.minimum || 0),
       };
       if (isEditMode) {
-        const delta = Number(form.stock) - initialStock;
-        if (delta !== 0 && hasSaleHistory) {
-          throw new Error("Stock quantity cannot be edited after this product has sale history.");
+        await api.products.update(productId, payload);
+        const latestSource = inventoryBatches.find((batch) => batch.productId === productId);
+        if (latestSource && (
+          String(latestSource.supplierName || "") !== form.supplierName.trim() ||
+          String(latestSource.invoiceReference || "") !== form.invoiceReference.trim()
+        )) {
+          await api.inventory.update(latestSource.id, {
+            supplierName: form.supplierName.trim(),
+            invoiceReference: form.invoiceReference.trim(),
+          });
         }
-        const adjustmentPlans = [];
-        if (delta > 0 && inventoryBatches[0]) {
-          const batch = inventoryBatches[0];
-          adjustmentPlans.push({ batchId: batch.id, body: { action: "ADD", quantity: delta, reason: "Product edit stock quantity.", staffName: user?.name || "Staff" } });
-        } else if (delta < 0) {
-          let remaining = Math.abs(delta);
-          for (const currentBatch of inventoryBatches) {
-            if (remaining <= 0) break;
-            const quantity = Math.min(remaining, Number(currentBatch.quantity || 0));
-            if (quantity > 0) adjustmentPlans.push({ batchId: currentBatch.id, body: { action: "SUB", quantity, reason: "Product edit stock quantity.", staffName: user?.name || "Staff" } });
-            remaining -= quantity;
-          }
-          if (remaining > 0) throw new Error("Stock quantity cannot be negative.");
-        }
-        const approvedPlans = [];
-        for (const plan of adjustmentPlans) {
-          const approvalToken = await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: productId, targetLabel: form.name.trim(), payload: { mode: "batch", productId, inventoryBatchId: plan.batchId, ...plan.body }, initialReason: plan.body.reason }, (token) => token);
-          approvedPlans.push({ ...plan, approvalToken });
-        }
-        const persistEdit = async () => {
-          await api.products.update(productId, payload);
-          if (delta !== 0) {
-            const batch = inventoryBatches[0];
-            if (delta > 0 && !batch)
-              await api.inventory.create({ productId, quantity: delta, unitCost: Number(form.cost), note: "Stock quantity set during product edit." });
-            else for (const plan of approvedPlans) await api.inventory.adjust(plan.batchId, plan.body, plan.approvalToken);
-          }
-        };
-        await persistEdit();
         setMessage({
           severity: "success",
           text: "Product updated successfully.",
@@ -408,7 +385,7 @@ export default function AddProductPage() {
     save,
     saving,
     loading,
-    hasSaleHistory,
+    supplierOptions,
   };
   if (!isMobile)
     return (
@@ -447,17 +424,10 @@ export default function AddProductPage() {
         />
         <PricingFields form={form} update={update} />
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
-          <Field
-            label="Stock Quantity"
-            value={form.stock}
-            onChange={update("stock")}
-            icon={<Inventory2RoundedIcon />}
-            disabled={isEditMode && hasSaleHistory}
-            helperText={isEditMode && hasSaleHistory ? "Stock quantity is locked because this product has sale history." : undefined}
-          />
+          {!isEditMode && <Field label="Stock Quantity" value={form.stock} onChange={update("stock")} icon={<Inventory2RoundedIcon />} />}
           <UnitField {...props} />
         </Box>
-        {!isEditMode && <StockSourceFields form={form} update={update} />}
+        <StockSourceFields form={form} update={update} supplierOptions={supplierOptions} />
         <Field
           label="Minimum Stock Alert Level (Optional)"
           value={form.minimum}
@@ -651,10 +621,13 @@ function UnitField({ form, update, units }) {
     </Field>
   );
 }
-function StockSourceFields({ form, update }) {
+function SupplierField({ value, onChange, options }) {
+  return <Autocomplete freeSolo autoHighlight options={options} value={value} onInputChange={(_, nextValue) => onChange({ target: { value: nextValue } })} renderInput={(params) => <TextField {...params} label="Supplier (Optional)" />} />;
+}
+function StockSourceFields({ form, update, supplierOptions }) {
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
-      <Field label="Supplier (Optional)" value={form.supplierName} onChange={update("supplierName")} />
+      <SupplierField value={form.supplierName} onChange={update("supplierName")} options={supplierOptions} />
       <Field label="Invoice / Reference No. (Optional)" value={form.invoiceReference} onChange={update("invoiceReference")} />
     </Box>
   );
@@ -671,7 +644,7 @@ function DesktopAddProduct(props) {
     loading,
     isEditMode,
     units,
-    hasSaleHistory,
+    supplierOptions,
   } = props;
   return (
     <Dialog open fullWidth maxWidth="md" onClose={() => navigate("/stock")} slotProps={{ paper: { sx: { width: "calc(100% - 32px)", maxWidth: 760, borderRadius: 3, maxHeight: "88vh" } } }}>
@@ -688,9 +661,10 @@ function DesktopAddProduct(props) {
             onClick={() => setCategoryDialogOpen(true)}
           /></Box>
           <Box sx={{ gridColumn: "1 / -1" }}><PricingFields form={form} update={update} /></Box>
-          <Field label="Stock Quantity" value={form.stock} onChange={update("stock")} icon={<Inventory2RoundedIcon />} disabled={isEditMode && hasSaleHistory} helperText={isEditMode && hasSaleHistory ? "Locked after sale history." : undefined} />
+          {!isEditMode && <Field label="Stock Quantity" value={form.stock} onChange={update("stock")} icon={<Inventory2RoundedIcon />} />}
           <UnitField form={form} update={update} units={units} />
-          {!isEditMode && <><Field label="Supplier (Optional)" value={form.supplierName} onChange={update("supplierName")} /><Field label="Invoice / Reference No. (Optional)" value={form.invoiceReference} onChange={update("invoiceReference")} /></>}
+          <SupplierField value={form.supplierName} onChange={update("supplierName")} options={supplierOptions} />
+          <Field label="Invoice / Reference No. (Optional)" value={form.invoiceReference} onChange={update("invoiceReference")} />
           <Box sx={{ gridColumn: "1 / -1" }}><Field
             label="Minimum Stock Alert Level (Optional)"
             value={form.minimum}

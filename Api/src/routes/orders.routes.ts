@@ -5,6 +5,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
 import { approvalAccessToken, approvalAuditMetadata, approvalPayloadFingerprint, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import { historicalReceiptPaymentSummary } from "../lib/order-payment-balance.js";
+import { allocateRefund, effectiveOrderTotal } from "../lib/order-return-refund.js";
 import { recordInventoryMovement, setInventoryReservation } from "../lib/inventory-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { resolvePrice } from "../lib/pricing-domain.js";
@@ -1404,8 +1405,61 @@ ordersRouter.post("/:shopId/orders/:orderId/product-returns", async (request, re
     const orderId = z.string().min(1).parse(request.params.orderId);
     const input = productReturnSchema.parse(request.body);
     await assertUserOwnsShop(authUser.id, shopId);
+    const authorization = await authorizeSensitiveAction({
+      requesterId: authUser.id,
+      shopId,
+      action: "payment.refund",
+      targetId: orderId,
+      payload: { orderId, ...input },
+      approvalToken: approvalAccessToken(request.headers),
+    });
     const transactionStartedAt = Date.now();
-    const result = await prisma.$transaction((tx) => createProductReturnsInTransaction(tx, shopId, orderId, input, authUser.id, request.header("Idempotency-Key")), ORDER_LIFECYCLE_TRANSACTION_OPTIONS);
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({
+        where: { id: orderId, shopId, fulfillmentStatus: "completed" },
+        include: { items: { include: { returns: true } }, payments: true },
+      });
+      if (!order) throw badRequest("Only completed sales can receive product returns.");
+      const returnedValue = historicalReturnedValue(order, input.items);
+      const paidBalance = Math.max(0, order.payments.reduce((sum, payment) => sum + payment.amount, 0));
+      const availableRefund = order.payments
+        .filter((payment) => payment.amount > 0)
+        .reduce((sum, payment) => sum + payment.amount, 0)
+        - order.payments.filter((payment) => payment.amount < 0 && payment.originalPaymentId).reduce((sum, payment) => sum + Math.abs(payment.amount), 0);
+      const refundAmount = Math.max(0, Math.min(returnedValue, paidBalance, availableRefund));
+      const returnResult = await createProductReturnsInTransaction(
+        tx, shopId, orderId, input, authUser.id, request.header("Idempotency-Key"), undefined, refundAmount > 0,
+      );
+      if (returnResult.duplicate) return { ...returnResult, refunds: [], refundedAmount: 0, returnedValue };
+
+      await consumeManagerApproval(tx, authorization);
+      const allocation = allocateRefund(order.payments, refundAmount);
+      if (allocation.unallocatedAmount > 0) throw badRequest("Refund amount exceeds the refundable payment balance.");
+      const refunds = [];
+      const reason = [...new Set(input.items.map((item) => item.reason))].join("; ");
+      for (const entry of allocation.allocations) {
+        const refund = await tx.payment.create({
+          data: {
+            shopId, orderId, type: "refund", scope: "product-return", method: entry.method,
+            amount: -entry.amount, originalPaymentId: entry.originalPaymentId, reason, note: reason,
+          },
+        });
+        await writeAuditLog(tx, {
+          shopId, actorId: authUser.id, action: "payment.refund", entity: "Payment", entityId: refund.id,
+          metadata: { orderId, refundAmount: entry.amount, method: entry.method, restoredStock: true, ...approvalAuditMetadata(authorization) },
+        });
+        refunds.push(refund);
+      }
+      const paymentsAfter = [...order.payments, ...refunds];
+      const orderAfterReturns = await tx.order.findUniqueOrThrow({
+        where: { id: orderId }, include: { items: { include: { returns: true } } },
+      });
+      const payableTotal = effectiveOrderTotal(orderAfterReturns);
+      const netPaid = paymentsAfter.reduce((sum, payment) => sum + payment.amount, 0);
+      const paymentStatus = netPaid <= 0 ? "unpaid" : netPaid >= payableTotal ? "paid" : "partial";
+      await tx.order.update({ where: { id: orderId }, data: { paymentStatus, ...(refunds.at(-1) ? { refundId: refunds.at(-1)!.id } : {}) } });
+      return { ...returnResult, refunds, refundedAmount: refundAmount, returnedValue };
+    }, ORDER_LIFECYCLE_TRANSACTION_OPTIONS);
     request.log.info({ operation: "product-return", transactionDurationMs: Date.now() - transactionStartedAt }, "Order lifecycle transaction completed");
     response.status(result.duplicate ? 200 : 201).json(result);
   } catch (error) { next(error); }

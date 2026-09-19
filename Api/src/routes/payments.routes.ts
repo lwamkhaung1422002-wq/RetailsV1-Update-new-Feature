@@ -4,6 +4,7 @@ import { z } from "zod";
 import { writeAuditLog } from "../lib/audit-log.js";
 import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import { orderPaidAmount } from "../lib/order-payment-balance.js";
+import { effectiveOrderTotal, remainingRefundablePayments } from "../lib/order-return-refund.js";
 import { prisma } from "../lib/prisma.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -47,7 +48,6 @@ const voidCodSettlementSchema = z.object({
 });
 
 const refundPaymentSchema = z.object({
-  method: z.string().trim().min(1, "Refund method is required."),
   transactionId: z.string().trim().optional(),
   originalPaymentId: z.string().trim().optional(),
   note: z.string().trim().min(1, "Refund reason is required."),
@@ -113,14 +113,16 @@ async function paidAmountForOrder(tx: any, shopId: string, orderId: string): Pro
 async function updateOrderPaymentStatus(tx: any, shopId: string, orderId: string) {
   const order = await tx.order.findFirst({
     where: { id: orderId, shopId },
+    include: { items: { include: { returns: true } } },
   });
 
   if (!order) throw notFound("Order not found.");
 
   const paidAmount = await paidAmountForOrder(tx, shopId, orderId);
+  const payableTotal = effectiveOrderTotal(order);
   const paymentStatus = paidAmount <= 0
     ? "unpaid"
-    : paidAmount >= order.total
+    : paidAmount >= payableTotal
       ? "paid"
       : "partial";
 
@@ -190,7 +192,7 @@ paymentsRouter.post("/:shopId/orders/:orderId/payments", async (request, respons
     const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findFirst({
         where: { id: orderId, shopId },
-        include: { items: { include: { allocations: true } } },
+        include: { items: { include: { allocations: true, returns: true } }, payments: true },
       });
 
       if (!order) throw notFound("Order not found.");
@@ -207,7 +209,7 @@ paymentsRouter.post("/:shopId/orders/:orderId/payments", async (request, respons
       );
 
       const paidAmount = await paidAmountForOrder(tx, shopId, order.id);
-      const remainingAmount = Math.max(0, order.total - paidAmount);
+      const remainingAmount = Math.max(0, effectiveOrderTotal(order) - paidAmount);
       const amount = input.amount ?? remainingAmount;
 
       if (remainingAmount <= 0) {
@@ -426,28 +428,33 @@ paymentsRouter.post("/:shopId/orders/:orderId/refunds", async (request, response
     const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findFirst({
         where: { id: orderId, shopId },
-        include: { items: { include: { allocations: true } } },
+        include: { items: { include: { allocations: true, returns: true } }, payments: true },
       });
 
       if (!order) throw notFound("Order not found.");
-      let originalPayment: { id: string; amount: number } | null = null;
+      let originalPayment: { id: string; amount: number; method: string } | null = null;
       if (input.originalPaymentId) {
         originalPayment = await tx.payment.findFirst({
           where: { id: input.originalPaymentId, shopId, orderId: order.id, amount: { gt: 0 } },
-          select: { id: true, amount: true },
+          select: { id: true, amount: true, method: true },
         });
 
         if (!originalPayment) throw notFound("Original payment not found.");
-        const originalPaymentMethod = await tx.payment.findUnique({ where: { id: originalPayment.id }, select: { method: true } });
-        if (originalPaymentMethod?.method === "COD") {
+        if (originalPayment.method === "COD") {
           throw badRequest("Void COD settlements instead of refunding them.");
         }
-        const priorReversal = await tx.payment.findFirst({ where: { shopId, originalPaymentId: originalPayment.id, amount: { lt: 0 } }, select: { id: true } });
-        if (priorReversal) throw badRequest("This payment has already been cancelled.");
       }
 
       const paidAmount = await paidAmountForOrder(tx, shopId, order.id);
       const refundAmount = input.amount ?? paidAmount;
+      const refundablePayments = remainingRefundablePayments(order.payments);
+      const refundSource = originalPayment
+        ? refundablePayments.find((payment) => payment.id === originalPayment.id)
+        : refundablePayments[0];
+
+      if (refundSource?.method === "COD") {
+        throw badRequest("Void COD settlements instead of refunding them.");
+      }
 
       const authorization = await authorizeSensitiveAction({
         requesterId: authUser.id,
@@ -458,7 +465,7 @@ paymentsRouter.post("/:shopId/orders/:orderId/refunds", async (request, response
         approvalToken: approvalAccessToken(request.headers),
       });
 
-      if (refundAmount <= 0 || refundAmount > paidAmount || (originalPayment && refundAmount > originalPayment.amount)) {
+      if (!refundSource || refundAmount <= 0 || refundAmount > paidAmount || refundAmount > refundSource.refundableAmount) {
         throw badRequest("Refund amount must be within the paid order balance.");
       }
 
@@ -470,19 +477,19 @@ paymentsRouter.post("/:shopId/orders/:orderId/refunds", async (request, response
           orderId: order.id,
           type: "refund",
           scope: "refund",
-          method: input.method,
+          method: refundSource.method,
           amount: -Math.abs(refundAmount),
           reason: input.note,
           note: input.note,
-          ...(input.originalPaymentId !== undefined ? { originalPaymentId: input.originalPaymentId } : {}),
+          originalPaymentId: refundSource.id,
           ...(input.transactionId !== undefined ? { transactionId: input.transactionId } : {}),
           ...(input.paidAt !== undefined ? { paidAt: input.paidAt } : {}),
         },
       });
 
       await tx.order.update({ where: { id: order.id }, data: { refundId: refund.id } });
-      // A cancelled payment restores the outstanding balance. It is not a
-      // terminal order state: the customer may pay again with a new payment.
+      // A refund restores the outstanding balance. It is not a terminal order
+      // state: the customer may pay again with a new payment.
       const updatedOrder = await updateOrderPaymentStatus(tx, shopId, order.id);
 
       await writeAuditLog(tx, {
@@ -491,7 +498,7 @@ paymentsRouter.post("/:shopId/orders/:orderId/refunds", async (request, response
         action: "payment.refund",
         entity: "Payment",
         entityId: refund.id,
-        metadata: { orderId: order.id, refundAmount, method: input.method, restoredStock: false, ...approvalAuditMetadata(authorization) },
+        metadata: { orderId: order.id, refundAmount, method: refundSource.method, restoredStock: false, ...approvalAuditMetadata(authorization) },
       });
 
       return { refund: serializePayment(refund), order: updatedOrder };

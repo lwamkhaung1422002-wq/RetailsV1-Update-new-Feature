@@ -35,9 +35,9 @@ function usePayments(all: Array<Record<string, unknown>>, period = all) {
 describe("payment report", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    const cash = { id: "pay-1", shopId: "branch-2", orderId: "order-1", type: "payment", scope: "order-payment", method: "Cash", amount: 100_000, originalPaymentId: null, paidAt: new Date("2026-09-10T03:00:00.000Z") };
-    const refund = { id: "refund-1", shopId: "branch-2", orderId: "order-1", type: "refund", scope: "financial-refund", method: "Cash", amount: -20_000, originalPaymentId: "pay-1", paidAt: new Date("2026-09-10T04:00:00.000Z") };
-    const wallet = { id: "pay-2", shopId: "branch-2", orderId: "order-2", type: "payment", scope: "order-payment", method: "KBZPay", amount: 50_000, originalPaymentId: null, paidAt: new Date("2026-09-10T05:00:00.000Z") };
+    const cash = { id: "pay-1", shopId: "branch-2", orderId: "order-1", order: { id: "order-1", orderNumber: "INV-00025" }, type: "payment", scope: "order-payment", method: "Cash", amount: 100_000, originalPaymentId: null, paidAt: new Date("2026-09-10T03:00:00.000Z") };
+    const refund = { id: "refund-1", shopId: "branch-2", orderId: "order-1", order: { id: "order-1", orderNumber: "INV-00025" }, type: "refund", scope: "financial-refund", method: "Cash", amount: -20_000, originalPaymentId: "pay-1", paidAt: new Date("2026-09-10T04:00:00.000Z") };
+    const wallet = { id: "pay-2", shopId: "branch-2", orderId: "order-2", order: { id: "order-2", orderNumber: "INV-00026" }, type: "payment", scope: "order-payment", method: "KBZPay", amount: 50_000, originalPaymentId: null, paidAt: new Date("2026-09-10T05:00:00.000Z") };
     mocks.shop.mockResolvedValue({ id: "branch-2", name: "Hledan" });
     usePayments([cash, refund, wallet], [refund, cash, wallet]);
     mocks.audits.mockResolvedValue([
@@ -56,6 +56,7 @@ describe("payment report", () => {
     expect(result.body.methods).toEqual([{ method: "Cash", collected: 100_000, refunds: 20_000, netCollected: 80_000 }]);
     expect(result.body.recent).toHaveLength(2);
     expect(result.body.recent[0].approver).toEqual({ id: "manager-1", name: "Manager" });
+    expect(result.body.recent[0]).toMatchObject({ type: "Refund", source: "Sale Invoice #INV-00025" });
   });
 
   it.each([

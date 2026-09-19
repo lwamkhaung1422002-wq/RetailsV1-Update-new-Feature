@@ -37,13 +37,14 @@ const updateInventoryBatchSchema = z.object({
   unitCost: moneySchema.optional(),
   receivedAt: z.coerce.date().optional(),
   note: z.string().trim().optional(),
+  supplierName: z.string().trim().max(160).nullable().optional(),
+  invoiceReference: z.string().trim().max(160).nullable().optional(),
 });
 
 const adjustmentSchema = z.object({
   action: z.enum(["ADD", "REMOVE", "SUB", "SET"]),
   quantity: z.coerce.number().int().nonnegative(),
   reason: z.string().trim().min(1, "Reason is required."),
-  staffName: z.string().trim().min(1, "Staff name is required."),
 });
 
 inventoryRouter.use(requireAuth);
@@ -126,7 +127,6 @@ const costPriceDecreaseSchema = z.object({
   unitCost: z.coerce.number().int().positive("Cost price must be greater than 0."),
   quantity: z.coerce.number().int().positive("Quantity must be greater than 0."),
   reason: z.string().trim().min(1, "Reason is required."),
-  staffName: z.string().trim().min(1, "Staff name is required."),
 });
 
 inventoryRouter.get("/:shopId/inventory-movements", async (request, response, next) => {
@@ -149,19 +149,30 @@ inventoryRouter.get("/:shopId/inventory-movements", async (request, response, ne
       .filter((movement) => movement.sourceType === "OrderItemAllocation")
       .map((movement) => movement.sourceId?.split(":")[0])
       .filter((value): value is string => Boolean(value));
+    const customerReturnIds = movements
+      .filter((movement) => movement.type === "CUSTOMER_RETURN" && movement.sourceType === "CustomerReturn")
+      .map((movement) => movement.sourceId?.split(":")[0])
+      .filter((value): value is string => Boolean(value));
     const allocations = allocationIds.length ? await prisma.orderItemAllocation.findMany({
       where: { id: { in: allocationIds } },
     }) : [];
     const orderItems = allocations.length ? await prisma.orderItem.findMany({ where: { id: { in: allocations.map((allocation) => allocation.orderItemId) } }, select: { id: true, orderId: true } }) : [];
-    const orders = orderItems.length ? await prisma.order.findMany({ where: { id: { in: orderItems.map((item) => item.orderId) } }, select: { id: true, orderNumber: true } }) : [];
+    const customerReturns = customerReturnIds.length ? await prisma.customerReturn.findMany({ where: { id: { in: customerReturnIds } }, select: { id: true, orderId: true } }) : [];
+    const orderIds = [...new Set([...orderItems.map((item) => item.orderId), ...customerReturns.map((entry) => entry.orderId)])];
+    const orders = orderIds.length ? await prisma.order.findMany({ where: { id: { in: orderIds } }, select: { id: true, orderNumber: true } }) : [];
     const orderIdByItemId = new Map(orderItems.map((item) => [item.id, item.orderId]));
     const invoiceByOrderId = new Map(orders.map((order) => [order.id, order.orderNumber || order.id]));
     const invoiceByAllocationId = new Map(allocations.map((allocation) => [allocation.id, invoiceByOrderId.get(orderIdByItemId.get(allocation.orderItemId) || "")]));
+    const invoiceByReturnId = new Map(customerReturns.map((entry) => [entry.id, invoiceByOrderId.get(entry.orderId)]));
     response.status(200).json({ movements: movements.map(({ inventoryBatch, ...movement }) => ({
       ...movement,
       supplierName: inventoryBatch?.supplierName ?? null,
       invoiceReference: inventoryBatch?.invoiceReference ?? null,
-      invoiceNumber: movement.sourceType === "OrderItemAllocation" && movement.sourceId ? invoiceByAllocationId.get(movement.sourceId.split(":")[0] ?? "") ?? null : null,
+      invoiceNumber: movement.sourceType === "OrderItemAllocation" && movement.sourceId
+        ? invoiceByAllocationId.get(movement.sourceId.split(":")[0] ?? "") ?? null
+        : movement.type === "CUSTOMER_RETURN" && movement.sourceType === "CustomerReturn" && movement.sourceId
+          ? invoiceByReturnId.get(movement.sourceId.split(":")[0] ?? "") ?? null
+          : null,
     })) });
   } catch (error) {
     next(error);
@@ -263,7 +274,7 @@ inventoryRouter.patch("/:shopId/inventory/:inventoryBatchId", async (request, re
 
     const existingBatch = await prisma.inventoryBatch.findFirst({
       where: { id: inventoryBatchId, shopId },
-      select: { id: true },
+      select: { id: true, supplierName: true, invoiceReference: true },
     });
 
     if (!existingBatch) {
@@ -274,6 +285,8 @@ inventoryRouter.patch("/:shopId/inventory/:inventoryBatchId", async (request, re
       ...(input.unitCost !== undefined ? { unitCost: input.unitCost } : {}),
       ...(input.receivedAt !== undefined ? { receivedAt: input.receivedAt } : {}),
       ...(input.note !== undefined ? { note: input.note } : {}),
+      ...(input.supplierName !== undefined ? { supplierName: input.supplierName || null } : {}),
+      ...(input.invoiceReference !== undefined ? { invoiceReference: input.invoiceReference || null } : {}),
     };
 
     const inventoryBatch = await prisma.$transaction(async (tx) => {
@@ -292,6 +305,12 @@ inventoryRouter.patch("/:shopId/inventory/:inventoryBatchId", async (request, re
         action: "inventory.update",
         entity: "InventoryBatch",
         entityId: inventoryBatchId,
+        metadata: {
+          previousSupplierName: existingBatch.supplierName,
+          supplierName: input.supplierName,
+          previousInvoiceReference: existingBatch.invoiceReference,
+          invoiceReference: input.invoiceReference,
+        },
       });
 
       return updatedBatch;
@@ -323,6 +342,8 @@ inventoryRouter.post("/:shopId/inventory/adjustments/by-cost", async (request, r
     const authUser = getAuthUser(request);
     const { shopId } = paramsSchema.parse(request.params);
     const input = costPriceDecreaseSchema.parse(request.body);
+    const actor = await prisma.user.findUnique({ where: { id: authUser.id }, select: { name: true } });
+    const staffName = actor?.name || authUser.email;
     const authorization = await authorizeSensitiveAction({
       requesterId: authUser.id,
       shopId,
@@ -359,7 +380,7 @@ inventoryRouter.post("/:shopId/inventory/adjustments/by-cost", async (request, r
       const adjustment = await tx.stockAdjustment.create({
         data: {
           shopId, productId: input.productId, selectedUnitCost: input.unitCost, action: "SUB", quantity: input.quantity,
-          beforeQuantity, afterQuantity: beforeQuantity - input.quantity, reason: input.reason, staffName: input.staffName,
+          beforeQuantity, afterQuantity: beforeQuantity - input.quantity, reason: input.reason, staffName,
         },
       });
       await tx.stockAdjustmentAllocation.createMany({
@@ -372,13 +393,13 @@ inventoryRouter.post("/:shopId/inventory/adjustments/by-cost", async (request, r
           type: "ADJUSTMENT_OUT", direction: "OUT", quantity, unitCost: batch.unitCost,
           sourceType: "StockAdjustment", sourceId: adjustment.id,
           idempotencyKey: `inventory.adjust.cost:${adjustment.id}:${batch.id}`,
-          reason: input.reason, staffName: input.staffName,
+          reason: input.reason, staffName,
         });
         if (movement) movements.push(movement);
       }
       await writeAuditLog(tx, {
         shopId, actorId: authUser.id, action: "inventory.adjust", entity: "StockAdjustment", entityId: adjustment.id,
-        metadata: { productId: input.productId, unitCost: input.unitCost, quantity: input.quantity, availableQuantity, allocations: deductions.map(({ batch, quantity }) => ({ inventoryBatchId: batch.id, quantity })), reason: input.reason, staffName: input.staffName, ...approvalAuditMetadata(authorization) },
+        metadata: { productId: input.productId, unitCost: input.unitCost, quantity: input.quantity, availableQuantity, allocations: deductions.map(({ batch, quantity }) => ({ inventoryBatchId: batch.id, quantity })), reason: input.reason, staffName, ...approvalAuditMetadata(authorization) },
       });
       const averageCost = await refreshProductWeightedCost(tx, shopId, input.productId);
       await Promise.all(movements.map((movement) => tx.inventoryMovement.update({ where: { id: movement.id }, data: { averageCostAfter: averageCost } })));
@@ -401,6 +422,8 @@ inventoryRouter.post(
       const scopedBatch = await prisma.inventoryBatch.findFirst({ where: { id: inventoryBatchId, shopId }, select: { id: true, productId: true } });
       if (!scopedBatch) throw notFound("Inventory batch not found.");
       const input = adjustmentSchema.parse(request.body);
+      const actor = await prisma.user.findUnique({ where: { id: authUser.id }, select: { name: true } });
+      const staffName = actor?.name || authUser.email;
       const normalizedAction = input.action === "REMOVE" ? "SUB" : input.action;
       const authorization = await authorizeSensitiveAction({
         requesterId: authUser.id,
@@ -463,7 +486,7 @@ inventoryRouter.post(
             beforeQuantity,
             afterQuantity,
             reason: input.reason,
-            staffName: input.staffName,
+            staffName,
           },
         });
 
@@ -480,7 +503,7 @@ inventoryRouter.post(
             beforeQuantity,
             afterQuantity,
             reason: input.reason,
-            staffName: input.staffName,
+            staffName,
             ...approvalAuditMetadata(authorization),
           },
         });
@@ -495,7 +518,7 @@ inventoryRouter.post(
             unitCost: batch.unitCost, sourceType: "StockAdjustment", sourceId: adjustment.id,
             idempotencyKey: String(request.header("Idempotency-Key") || `inventory.adjust:${adjustment.id}`),
             reason: input.reason,
-            staffName: input.staffName,
+            staffName,
           });
         }
         const averageCost = await refreshProductWeightedCost(tx, shopId, batch.productId);
