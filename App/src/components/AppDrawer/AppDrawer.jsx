@@ -21,6 +21,7 @@ import {
   Inventory2Rounded as InventoryIcon,
   LocalOfferRounded as PriceIcon,
   LogoutRounded as LogoutIcon,
+  FactCheckRounded as OperationsIcon,
   GroupsRounded as StaffAccessIcon,
   SettingsRounded as SettingsRoundedIcon,
   ShoppingCartRounded as SaleIcon,
@@ -64,6 +65,11 @@ const menuItems = [
     label: "Payment Report",
     path: "/report/payments",
     icon: <PaymentIcon />, permission: "report.viewSales",
+  },
+  {
+    label: "Operations",
+    path: "/report/operations",
+    icon: <OperationsIcon />, permission: "audit.view",
   },
   { label: "Settings", path: "/settings", icon: <SettingsRoundedIcon />, permission: "settings.manage" },
 ];
