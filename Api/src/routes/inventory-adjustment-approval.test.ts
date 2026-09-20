@@ -171,4 +171,23 @@ describe("inventory batch adjustment approval metadata", () => {
       metadata: expect.objectContaining({ previousSupplierName: "Old Supplier", previousInvoiceReference: "OLD-1" }),
     }));
   });
+
+  it("clears source fields on the selected existing batch without creating stock activity", async () => {
+    mocks.scopedBatch.mockResolvedValue({ id: "batch-1", supplierName: "Old Supplier", invoiceReference: "OLD-1" });
+    mocks.updateBatch.mockResolvedValue({ id: "batch-1", supplierName: null, invoiceReference: null });
+
+    await request(app)
+      .patch("/shop-1/inventory/batch-1")
+      .send({ supplierName: "", invoiceReference: "" })
+      .expect(200);
+
+    expect(mocks.updateBatch).toHaveBeenCalledOnce();
+    expect(mocks.updateBatch).toHaveBeenCalledWith({
+      where: { id: "batch-1" },
+      data: { supplierName: null, invoiceReference: null },
+      include: { product: true, variant: true },
+    });
+    expect(mocks.createAdjustment).not.toHaveBeenCalled();
+    expect(mocks.recordMovement).not.toHaveBeenCalled();
+  });
 });

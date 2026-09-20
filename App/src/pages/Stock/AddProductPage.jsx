@@ -145,7 +145,7 @@ export default function AddProductPage() {
             supplierName: latestSource?.supplierName || "",
             invoiceReference: latestSource?.invoiceReference || "",
             unitId: baseUnit?.unitId || nextUnits[0]?.id || "",
-            minimum: "10",
+            minimum: String(product.minimumStock ?? 10),
           });
           setActiveBarcode(productResult.activeBarcode || null);
           setActiveShortCode(shortCodeRecord || null);
@@ -622,7 +622,33 @@ function UnitField({ form, update, units }) {
   );
 }
 function SupplierField({ value, onChange, options }) {
-  return <Autocomplete freeSolo autoHighlight options={options} value={value} onInputChange={(_, nextValue) => onChange({ target: { value: nextValue } })} renderInput={(params) => <TextField {...params} label="Supplier (Optional)" />} />;
+  return (
+    <Box sx={{ mb: { xs: 2, md: 1.25 } }}>
+      <Stack direction="row" alignItems="center" sx={{ minHeight: 32, mb: 0.75 }}>
+        <Typography noWrap fontSize={16} fontWeight={700}>Supplier (Optional)</Typography>
+      </Stack>
+      <Autocomplete
+        freeSolo
+        autoHighlight
+        options={options}
+        value={value}
+        onInputChange={(_, nextValue) => onChange({ target: { value: nextValue } })}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            sx={{
+              "& .MuiOutlinedInput-root": {
+                minHeight: { xs: 64, md: 56 },
+                borderRadius: 1.5,
+                fontSize: 16,
+                "& fieldset": { borderColor: "#b8b8b8" },
+              },
+            }}
+          />
+        )}
+      />
+    </Box>
+  );
 }
 function StockSourceFields({ form, update, supplierOptions }) {
   return (

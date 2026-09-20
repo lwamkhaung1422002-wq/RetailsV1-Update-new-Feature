@@ -150,22 +150,22 @@ export default function AddStockMovementPage() {
       quantity: !quantity || Number(quantity) <= 0,
       cost: movementType === "in" && (!cost || Number(cost) <= 0),
       adjustmentCost: movementType === "adjustment" && adjustmentType === "decrease" && !adjustmentCost,
-      notes: !notes.trim(),
+      notes: movementType === "adjustment" && !notes.trim(),
     };
     setErrors(nextErrors);
     if (Object.values(nextErrors).some(Boolean)) return;
     try { if (movementType === "in") await api.inventory.create(stockInReceiptPayload({ productId: product.id, quantity, cost, notes, supplierName, invoiceReference })); else if (adjustmentType === "decrease") { const body = { productId: product.id, unitCost: Number(adjustmentCost), quantity: Number(quantity), reason: notes.trim() }; await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: product.id, targetLabel: product.name, payload: { mode: "by-cost", ...body, action: "SUB" }, initialReason: body.reason }, (approvalToken) => api.inventory.adjustByCost(body, approvalToken)); } else { const batch = batches.find((item) => item.productId === product.id); if (!batch) throw new Error("Add stock before recording an adjustment."); const body = { action: "ADD", quantity: Number(quantity), reason: notes.trim() }; await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: product.id, targetLabel: product.name, payload: { mode: "batch", productId: product.id, inventoryBatchId: batch.id, ...body }, initialReason: body.reason }, (approvalToken) => api.inventory.adjust(batch.id, body, approvalToken)); }
-      // Stock History is the next screen, so its movement feed stays critical.
-      // Catalog, pricing and analytical summaries refresh without delaying navigation.
-      await queryClient.invalidateQueries({ queryKey: queryKeys.movements(shop?.id) });
-      void Promise.all([
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.movements(shop?.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.products(shop?.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.inventory(shop?.id) }),
+      ]);
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.pricing(shop?.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(shop?.id) }),
         queryClient.invalidateQueries({ queryKey: ["shops", shop?.id, "reports"] }),
       ]);
-      navigate("/stock/history");
+      navigate("/stock");
     } catch (error) { if (!error.approvalCancelled) setErrors((current) => ({ ...current, submit: error.message || "Unable to save stock movement." })); }
   };
 
@@ -175,7 +175,7 @@ export default function AddStockMovementPage() {
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default", pb: "128px", fontFamily: "Inter, Roboto, Noto Sans Myanmar, sans-serif" }}>
       <AppBar position="sticky" elevation={0} sx={{ bgcolor: "primary.main" }}>
         <Toolbar sx={{ minHeight: 64, display: "grid", gridTemplateColumns: "1fr auto 1fr" }}>
-          <IconButton aria-label="Back to stock history" onClick={() => navigate("/stock/history")} sx={{ justifySelf: "start", color: "common.white" }}><ArrowBackRoundedIcon /></IconButton>
+          <IconButton aria-label="Back to inventory" onClick={() => navigate("/stock")} sx={{ justifySelf: "start", color: "common.white" }}><ArrowBackRoundedIcon /></IconButton>
           <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Add Stock Movement</Typography>
           <Box />
         </Toolbar>
@@ -224,7 +224,7 @@ export default function AddStockMovementPage() {
 
 function DesktopAddStockMovement({ movementType, setMovementType, adjustmentType, setAdjustmentType, query, filteredProducts, activeProductCount, product, selectProduct, findProduct, onProductInputChange, onSearchKeyDown, productsLoading, productsError, quantity, setQuantity, cost, setCost, supplierName, setSupplierName, supplierOptions, invoiceReference, setInvoiceReference, adjustmentCost, setAdjustmentCost, availableCostBuckets, notes, setNotes, errors, onClose, onSave }) {
   return <Dialog open fullWidth maxWidth="md" onClose={onClose} slotProps={{ paper: { sx: { maxWidth: 920, borderRadius: 3, maxHeight: "88vh" } } }}>
-    <DialogTitle sx={{ px: 3, py: 2.25, borderBottom: "1px solid", borderColor: "divider" }}><Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Box><Typography sx={{ fontSize: 22, fontWeight: 800 }}>Add Stock Movement</Typography><Typography color="text.secondary" sx={{ mt: .4, fontSize: 14 }}>Record stock in or an inventory adjustment.</Typography></Box><IconButton aria-label="Close stock movement" onClick={onClose}><CloseRoundedIcon /></IconButton></Box></DialogTitle>
+    <DialogTitle sx={{ px: 3, py: 2.25, borderBottom: "1px solid", borderColor: "divider" }}><Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography sx={{ fontSize: 22, fontWeight: 800 }}>Add Stock Movement</Typography><IconButton aria-label="Close stock movement" onClick={onClose}><CloseRoundedIcon /></IconButton></Box></DialogTitle>
     <DialogContent dividers sx={{ p: 3 }}><Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 3 }}>
       <Box><Typography sx={sectionLabelSx}>SELECT PRODUCT</Typography><Autocomplete freeSolo autoHighlight autoSelect openOnFocus options={filteredProducts} value={product} filterOptions={(options) => options} isOptionEqualToValue={(option, value) => option.id === value.id} getOptionLabel={(option) => typeof option === "string" ? option : option.name} inputValue={query} onInputChange={onProductInputChange} onChange={(_, value) => selectProduct(typeof value === "string" ? findProduct(value) : value)} renderInput={(params) => <TextField {...params} placeholder={productsLoading ? "Loading products…" : "Search product or enter barcode"} disabled={productsLoading} error={Boolean(errors.product || productsError)} helperText={productsError || (!productsLoading && activeProductCount === 0 ? "No active products. Create a product first." : typeof errors.product === "string" ? errors.product : errors.product ? "Select a product" : "")} onKeyDown={onSearchKeyDown} slotProps={{ input: { ...params.slotProps.input, startAdornment: <><InputAdornment position="start"><SearchRoundedIcon color="action" /></InputAdornment>{params.slotProps.input.startAdornment}</>, endAdornment: product ? <InputAdornment position="end"><IconButton aria-label="Clear selected product" onClick={() => selectProduct(null)}><CloseRoundedIcon /></IconButton></InputAdornment> : params.slotProps.input.endAdornment }, htmlInput: params.slotProps.htmlInput }} sx={{ ...fieldSx, mb: 0 }} />} />
         {product && <SelectedProduct product={product} onClear={() => selectProduct(null)} />}
@@ -246,7 +246,7 @@ function MovementButton({ active, onClick, icon, label, tone, compact = false })
 }
 
 function StockInForm({ quantity, setQuantity, cost, setCost, supplierName, setSupplierName, supplierOptions, invoiceReference, setInvoiceReference, notes, setNotes, errors }) {
-  return <><InputField label="Quantity *" value={quantity} onChange={(event) => setQuantity(event.target.value)} icon={<Inventory2RoundedIcon />} inputMode="numeric" type="number" error={errors.quantity} helperText="Enter a valid quantity" /><InputField label="Cost Price *" value={cost} onChange={(event) => setCost(event.target.value)} icon={<CurrencyExchangeRoundedIcon />} inputMode="decimal" type="number" error={errors.cost} helperText="Enter a cost price greater than 0" endAdornment="ကျပ်" /><Autocomplete freeSolo autoHighlight options={supplierOptions} value={supplierName} onInputChange={(_, value) => setSupplierName(value)} renderInput={(params) => <TextField {...params} label="Supplier (Optional)" sx={fieldSx} />} /><InputField label="Invoice / Reference No. (Optional)" value={invoiceReference} onChange={(event) => setInvoiceReference(event.target.value)} /><InputField label="Notes *" value={notes} onChange={(event) => setNotes(event.target.value)} icon={<NotesRoundedIcon />} multiline minRows={4} error={errors.notes} helperText="Notes are required" /></>;
+  return <><InputField label="Quantity *" value={quantity} onChange={(event) => setQuantity(event.target.value)} icon={<Inventory2RoundedIcon />} inputMode="numeric" type="number" error={errors.quantity} helperText="Enter a valid quantity" /><InputField label="Cost Price *" value={cost} onChange={(event) => setCost(event.target.value)} icon={<CurrencyExchangeRoundedIcon />} inputMode="decimal" type="number" error={errors.cost} helperText="Enter a cost price greater than 0" endAdornment="ကျပ်" /><Autocomplete freeSolo autoHighlight options={supplierOptions} value={supplierName} onInputChange={(_, value) => setSupplierName(value)} renderInput={(params) => <TextField {...params} label="Supplier (Optional)" sx={fieldSx} />} /><InputField label="Invoice / Reference No. (Optional)" value={invoiceReference} onChange={(event) => setInvoiceReference(event.target.value)} /><InputField label="Notes (Optional)" value={notes} onChange={(event) => setNotes(event.target.value)} icon={<NotesRoundedIcon />} multiline minRows={4} /></>;
 }
 
 function AdjustmentForm({ adjustmentType, setAdjustmentType, quantity, setQuantity, adjustmentCost, setAdjustmentCost, availableCostBuckets, notes, setNotes, errors }) {

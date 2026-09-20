@@ -41,6 +41,17 @@ describe("stock receipt source payloads", () => {
     })).toEqual({ productId: "product-1", quantity: 7, unitCost: 600, note: "Stock in" });
   });
 
+  it("omits blank Stock In Notes", () => {
+    expect(stockInReceiptPayload({
+      productId: "product-1",
+      quantity: "7",
+      cost: "600",
+      notes: "   ",
+      supplierName: "",
+      invoiceReference: "",
+    })).toEqual({ productId: "product-1", quantity: 7, unitCost: 600 });
+  });
+
   it("submits source metadata for Stock In", () => {
     expect(stockInReceiptPayload({
       productId: "product-1",

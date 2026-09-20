@@ -118,6 +118,9 @@ describe("stock receipt source audit", () => {
     mocks.listBatches.mockResolvedValue([{ id: "legacy-batch", supplierName: null, invoiceReference: null }]);
     const result = await request(app).get("/shop-1/inventory").expect(200);
     expect(result.body.inventory).toEqual([{ id: "legacy-batch", supplierName: null, invoiceReference: null }]);
+    expect(mocks.listBatches).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
+    }));
   });
 
   it("returns receipt source metadata on existing stock movement history", async () => {

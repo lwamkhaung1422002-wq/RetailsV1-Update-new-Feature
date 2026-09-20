@@ -64,7 +64,7 @@ export default function StockPage() {
     return (productResult?.products || []).map((product) => ({
       id: product.id, name: product.name, sku: product.sku || "", barcodeValues: (product.barcodes || []).map((barcode) => barcode.value).filter(Boolean),
       category: product.category?.name || categoryNames.get(product.categoryId) || "Uncategorized", price: Number(product.price || 0), cost: Number(product.cost || 0),
-      stock: Number(product.currentStock ?? totals.get(product.id) ?? 0), hasSaleHistory: Boolean(product.hasSaleHistory),
+      stock: Number(product.currentStock ?? totals.get(product.id) ?? 0), minimumStock: Number(product.minimumStock ?? 10), hasSaleHistory: Boolean(product.hasSaleHistory),
     }));
   }, [categoryResult, inventoryResult, productResult]);
 
@@ -86,7 +86,7 @@ export default function StockPage() {
       !query || [product.name, product.sku, ...(product.barcodeValues || [])]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query))
-    ) && (!lowStockOnly || product.stock < 10));
+    ) && (!lowStockOnly || product.stock < product.minimumStock));
     if (sort === "name") return [...result].sort((a, b) => a.name.localeCompare(b.name));
     if (sort === "price") return [...result].sort((a, b) => b.price - a.price);
     if (sort === "stock") return [...result].sort((a, b) => a.stock - b.stock);
@@ -174,7 +174,7 @@ export default function StockPage() {
               <Stack direction="row" alignItems="center" spacing={1.25}>
                 <Box sx={{ minWidth: 0, flexGrow: 1 }}>
                   <Typography color="text.primary" fontSize={18} fontWeight={600}>{product.name}<Box component="span" sx={{ ml: 0.75, color: "text.secondary", fontSize: 14, fontWeight: 400 }}>· {product.category}</Box></Typography>
-                  <Stack direction="row" alignItems="center" spacing={0.7} sx={{ mt: 0.65, color: product.stock < 10 ? "error.main" : "success.main" }}><Inventory2RoundedIcon fontSize="small" /><Typography variant="body2">{product.stock} pcs</Typography></Stack>
+                  <Stack direction="row" alignItems="center" spacing={0.7} sx={{ mt: 0.65, color: product.stock < product.minimumStock ? "error.main" : "success.main" }}><Inventory2RoundedIcon fontSize="small" /><Typography variant="body2">{product.stock} pcs</Typography></Stack>
                 </Box>
                 <Box sx={{ alignSelf: "stretch", display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "flex-end" }}>
                   <Typography color="primary.main" fontWeight={700} fontSize={17}>{formatMoney(product.cost)}</Typography>
@@ -227,7 +227,7 @@ function DesktopInventoryPage({ products, search, setSearch, summary, lowStockOn
         <CardContent sx={{ p: 1.75, "&:last-child": { pb: 1.75 } }}>
           <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography noWrap sx={{ minWidth: 0, fontSize: 17, fontWeight: 700 }}>{product.name}<Box component="span" sx={{ ml: 0.75, color: "text.secondary", fontSize: 13, fontWeight: 400 }}>· {product.category}</Box></Typography><IconButton aria-label={`Actions for ${product.name}`} onClick={(event) => { event.stopPropagation(); setMenuAnchor(event.currentTarget); setMenuProduct(product); }} size="small"><MoreVertRoundedIcon /></IconButton></Box>
           <Divider sx={{ my: 1.5 }} />
-          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}><Box><Typography color="text.secondary" sx={{ fontSize: 12 }}>Stock</Typography><Typography color={product.stock < 10 ? "error.main" : "success.main"} sx={{ fontSize: 15, fontWeight: 800, mt: .5 }}>{product.stock} pcs</Typography></Box><Box sx={{ textAlign: "right" }}><Typography color="text.secondary" sx={{ fontSize: 12 }}>Cost Price</Typography><Typography sx={{ fontSize: 15, fontWeight: 800, mt: .5, whiteSpace: "nowrap" }}>{formatMoney(product.cost)}</Typography></Box></Box>
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}><Box><Typography color="text.secondary" sx={{ fontSize: 12 }}>Stock</Typography><Typography color={product.stock < product.minimumStock ? "error.main" : "success.main"} sx={{ fontSize: 15, fontWeight: 800, mt: .5 }}>{product.stock} pcs</Typography></Box><Box sx={{ textAlign: "right" }}><Typography color="text.secondary" sx={{ fontSize: 12 }}>Cost Price</Typography><Typography sx={{ fontSize: 15, fontWeight: 800, mt: .5, whiteSpace: "nowrap" }}>{formatMoney(product.cost)}</Typography></Box></Box>
           <Divider sx={{ my: 1.5 }} />
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Typography color="text.secondary" sx={{ fontSize: 12 }}>Total Value</Typography><Typography sx={{ fontSize: 14, fontWeight: 800 }}>{formatMoney(product.cost * product.stock)}</Typography></Box>
         </CardContent>

@@ -3,7 +3,6 @@ import { useNavigate, useParams } from "react-router";
 import {
   AppBar,
   Box,
-  Button,
   Card,
   CardContent,
   CircularProgress,
@@ -12,7 +11,6 @@ import {
   DialogTitle,
   IconButton,
   LinearProgress,
-  Stack,
   Toolbar,
   Typography,
   useMediaQuery,
@@ -45,9 +43,6 @@ export default function ProductDetailsPage() {
   const [sourceHistory, setSourceHistory] = useState([]);
   const [sourceHistoryLoading, setSourceHistoryLoading] = useState(false);
   const [sourceHistoryError, setSourceHistoryError] = useState("");
-  const [auditOpen, setAuditOpen] = useState(false);
-  const [auditLogs, setAuditLogs] = useState([]);
-  const [auditLoading, setAuditLoading] = useState(false);
   const [reloadVersion, setReloadVersion] = useState(0);
 
   const openCostHistory = async () => {
@@ -62,10 +57,6 @@ export default function ProductDetailsPage() {
     } finally {
       setCostHistoryLoading(false);
     }
-  };
-  const openAuditHistory = async () => {
-    setAuditOpen(true); setAuditLoading(true);
-    try { const result = await api.audit({ entity: "Product", entityId: productId, pageSize: 100 }); setAuditLogs(result.auditLogs || []); } catch { setAuditLogs([]); } finally { setAuditLoading(false); }
   };
   const openSourceHistory = async () => {
     setSourceHistoryOpen(true); setSourceHistoryLoading(true); setSourceHistoryError("");
@@ -122,7 +113,7 @@ export default function ProductDetailsPage() {
           price: Number(apiProduct.price || 0),
           stock,
           hasSaleHistory: Boolean(productResult.hasSaleHistory),
-          minimumStock: 10,
+          minimumStock: Number(apiProduct.minimumStock ?? 10),
           movement: latestMovement
             ? {
                 type: isOut ? "OUT" : "IN",
@@ -152,7 +143,7 @@ export default function ProductDetailsPage() {
   const stockHealth = Math.min(100, Math.round((product.stock / Math.max(product.minimumStock, 1)) * 100));
 
   if (!isMobile) {
-    return <><DesktopProductDetails product={product} productId={productId} profit={profit} profitPercent={profitPercent} stockHealth={stockHealth} navigate={navigate} onOpenCostHistory={openCostHistory} onOpenSourceHistory={openSourceHistory} onOpenAuditHistory={openAuditHistory} onRemove={removeProduct} deleting={deleting} /><CostHistoryDialog open={costHistoryOpen} onClose={() => setCostHistoryOpen(false)} history={costHistory} loading={costHistoryLoading} error={costHistoryError} /><SourceHistoryDialog open={sourceHistoryOpen} onClose={() => setSourceHistoryOpen(false)} history={sourceHistory} loading={sourceHistoryLoading} error={sourceHistoryError} /><ProductAuditDialog open={auditOpen} onClose={() => setAuditOpen(false)} logs={auditLogs} loading={auditLoading} /></>;
+    return <><DesktopProductDetails product={product} productId={productId} profit={profit} profitPercent={profitPercent} stockHealth={stockHealth} navigate={navigate} onOpenCostHistory={openCostHistory} onOpenSourceHistory={openSourceHistory} onRemove={removeProduct} deleting={deleting} /><CostHistoryDialog open={costHistoryOpen} onClose={() => setCostHistoryOpen(false)} history={costHistory} loading={costHistoryLoading} error={costHistoryError} /><SourceHistoryDialog open={sourceHistoryOpen} onClose={() => setSourceHistoryOpen(false)} history={sourceHistory} loading={sourceHistoryLoading} error={sourceHistoryError} /></>;
   }
 
   return (
@@ -209,6 +200,7 @@ export default function ProductDetailsPage() {
                 <Typography color="primary.main" sx={{ fontSize: 43, fontWeight: 700, lineHeight: 1 }}>{product.stock} pcs</Typography>
               </Box>
             </Box>
+            <DetailRow label="Total Stock Value" value={formatMoney(product.stock * product.cost)} />
             <DetailRow label="Min Stock Alert" value={`${product.minimumStock} pcs`} />
             <Box sx={{ mt: 3.5 }}>
               <DetailRow label="Stock Health" value={`${stockHealth}%`} valueColor="success.main" emphasis />
@@ -219,20 +211,16 @@ export default function ProductDetailsPage() {
 
         <MovementPanel product={product} navigate={navigate} />
       </Box>
-      <Box sx={{ px: 3, pb: 3 }}><Button variant="outlined" fullWidth onClick={openAuditHistory}>Product History</Button></Box>
       <CostHistoryDialog open={costHistoryOpen} onClose={() => setCostHistoryOpen(false)} history={costHistory} loading={costHistoryLoading} error={costHistoryError} />
       <SourceHistoryDialog open={sourceHistoryOpen} onClose={() => setSourceHistoryOpen(false)} history={sourceHistory} loading={sourceHistoryLoading} error={sourceHistoryError} />
-      <ProductAuditDialog open={auditOpen} onClose={() => setAuditOpen(false)} logs={auditLogs} loading={auditLoading} />
     </Box>
   );
 }
 
-function DesktopProductDetails({ product, productId, profit, profitPercent, stockHealth, navigate, onOpenCostHistory, onOpenSourceHistory, onOpenAuditHistory, onRemove, deleting }) {
-  const actions = <><IconButton aria-label="Edit product" title="Edit product" onClick={() => navigate(`/stock/add?edit=${productId}`)} sx={{ width: 44, height: 44, borderRadius: 2, bgcolor: "primary.main", color: "common.white", "&:hover": { bgcolor: "primary.dark" } }}><EditRoundedIcon /></IconButton><Button variant="outlined" onClick={onOpenAuditHistory}>Product History</Button><IconButton aria-label="Delete product" title="Delete product" disabled={deleting || product.hasSaleHistory} onClick={onRemove} sx={{ width: 44, height: 44, border: "1px solid", borderColor: "error.main", borderRadius: 2, color: "error.main" }}><DeleteRoundedIcon /></IconButton></>;
-  return <DesktopPage title={product.name} actionAfter={actions} headerMarginBottom={2}><Box sx={{ display: "grid", gridTemplateColumns: "minmax(360px, 0.75fr) minmax(0, 1.25fr)", gap: 3, alignItems: "start" }}><DesktopPanel><Box sx={{ display: "grid", gap: 1.5 }}><DesktopDetail label="Description" value={product.description} muted={product.description === "Not set"} /><DesktopDetail label="SKU" value={product.sku} muted={product.sku === "Not set"} /><DesktopDetail label="Barcode" value={product.barcode} muted={product.barcode === "Not set"} /><DesktopDetail label="Item Code" value={product.itemCode} muted={product.itemCode === "Not set"} /><DesktopDetail label="Category" value={product.category} /><DesktopDetail label="Created" value={product.created} /><DesktopDetail label="Updated" value={product.updated} /></Box></DesktopPanel><Box sx={{ display: "grid", gap: 3, alignContent: "start" }}><Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2.25 }}><DesktopStat label="Cost Price" value={formatMoney(product.cost)} action={<><IconButton aria-label="View cost price history" onClick={onOpenCostHistory} size="small"><ReceiptLongOutlinedIcon fontSize="small" /></IconButton><IconButton aria-label="View stock source history" onClick={onOpenSourceHistory} size="small"><LocalShippingOutlinedIcon fontSize="small" /></IconButton></>} /><DesktopStat label="Selling Price" value={formatMoney(product.price)} color="primary.main" /></Box><DesktopPanel><Typography sx={{ fontSize: 19, fontWeight: 700, mb: 2 }}>Profitability</Typography><Box sx={{ p: 2.5, borderRadius: 2.5, bgcolor: "#f0f9f1", border: "1px solid", borderColor: "success.light", display: "grid", gap: 1.5 }}><DesktopDetail label="Profit Margin" value={formatMoney(profit)} color="success.main" /><DesktopDetail label="Profit %" value={`${profitPercent.toFixed(1)}%`} color="success.main" /></Box></DesktopPanel><DesktopPanel><Box sx={{ display: "grid", gridTemplateColumns: "0.8fr 1.2fr", gap: 3, alignItems: "center" }}><Box sx={{ p: 3, borderRadius: 2.5, bgcolor: "#eaf3ff", textAlign: "center" }}><Typography color="text.secondary">Current Stock</Typography><Typography color="primary.main" sx={{ fontSize: 36, fontWeight: 700, mt: 1 }}>{product.stock} pcs</Typography></Box><Box><DesktopDetail label="Min Stock Alert" value={`${product.minimumStock} pcs`} /><Box sx={{ mt: 2.5 }}><DesktopDetail label="Stock Health" value={`${stockHealth}%`} color="success.main" /><LinearProgress variant="determinate" value={stockHealth} color="success" sx={{ mt: 1.25, height: 10, borderRadius: 99 }} /></Box></Box></Box></DesktopPanel><MovementPanel product={product} navigate={navigate} desktop title="Current Stock Movement" /></Box></Box></DesktopPage>;
+function DesktopProductDetails({ product, productId, profit, profitPercent, stockHealth, navigate, onOpenCostHistory, onOpenSourceHistory, onRemove, deleting }) {
+  const actions = <><IconButton aria-label="Edit product" title="Edit product" onClick={() => navigate(`/stock/add?edit=${productId}`)} sx={{ width: 44, height: 44, borderRadius: 2, bgcolor: "primary.main", color: "common.white", "&:hover": { bgcolor: "primary.dark" } }}><EditRoundedIcon /></IconButton><IconButton aria-label="Delete product" title="Delete product" disabled={deleting || product.hasSaleHistory} onClick={onRemove} sx={{ width: 44, height: 44, border: "1px solid", borderColor: "error.main", borderRadius: 2, color: "error.main" }}><DeleteRoundedIcon /></IconButton></>;
+  return <DesktopPage title={product.name} actionAfter={actions} headerMarginBottom={2}><Box sx={{ display: "grid", gridTemplateColumns: "minmax(360px, 0.75fr) minmax(0, 1.25fr)", gap: 3, alignItems: "start" }}><DesktopPanel><Box sx={{ display: "grid", gap: 1.5 }}><DesktopDetail label="Description" value={product.description} muted={product.description === "Not set"} /><DesktopDetail label="SKU" value={product.sku} muted={product.sku === "Not set"} /><DesktopDetail label="Barcode" value={product.barcode} muted={product.barcode === "Not set"} /><DesktopDetail label="Item Code" value={product.itemCode} muted={product.itemCode === "Not set"} /><DesktopDetail label="Category" value={product.category} /><DesktopDetail label="Created" value={product.created} /><DesktopDetail label="Updated" value={product.updated} /></Box></DesktopPanel><Box sx={{ display: "grid", gap: 3, alignContent: "start" }}><Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2.25 }}><DesktopStat label="Cost Price" value={formatMoney(product.cost)} action={<><IconButton aria-label="View cost price history" onClick={onOpenCostHistory} size="small"><ReceiptLongOutlinedIcon fontSize="small" /></IconButton><IconButton aria-label="View stock source history" onClick={onOpenSourceHistory} size="small"><LocalShippingOutlinedIcon fontSize="small" /></IconButton></>} /><DesktopStat label="Selling Price" value={formatMoney(product.price)} color="primary.main" /></Box><DesktopPanel><Typography sx={{ fontSize: 19, fontWeight: 700, mb: 2 }}>Profitability</Typography><Box sx={{ p: 2.5, borderRadius: 2.5, bgcolor: "#f0f9f1", border: "1px solid", borderColor: "success.light", display: "grid", gap: 1.5 }}><DesktopDetail label="Profit Margin" value={formatMoney(profit)} color="success.main" /><DesktopDetail label="Profit %" value={`${profitPercent.toFixed(1)}%`} color="success.main" /></Box></DesktopPanel><DesktopPanel><Box sx={{ display: "grid", gridTemplateColumns: "0.8fr 1.2fr", gap: 3, alignItems: "center" }}><Box sx={{ p: 3, borderRadius: 2.5, bgcolor: "#eaf3ff", textAlign: "center" }}><Typography color="text.secondary">Current Stock</Typography><Typography color="primary.main" sx={{ fontSize: 36, fontWeight: 700, mt: 1 }}>{product.stock} pcs</Typography></Box><Box><DesktopDetail label="Total Stock Value" value={formatMoney(product.stock * product.cost)} /><DesktopDetail label="Min Stock Alert" value={`${product.minimumStock} pcs`} /><Box sx={{ mt: 2.5 }}><DesktopDetail label="Stock Health" value={`${stockHealth}%`} color="success.main" /><LinearProgress variant="determinate" value={stockHealth} color="success" sx={{ mt: 1.25, height: 10, borderRadius: 99 }} /></Box></Box></Box></DesktopPanel><MovementPanel product={product} navigate={navigate} desktop title="Current Stock Movement" /></Box></Box></DesktopPage>;
 }
-
-function ProductAuditDialog({ open, onClose, logs, loading }) { return <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm"><DialogTitle sx={{ fontWeight: 700 }}>Product History</DialogTitle><DialogContent dividers>{loading ? <Box sx={{ py: 4, display: "grid", placeItems: "center" }}><CircularProgress size={28} /></Box> : !logs.length ? <Typography color="text.secondary">No product history yet.</Typography> : <Stack spacing={1.5}>{logs.map((log) => <Box key={log.id} sx={{ pb: 1.25, borderBottom: "1px solid", borderColor: "divider" }}><Typography sx={{ fontWeight: 700 }}>{String(log.action || "Product update").replace("product.", "").replaceAll("_", " ")}</Typography><Typography color="text.secondary" sx={{ fontSize: 13 }}>{new Date(log.createdAt).toLocaleString("en-GB", { timeZone: "Asia/Yangon" })}</Typography></Box>)}</Stack>}</DialogContent></Dialog>; }
 
 function MovementPanel({ product, navigate, desktop = false, title = "Recent Stock Movements" }) {
   const content = <Box sx={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 1.75, alignItems: "start" }}><Box sx={{ border: 1.5, borderColor: product.movement.type === "IN" ? "success.main" : "error.main", color: product.movement.type === "IN" ? "success.main" : "error.main", borderRadius: 999, px: 1.4, py: 0.8, fontSize: 16, fontWeight: 700 }}>{product.movement.type}</Box><Box><Typography color={product.movement.type === "IN" ? "success.main" : "error.main"} sx={{ fontSize: desktop ? 16 : 21, fontWeight: 700, lineHeight: 1.15 }}>{product.movement.quantity}</Typography><Typography color="text.secondary" sx={{ mt: 1, fontSize: desktop ? 14 : 17 }}>{product.movement.reason}</Typography></Box><Typography color="text.secondary" sx={{ fontSize: desktop ? 14 : 15, whiteSpace: "nowrap" }}>{product.movement.date}</Typography></Box>;

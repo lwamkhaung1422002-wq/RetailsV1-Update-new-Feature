@@ -112,7 +112,7 @@ inventoryRouter.get("/:shopId/inventory", async (request, response, next) => {
         product: true,
         variant: true,
       },
-      orderBy: { receivedAt: "desc" },
+      orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
     });
 
     response.status(200).json({ inventory });

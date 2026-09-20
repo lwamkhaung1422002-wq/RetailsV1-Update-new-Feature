@@ -19,11 +19,12 @@ export function initialStockReceiptPayload({ productId, stock, cost, supplierNam
 }
 
 export function stockInReceiptPayload({ productId, quantity, cost, notes, supplierName, invoiceReference }) {
+  const note = String(notes || "").trim();
   return {
     productId,
     quantity: Number(quantity),
     unitCost: Number(cost),
-    note: notes.trim(),
+    ...(note ? { note } : {}),
     ...optionalSourceFields(supplierName, invoiceReference),
   };
 }
