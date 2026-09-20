@@ -67,3 +67,20 @@ export function allocateRefund(payments: RefundablePayment[], requestedAmount: n
   }
   return { allocations, unallocatedAmount: remaining };
 }
+
+export function remainingCancellationSlices<T>(
+  slices: T[],
+  quantityOf: (slice: T) => unknown,
+  alreadyReturned: unknown,
+) {
+  let returnedRemaining = Math.max(0, Number(alreadyReturned ?? 0));
+  const remaining: Array<{ slice: T; quantity: number }> = [];
+  for (const slice of slices) {
+    const quantity = Math.max(0, Number(quantityOf(slice) ?? 0));
+    const consumedByReturn = Math.min(returnedRemaining, quantity);
+    returnedRemaining -= consumedByReturn;
+    const cancelQuantity = quantity - consumedByReturn;
+    if (cancelQuantity > 0.0005) remaining.push({ slice, quantity: cancelQuantity });
+  }
+  return remaining;
+}

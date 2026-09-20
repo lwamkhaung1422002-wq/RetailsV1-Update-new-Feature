@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Stack, TextField, Typography } from "@mui/material";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "../context/AuthContext";
@@ -16,7 +16,6 @@ export default function ReturnRefundDialog({ open, order, onClose, onSaved }) {
   const queryClient = useQueryClient();
   const { runWithApproval } = useManagerApproval();
   const [returnedQuantities, setReturnedQuantities] = useState({});
-  const [conditions, setConditions] = useState({});
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -35,7 +34,7 @@ export default function ReturnRefundDialog({ open, order, onClose, onSaved }) {
       const serialIds = item.product?.trackingMode === "SERIAL"
         ? (item.serialAllocations || []).filter((entry) => entry.serial?.status === "SOLD").slice(0, quantity).map((entry) => entry.serialId)
         : undefined;
-      return [{ orderItemId: item.id, quantity, condition: conditions[item.id] || "SELLABLE", reason: reason.trim(), ...(serialIds ? { serialIds } : {}) }];
+      return [{ orderItemId: item.id, quantity, condition: "SELLABLE", reason: reason.trim(), ...(serialIds ? { serialIds } : {}) }];
     });
     if (!items.length || !reason.trim()) {
       setError("Select at least one item and enter a return reason.");
@@ -69,15 +68,12 @@ export default function ReturnRefundDialog({ open, order, onClose, onSaved }) {
     <DialogTitle fontWeight={800}>Return / Refund</DialogTitle>
     <DialogContent><Stack spacing={2} sx={{ pt: 1 }}>
       {error && <Alert severity="error">{error}</Alert>}
-      <Typography fontWeight={700}>Items to return</Typography>
-      {eligibleItems.length ? eligibleItems.map((item) => <Box key={item.id} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(0,1fr) 100px 120px" }, gap: 1, alignItems: "center" }}>
+      {eligibleItems.length ? eligibleItems.map((item) => <Box key={item.id} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(0,1fr) 100px" }, gap: 1, alignItems: "center" }}>
         <Box><Typography fontWeight={700}>{item.productName}</Typography><Typography variant="caption" color="text.secondary">Available to return: {item.remainingQuantity}</Typography></Box>
         <TextField label="Quantity" type="number" size="small" value={returnedQuantities[item.id] || ""} onChange={(event) => { const value = Math.min(item.remainingQuantity, Math.max(0, Number(event.target.value || 0))); setReturnedQuantities((current) => ({ ...current, [item.id]: value })); }} slotProps={{ htmlInput: { min: 0, max: item.remainingQuantity, step: 0.001 } }} />
-        <TextField select label="Condition" size="small" value={conditions[item.id] || "SELLABLE"} onChange={(event) => setConditions((current) => ({ ...current, [item.id]: event.target.value }))}><MenuItem value="SELLABLE">Sellable</MenuItem><MenuItem value="DAMAGED">Damaged</MenuItem></TextField>
       </Box>) : <Alert severity="info">This sale has no remaining items eligible for return.</Alert>}
       <Divider />
       <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}><Typography fontWeight={700}>Return value</Typography><Typography fontWeight={800}>{money(returnedValue)}</Typography></Box>
-      <Typography color="text.secondary" variant="body2">Any eligible refund is returned to the original payment method. If no refundable payment remains, inventory is still returned without a money refund.</Typography>
       <TextField label="Reason" value={reason} onChange={(event) => setReason(event.target.value)} multiline minRows={2} />
     </Stack></DialogContent>
     <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={onClose} disabled={saving}>Cancel</Button><Button variant="contained" onClick={() => void confirm()} disabled={saving || !eligibleItems.length}>{saving ? "Processing…" : "Confirm Return"}</Button></DialogActions>

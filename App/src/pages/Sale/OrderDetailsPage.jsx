@@ -25,6 +25,7 @@ import PaymentCancellationDialog from "../../components/PaymentCancellationDialo
 import ReturnRefundDialog from "../../components/ReturnRefundDialog";
 import { previewReturnedValue } from "../../lib/exchangePreview";
 import { refundableSalePayments } from "../../lib/refundablePayments";
+import { buildPaymentActivity, buildReturnActivity } from "../../lib/orderActivity";
 
 const formatKyat = (amount) =>
   `${new Intl.NumberFormat("en-US").format(amount)} ကျပ်`;
@@ -97,7 +98,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
     const createdAt = new Date(record.createdAt);
     return {
       id: record.orderNumber || record.id,
-      amount: Number(record.total || 0),
+      amount: Number(record.effectiveTotal ?? receipt?.effectiveTotal ?? record.total ?? 0),
       subtotal: Number(record.subtotal || record.total || 0),
       discount: Number(record.discount || 0),
       quantity: (record.items || []).reduce(
@@ -165,16 +166,13 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
         new Date(left.paidAt || left.createdAt) -
         new Date(right.paidAt || right.createdAt),
     );
-  const paymentActivity = [...(receipt?.payments || [])].sort(
-    (left, right) =>
-      new Date(left.paidAt || left.createdAt) -
-      new Date(right.paidAt || right.createdAt),
-  );
-  const paidAmount = (record.payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const paymentActivity = buildPaymentActivity(receipt);
+  const paidAmount = paymentActivity.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const activePaymentRecordCount = paymentRecords.length;
   const returnedQuantities = Object.fromEntries((record.items || []).map((item) => [item.id, (item.returns || []).reduce((sum, entry) => sum + Number(entry.quantity || 0), 0)]));
-  const effectiveTotal = Math.max(0, Number(record.total || 0) - previewReturnedValue(record, returnedQuantities));
+  const effectiveTotal = Number(record.effectiveTotal ?? receipt?.effectiveTotal ?? Math.max(0, Number(record.total || 0) - previewReturnedValue(record, returnedQuantities)));
   const remainingAmount = Math.max(0, effectiveTotal - paidAmount);
+  const returnActivity = buildReturnActivity(receipt);
   const showPaymentSummary =
     paymentActivity.length > 0 ||
     ["unpaid", "partial"].includes(
@@ -649,7 +647,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                   fontWeight: 700,
                 }}
               >
-                {activePaymentRecordCount > 0 ? "Refund Payment" : "Cancel Order"}
+                {record.paymentTracking && activePaymentRecordCount > 0 ? "Refund Payment" : "Cancel Order"}
               </Button>
             </CardContent>
           </Card>
@@ -823,23 +821,27 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
               </CardContent>
             </Card>
           )}
-          {(receipt?.returns?.length > 0 || receipt?.refunds?.length > 0 || receipt?.exchanges?.length > 0) && (
+          {returnActivity.length > 0 && (
             <Card sx={{ ...cardSx, mt: 2 }}>
               <CardContent sx={{ p: isMobile ? 2.5 : 3, "&:last-child": { pb: isMobile ? 2.5 : 3 } }}>
-                <Typography sx={{ fontSize: isMobile ? 22 : 23, fontWeight: 700 }}>Adjustments</Typography>
+                <Typography sx={{ fontSize: isMobile ? 22 : 23, fontWeight: 700 }}>Return Activity</Typography>
                 <Divider sx={{ my: 2, borderColor: colors.divider }} />
                 <Stack spacing={1.5}>
-                  {receipt.returns.map((entry) => <DetailRow key={entry.id} label="Return Reference" value={entry.id} />)}
-                  {receipt.refunds.map((entry) => <DetailRow key={entry.id} label="Refund Reference" value={`${entry.id} · ${formatKyat(Math.abs(Number(entry.amount || 0)))}`} />)}
-                  {receipt.exchanges.map((exchange) => (
-                    <Box key={exchange.id} sx={{ p: 1.5, borderRadius: 1.5, bgcolor: isDark ? "rgba(255,255,255,.05)" : "#f7f9fc" }}>
-                      <DetailRow label="Exchange Reference" value={exchange.id} />
-                      <DetailRow label="Original Invoice" value={exchange.originalInvoice.invoiceNumber} />
-                      <DetailRow label="Replacement Invoice" value={exchange.replacementInvoice.invoiceNumber} />
-                      <DetailRow label="Returned Value" value={formatKyat(exchange.returnedValue)} />
-                      <DetailRow label="Replacement Value" value={formatKyat(exchange.replacementValue)} />
-                      <DetailRow label={exchange.differenceType === "refund" ? "Refund" : exchange.differenceType === "customer-payment" ? "Customer Paid" : "Difference"} value={formatKyat(Math.abs(exchange.difference))} />
-                      <Button fullWidth variant="outlined" startIcon={<PrintRoundedIcon />} onClick={() => printExchange(exchange)} sx={{ mt: 1.5, textTransform: "none", fontWeight: 700 }}>
+                  {returnActivity.map((entry) => entry.activityType === "return" ? (
+                    <Box key={`return-${entry.id}`} sx={{ p: 1.5, borderRadius: 1.5, bgcolor: isDark ? "rgba(255,255,255,.05)" : "#f7f9fc" }}>
+                      <DetailRow label="Returned Item" value={entry.itemName || entry.orderItemId} />
+                      <DetailRow label="Quantity" value={entry.quantity} />
+                      <DetailRow label="Reason" value={entry.reason || "-"} />
+                      {entry.createdAt && <DetailRow label="Returned At" value={new Date(entry.createdAt).toLocaleString()} />}
+                    </Box>
+                  ) : (
+                    <Box key={`exchange-${entry.id}`} sx={{ p: 1.5, borderRadius: 1.5, bgcolor: isDark ? "rgba(255,255,255,.05)" : "#f7f9fc" }}>
+                      <DetailRow label="Exchange Reference" value={entry.id} />
+                      <DetailRow label="Original Invoice" value={entry.originalInvoice.invoiceNumber} />
+                      <DetailRow label="Replacement Invoice" value={entry.replacementInvoice.invoiceNumber} />
+                      <DetailRow label="Returned Value" value={formatKyat(entry.returnedValue)} />
+                      <DetailRow label="Replacement Value" value={formatKyat(entry.replacementValue)} />
+                      <Button fullWidth variant="outlined" startIcon={<PrintRoundedIcon />} onClick={() => printExchange(entry)} sx={{ mt: 1.5, textTransform: "none", fontWeight: 700 }}>
                         Print Exchange
                       </Button>
                     </Box>

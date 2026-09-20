@@ -41,6 +41,7 @@ import { usePosApi } from "../../hooks/useApiResource";
 import { useProductsQuery } from "../../hooks/usePosQueries";
 import { queryKeys } from "../../lib/queryKeys";
 import { toPricedCartItem } from "../../lib/cartPricing";
+import { resolveCheckoutPayment } from "../../lib/checkoutPayment";
 import { useAuth } from "../../context/AuthContext";
 
 const initialItems = [];
@@ -298,7 +299,6 @@ export default function CreateOrderPage() {
   const [otherAnchor, setOtherAnchor] = useState(null);
   const [otherPayment, setOtherPayment] = useState("unpaid");
   const [amountReceived, setAmountReceived] = useState("0");
-  const [amountReceivedTouched, setAmountReceivedTouched] = useState(false);
   const [buyerName, setBuyerName] = useState("");
   const [note, setNote] = useState("");
   const [productPickerOpen, setProductPickerOpen] = useState(false);
@@ -379,14 +379,10 @@ export default function CreateOrderPage() {
   const cashAmount = Number(amountReceived.replace(/,/g, "")) || 0;
   const isPartial = paymentMethod === "other" && otherPayment === "partial";
   const showsAmountReceived = paymentMethod === "cash" || isPartial;
-  const insufficientAmount = items.length > 0 && paymentMethod === "cash" && amountReceivedTouched && cashAmount < totals.total;
-  // A new order has no existing balance to settle. Partial is simply the
-  // amount received at creation; the later Payment worklist owns settlement
-  // and remaining-balance validation.
-  const invalidPartialAmount = items.length > 0 && isPartial && (!amountReceivedTouched || cashAmount <= 0);
+  const checkoutPayment = resolveCheckoutPayment({ paymentMethod, otherPayment, cashAmount, total: totals.total });
+  const insufficientAmount = items.length > 0 && paymentMethod === "cash" && Boolean(checkoutPayment.error);
   const updateAmountReceived = (value) => {
     setAmountReceived(value.replace(/[^0-9]/g, ""));
-    setAmountReceivedTouched(true);
   };
   const nonCashMethods = configuredMethods.filter(
     (method) => method.active && method.id !== "cash" && method.type !== "cod",
@@ -426,8 +422,10 @@ export default function CreateOrderPage() {
             ?.name || paymentMethod;
   const createOrder = async () => {
     if (creatingOrder) return;
-    if (insufficientAmount) { setOrderError("Amount received must be at least the total amount."); return; }
-    if (invalidPartialAmount) { setOrderError("Enter a partial payment amount greater than zero."); return; }
+    if (checkoutPayment.error) {
+      setOrderError(checkoutPayment.error);
+      return;
+    }
     if (!items.length) {
       setOrderError("Add at least one product before creating the order.");
       return;
@@ -443,17 +441,7 @@ export default function CreateOrderPage() {
     setCreatingOrder(true);
     setOrderError("");
     try {
-      const amountReceived =
-        paymentMethod === "other" && otherPayment === "unpaid"
-          ? 0
-          : paymentMethod === "cash" ||
-              (paymentMethod === "other" && otherPayment === "partial")
-            ? paymentMethod === "cash" && !amountReceivedTouched
-              ? totals.total
-              : cashAmount
-            : totals.total;
-      // Cash received can exceed the total; only the order total is a payment.
-      const initialPaymentAmount = Math.min(amountReceived, totals.total);
+      const { initialPaymentAmount } = checkoutPayment;
       const result = await api.orders.create({
         fulfillmentStatus: "reserved",
         ...(initialPaymentAmount > 0 ? {
@@ -494,7 +482,6 @@ export default function CreateOrderPage() {
       setBuyerName("");
       setNote("");
       setAmountReceived("0");
-      setAmountReceivedTouched(false);
       setPaymentMethod("cash");
       setOtherPayment("unpaid");
       setOtherAnchor(null);
@@ -657,8 +644,7 @@ export default function CreateOrderPage() {
         createOrder={createOrder}
         creatingOrder={creatingOrder}
         insufficientAmount={insufficientAmount}
-        invalidPartialAmount={invalidPartialAmount}
-        cashChange={amountReceivedTouched ? cashAmount - totals.total : 0}
+        cashChange={checkoutPayment.change}
         createdOrder={createdOrder}
         orderError={orderError}
         quickMethods={quickMethods}
@@ -915,7 +901,7 @@ export default function CreateOrderPage() {
                 </Typography>
                 <TextField
                   fullWidth
-                  value={formatMoney(amountReceivedTouched ? cashAmount - totals.total : 0)}
+                  value={formatMoney(checkoutPayment.change)}
                   InputProps={{ readOnly: true }}
                   sx={{ "& .MuiOutlinedInput-root": { bgcolor: "#f1f5f9" } }}
                 />
@@ -963,7 +949,6 @@ export default function CreateOrderPage() {
           </Alert>
         )}
         {insufficientAmount && <Alert severity="warning" sx={{ mt: 2 }}>Amount received is lower than the total amount.</Alert>}
-        {invalidPartialAmount && <Alert severity="warning" sx={{ mt: 2 }}>Enter a partial payment amount greater than zero.</Alert>}
         {createdOrder && (
           <Alert severity="success" sx={{ mt: 2 }}>
             Order {createdOrder.orderNumber || createdOrder.id} created
@@ -975,7 +960,7 @@ export default function CreateOrderPage() {
           fullWidth
           variant="contained"
           startIcon={<CheckRoundedIcon />}
-          disabled={creatingOrder || insufficientAmount || invalidPartialAmount}
+          disabled={creatingOrder || insufficientAmount}
           onClick={() => void createOrder()}
           sx={{
             mt: 2,
@@ -1224,7 +1209,6 @@ export function DesktopCreateOrder({
   createOrder,
   creatingOrder,
   insufficientAmount,
-  invalidPartialAmount,
   cashChange,
   createdOrder,
   orderError,
@@ -1478,7 +1462,7 @@ export function DesktopCreateOrder({
                 <Button
                   variant="contained"
                   startIcon={<CheckRoundedIcon />}
-                  disabled={creatingOrder || insufficientAmount || invalidPartialAmount}
+                  disabled={creatingOrder || insufficientAmount}
                   onClick={() => void createOrder()}
                   sx={{ minHeight: 44, textTransform: "none", fontWeight: 700 }}
                 >
@@ -1495,7 +1479,6 @@ export function DesktopCreateOrder({
               </Box>
               {orderError && <Alert severity="error" sx={{ mt: 1.25 }}>{orderError}</Alert>}
               {insufficientAmount && <Alert severity="warning" sx={{ mt: 1.25 }}>Amount received is lower than the total amount.</Alert>}
-              {invalidPartialAmount && <Alert severity="warning" sx={{ mt: 1.25 }}>Enter a partial payment amount greater than zero.</Alert>}
               {createdOrder && <Alert severity="success" sx={{ mt: 1.25 }}>Order {createdOrder.orderNumber || createdOrder.id} created successfully.</Alert>}
             </CardContent>
           </Card>
@@ -1506,7 +1489,7 @@ export function DesktopCreateOrder({
   );
 }
 
-function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
+export function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
   const subtotal = item.price * item.quantity;
   const promotionText =
     item.promotion.type === "discount"
@@ -1595,7 +1578,7 @@ function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
         <Typography sx={{ fontSize: 16, fontWeight: 700 }}>
           {formatMoney(item.price)}
         </Typography>
-        <Stack
+        {item.promotion.type === "discount" && <Stack
           direction="row"
           justifyContent="flex-end"
           alignItems="flex-start"
@@ -1606,7 +1589,7 @@ function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
           <Typography sx={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3, textAlign: "right", overflowWrap: "anywhere" }}>
             {promotionText}
           </Typography>
-        </Stack>
+        </Stack>}
         <Typography sx={{ fontSize: 15, color: "text.secondary", mt: 1.5 }}>
           {formatMoney(subtotal)}
         </Typography>

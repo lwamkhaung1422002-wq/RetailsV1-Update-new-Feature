@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocateRefund, effectiveOrderTotal, remainingRefundablePayments } from "./order-return-refund.js";
+import { allocateRefund, effectiveOrderTotal, remainingCancellationSlices, remainingRefundablePayments } from "./order-return-refund.js";
 
 describe("return/refund accounting", () => {
   it("reduces the payable total by cumulative historical return value", () => {
@@ -31,5 +31,18 @@ describe("return/refund accounting", () => {
       { originalPaymentId: "pay-1", method: "Cash", amount: 30_000 },
       { originalPaymentId: "pay-2", method: "KPay", amount: 20_000 },
     ]);
+  });
+
+  it("cancels only sold quantity that has not already been returned", () => {
+    const slices = remainingCancellationSlices(
+      [{ id: "first", quantity: 6 }, { id: "second", quantity: 4 }],
+      (slice) => slice.quantity,
+      3,
+    );
+    expect(slices).toEqual([
+      { slice: { id: "first", quantity: 6 }, quantity: 3 },
+      { slice: { id: "second", quantity: 4 }, quantity: 4 },
+    ]);
+    expect(slices.reduce((sum, entry) => sum + entry.quantity, 0)).toBe(7);
   });
 });

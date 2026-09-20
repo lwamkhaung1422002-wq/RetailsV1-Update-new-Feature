@@ -41,6 +41,8 @@ import { useAuth } from "../../context/AuthContext";
 import { queryKeys } from "../../lib/queryKeys";
 import OrderDetailsPage from "./OrderDetailsPage";
 import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
+import { refundableSalePayments } from "../../lib/refundablePayments";
+import { salePaymentDisplay, sumActiveSaleAmounts } from "../../lib/salePaymentDisplay";
 
 const initialFilters = {
   range: "all",
@@ -131,25 +133,23 @@ export default function SalePage() {
 
   const orders = useMemo(() => (orderResponse?.orders || []).map((order) => {
         const createdAt = new Date(order.createdAt);
-        const paymentStatus = String(order.paymentStatus || "unpaid").replace(/^./, (letter) => letter.toUpperCase());
-        const payment = [...(order.payments || [])]
-          .filter((entry) => Number(entry.amount || 0) > 0)
-          .sort((a, b) => new Date(b.paidAt || b.createdAt) - new Date(a.paidAt || a.createdAt))[0];
+        const effectiveTotal = Number(order.effectiveTotal ?? order.total ?? 0);
+        const paymentDisplay = salePaymentDisplay(order.payments, effectiveTotal);
         return {
           id: order.id,
           displayId: order.orderNumber || order.id,
-          amount: Number(order.total || 0),
+          amount: effectiveTotal,
           quantity: (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0),
           time: createdAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           date: createdAt.toISOString().slice(0, 10),
           status: order.fulfillmentStatus === "cancelled" ? "Cancel" : "Done",
-          paymentStatus,
-          paymentMethod: payment?.method || (paymentStatus === "Unpaid" ? "Unpaid" : "Cash"),
+          paymentStatus: paymentDisplay.status,
+          paymentMethod: paymentDisplay.label,
           subtotal: Number(order.subtotal || order.total || 0),
           discount: Number(order.discount || 0),
           items: order.items || [],
           hasPaymentRecord: (order.payments || []).length > 0,
-          activePaymentRecordCount: (order.payments || []).filter((payment) => Number(payment.amount || 0) > 0 && !(order.payments || []).some((reversal) => Number(reversal.amount || 0) < 0 && reversal.originalPaymentId === payment.id)).length,
+          activePaymentRecordCount: refundableSalePayments(order.payments || []).length,
         };
       }), [orderResponse]);
 
@@ -187,7 +187,7 @@ export default function SalePage() {
     });
   }, [filters, orders, search]);
 
-  const totalAmount = filteredOrders.filter((order) => order.status !== "Cancel").reduce((total, order) => total + order.amount, 0);
+  const totalAmount = sumActiveSaleAmounts(filteredOrders);
 
   const updateDraft = (field, value) =>
     setDraftFilters((current) => ({ ...current, [field]: value }));

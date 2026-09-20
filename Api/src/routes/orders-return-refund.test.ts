@@ -70,4 +70,23 @@ describe("atomic product return/refund", () => {
     expect(mocks.returnCreate).not.toHaveBeenCalled();
     expect(mocks.paymentCreate).not.toHaveBeenCalled();
   });
+
+  it("treats new exchanges as return/refund only without a replacement order or exchange credit", async () => {
+    const result = await request(app)
+      .post("/shop-1/orders/order-1/exchanges")
+      .set("Idempotency-Key", "exchange-key")
+      .send({
+        reason: "Wrong size",
+        paymentMethod: "KPay",
+        returnedItems: [{ orderItemId: "item-1", quantity: 1, condition: "SELLABLE", reason: "Wrong size" }],
+        replacementItems: [{ productId: "replacement-product", quantity: 1 }],
+      });
+    expect(result.status, JSON.stringify(result.body)).toBe(201);
+    expect(result.body).toMatchObject({ returnedValue: 50_000, refundedAmount: 50_000 });
+    expect(result.body.exchange).toBeUndefined();
+    expect(mocks.paymentCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.paymentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
+      method: "Cash", amount: -50_000, originalPaymentId: "payment-1", scope: "exchange-return",
+    }) });
+  });
 });

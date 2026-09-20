@@ -3,15 +3,15 @@ import { z } from "zod";
 
 import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
-import { approvalAccessToken, approvalAuditMetadata, approvalPayloadFingerprint, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
+import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import { historicalReceiptPaymentSummary } from "../lib/order-payment-balance.js";
-import { allocateRefund, effectiveOrderTotal } from "../lib/order-return-refund.js";
+import { allocateRefund, effectiveOrderTotal, remainingCancellationSlices, remainingRefundablePayments } from "../lib/order-return-refund.js";
 import { recordInventoryMovement, setInventoryReservation } from "../lib/inventory-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { resolvePrice } from "../lib/pricing-domain.js";
 import { buildReceiptReadModel } from "../lib/receipt-read-model.js";
-import { exchangeDifference, historicalReturnedValue } from "../lib/sale-exchange.js";
-import { assertShopAccess, assertUserOwnsShop, hasShopPermission } from "../lib/shop-access.js";
+import { historicalReturnedValue } from "../lib/sale-exchange.js";
+import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { assertCapability } from "../lib/store-capabilities.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
@@ -113,12 +113,10 @@ const productReturnSchema = z.object({
     serialIds: z.array(z.string().min(1)).optional(),
   })).min(1),
 });
-const exchangeSchema = z.object({
+const exchangeReturnSchema = z.object({
   reason: z.string().trim().min(1, "Exchange reason is required."),
-  paymentMethod: z.string().trim().min(1, "Payment method is required."),
   returnedItems: productReturnSchema.shape.items,
-  replacementItems: z.array(orderItemSchema).min(1, "At least one replacement item is required."),
-}).superRefine((value, context) => {
+}).passthrough().superRefine((value, context) => {
   if (new Set(value.returnedItems.map((item) => item.orderItemId)).size !== value.returnedItems.length) {
     context.addIssue({ code: "custom", path: ["returnedItems"], message: "Each returned order item may appear only once." });
   }
@@ -135,12 +133,6 @@ function notFound(message: string): Error {
 function badRequest(message: string): Error {
   const error = new Error(message);
   error.name = "BadRequestError";
-  return error;
-}
-
-function forbidden(message: string): Error {
-  const error = new Error(message);
-  error.name = "ForbiddenError";
   return error;
 }
 
@@ -387,10 +379,11 @@ ordersRouter.get("/:shopId/orders", async (request, response, next) => {
           subtotal: true,
           discount: true,
           total: true,
+          paymentTracking: true,
           paymentStatus: true,
           fulfillmentStatus: true,
           createdAt: true,
-          items: { select: { id: true, quantity: true, productName: true } },
+          items: { select: { id: true, quantity: true, baseQuantity: true, productName: true, lineTotal: true, returns: { select: { quantity: true } } } },
           payments: {
             select: { id: true, amount: true, method: true, paidAt: true, createdAt: true, originalPaymentId: true },
           },
@@ -407,6 +400,7 @@ ordersRouter.get("/:shopId/orders", async (request, response, next) => {
               allocations: { include: { inventoryBatch: true } },
               serialAllocations: { include: { serial: true } },
               modifierSelections: true,
+              returns: true,
             },
           },
           payments: true,
@@ -418,7 +412,7 @@ ordersRouter.get("/:shopId/orders", async (request, response, next) => {
     ]);
 
     response.status(200).json({
-      orders,
+      orders: orders.map((order) => ({ ...order, effectiveTotal: effectiveOrderTotal(order as never) })),
       totalCount,
       pagination: { page: query.page, pageSize: query.pageSize, total: totalCount },
     });
@@ -474,7 +468,8 @@ ordersRouter.get("/:shopId/orders/:orderId", async (request, response, next) => 
     const paymentSummary = historicalReceiptPaymentSummary(order.total, order.id, order.payments, allocatedPayments);
     const receipt = buildReceiptReadModel(order, paymentSummary, creatorAudit?.actorId ?? null, new Map(actors.map((actor) => [actor.id, actor])));
 
-    response.status(200).json({ order, receipt });
+    const effectiveTotal = effectiveOrderTotal(order);
+    response.status(200).json({ order: { ...order, effectiveTotal }, receipt: { ...receipt, effectiveTotal } });
   } catch (error) {
     next(error);
   }
@@ -1140,6 +1135,7 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
               allocations: { include: { inventoryBatch: true } },
               serialAllocations: true,
               modifierSelections: true,
+              returns: true,
               product: { include: { recipe: { include: { components: true } } } },
             },
           },
@@ -1151,40 +1147,70 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
       if (existingOrder.fulfillmentStatus === "cancelled") {
         throw badRequest("Order is already cancelled.");
       }
-      const activePaymentRecords = existingOrder.payments.filter((payment) =>
-        payment.amount > 0 && !existingOrder.payments.some((reversal) =>
-          reversal.amount < 0 && reversal.originalPaymentId === payment.id,
-        ),
-      );
-      const activePaidAmount = activePaymentRecords.reduce((sum, payment) => sum + payment.amount, 0);
-      const remainingAmount = Math.max(0, existingOrder.total - activePaidAmount);
-      if (activePaymentRecords.length > 0 && remainingAmount > 0) {
+      const refundablePayments = remainingRefundablePayments(existingOrder.payments);
+      if (existingOrder.paymentTracking && refundablePayments.length > 0) {
         throw badRequest("Cancel active payment records before cancelling this order.");
       }
 
+      const effectiveTotal = effectiveOrderTotal(existingOrder);
+      const netPaid = Math.max(0, existingOrder.payments.reduce((sum, payment) => sum + payment.amount, 0));
+      const directRefundAmount = existingOrder.paymentTracking
+        ? 0
+        : Math.min(netPaid, effectiveTotal, refundablePayments.reduce((sum, payment) => sum + payment.refundableAmount, 0));
+      const directRefunds = allocateRefund(existingOrder.payments, directRefundAmount);
+      if (directRefunds.unallocatedAmount > 0.0005) {
+        throw badRequest("The current payment balance could not be refunded safely.");
+      }
+      for (const entry of directRefunds.allocations) {
+        const refund = await tx.payment.create({
+          data: {
+            shopId,
+            orderId,
+            type: "refund",
+            scope: "order-cancel",
+            method: entry.method,
+            amount: -entry.amount,
+            originalPaymentId: entry.originalPaymentId,
+            reason: input.reason,
+            note: input.reason,
+          },
+        });
+        await writeAuditLog(tx, {
+          shopId,
+          actorId: authUser.id,
+          action: "payment.refund",
+          entity: "Payment",
+          entityId: refund.id,
+          metadata: { orderId, refundAmount: entry.amount, method: entry.method, scope: "order-cancel", ...approvalAuditMetadata(authorization) },
+        });
+      }
+
       for (const item of existingOrder.items) {
+        const soldQuantity = storedItemBaseQuantity(item);
+        const returnedQuantity = item.returns.reduce(
+          (sum, entry) => sum.plus(quantityDecimal(entry.quantity)),
+          new Prisma.Decimal(0),
+        );
+        const remainingItemQuantity = Prisma.Decimal.max(0, soldQuantity.minus(returnedQuantity));
         for (const requirement of recipeIngredientRequirements(item)) {
+          const remainingRequirement = soldQuantity.greaterThan(0)
+            ? quantityDecimal(requirement.quantity).mul(remainingItemQuantity).div(soldQuantity)
+            : new Prisma.Decimal(0);
+          if (!remainingRequirement.greaterThan("0.0005")) continue;
           await setInventoryReservation(tx, {
             shopId, productId: requirement.productId,
             sourceType: "RecipeOrderItem", sourceId: requirement.sourceId,
-            quantity: requirement.quantity, release: true,
+            quantity: remainingRequirement.toString(), release: true,
           });
         }
-        for (const allocation of item.allocations) {
-          const batch = allocation.inventoryBatch;
-
-          if (!batch) continue;
-
-          await tx.inventoryBatch.update({
-            where: { id: batch.id },
-            data: {
-              reservedQuantity: Math.max(
-                0,
-                batch.reservedQuantity - compatibilityQuantity(storedAllocationBaseQuantity(allocation)),
-              ),
-            },
-          });
-          if (existingOrder.fulfillmentStatus === "completed") {
+        const releasedByBatch = new Map<string, number>();
+        if (existingOrder.fulfillmentStatus === "completed") {
+          const saleSlices: Array<{
+            allocation: (typeof item.allocations)[number];
+            movementIndex: number;
+            movement: { id?: string; inventoryBatchId: string | null; lotId: string | null; baseQuantity: unknown; unitCost: number | null };
+          }> = [];
+          for (const allocation of item.allocations) {
             const saleMovements = await tx.inventoryMovement.findMany({
               where: { shopId, sourceType: "OrderItemAllocation", sourceId: { startsWith: allocation.id }, direction: "OUT" },
             });
@@ -1195,21 +1221,47 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
               unitCost: allocation.unitCost,
             }];
             for (const [movementIndex, saleMovement] of reversals.entries()) {
-              const quantity = storedItemBaseQuantity({ quantity: 0, baseQuantity: saleMovement.baseQuantity });
-              if (saleMovement.lotId) {
-                const lot = await tx.inventoryLot.findUnique({ where: { id: saleMovement.lotId } });
+              saleSlices.push({ allocation, movementIndex, movement: saleMovement });
+            }
+          }
+          for (const { slice, quantity: rawQuantity } of remainingCancellationSlices(
+            saleSlices,
+            (entry) => entry.movement.baseQuantity,
+            returnedQuantity.toString(),
+          )) {
+              const quantity = quantityDecimal(rawQuantity);
+              const batchId = slice.movement.inventoryBatchId ?? slice.allocation.inventoryBatchId;
+              releasedByBatch.set(batchId, (releasedByBatch.get(batchId) ?? 0) + compatibilityQuantity(quantity));
+              if (slice.movement.lotId) {
+                const lot = await tx.inventoryLot.findUnique({ where: { id: slice.movement.lotId } });
                 if (lot) await tx.inventoryLot.update({ where: { id: lot.id }, data: { quantity: quantityDecimal(lot.quantity).plus(quantity).toString(), status: "ACTIVE" } });
               }
               await recordInventoryMovement(tx, {
                 shopId, productId: item.productId, variantId: item.variantId,
-                inventoryBatchId: saleMovement.inventoryBatchId ?? allocation.inventoryBatchId,
-                ...(saleMovement.lotId ? { lotId: saleMovement.lotId } : {}),
-                type: "SALE_REVERSAL", direction: "IN", quantity: quantity.toString(), unitCost: saleMovement.unitCost ?? allocation.unitCost,
-                sourceType: "OrderCancellation", sourceId: `${orderId}:${allocation.id}:${movementIndex}`,
-                idempotencyKey: `order.cancel:${orderId}:${allocation.id}:${movementIndex}`,
+                inventoryBatchId: batchId,
+                ...(slice.movement.lotId ? { lotId: slice.movement.lotId } : {}),
+                type: "SALE_REVERSAL", direction: "IN", quantity: quantity.toString(), unitCost: slice.movement.unitCost ?? slice.allocation.unitCost,
+                sourceType: "OrderCancellation", sourceId: `${orderId}:${slice.allocation.id}:${slice.movementIndex}`,
+                idempotencyKey: `order.cancel:${orderId}:${slice.allocation.id}:${slice.movementIndex}`,
                 reason: input.reason,
               });
-            }
+          }
+        } else {
+          for (const { slice: allocation, quantity } of remainingCancellationSlices(
+            item.allocations,
+            (entry) => storedAllocationBaseQuantity(entry).toString(),
+            returnedQuantity.toString(),
+          )) {
+            releasedByBatch.set(allocation.inventoryBatchId, (releasedByBatch.get(allocation.inventoryBatchId) ?? 0) + compatibilityQuantity(quantity));
+          }
+        }
+        for (const [batchId, releasedQuantity] of releasedByBatch) {
+          const batch = await tx.inventoryBatch.findUnique({ where: { id: batchId } });
+          if (batch) {
+            await tx.inventoryBatch.update({
+              where: { id: batchId },
+              data: { reservedQuantity: Math.max(0, batch.reservedQuantity - releasedQuantity) },
+            });
           }
         }
         if (item.serialAllocations.length) {
@@ -1218,11 +1270,13 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
             data: { status: "IN_STOCK", soldAt: null },
           });
         }
-        await setInventoryReservation(tx, {
-          shopId, productId: item.productId, variantId: item.variantId,
-          sourceType: "OrderItem", sourceId: item.id,
-          quantity: storedItemBaseQuantity(item).toString(), release: true,
-        });
+        if (remainingItemQuantity.greaterThan("0.0005")) {
+          await setInventoryReservation(tx, {
+            shopId, productId: item.productId, variantId: item.variantId,
+            sourceType: "OrderItem", sourceId: item.id,
+            quantity: remainingItemQuantity.toString(), release: true,
+          });
+        }
       }
 
       const cancelledOrder = await tx.order.update({
@@ -1234,7 +1288,7 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
         },
         include: {
           customer: true,
-          items: { include: { product: true, variant: true, allocations: true } },
+          items: { include: { product: true, variant: true, allocations: true, returns: true } },
           payments: true,
         },
       });
@@ -1248,7 +1302,7 @@ ordersRouter.post("/:shopId/orders/:orderId/cancel", async (request, response, n
         metadata: { reason: input.reason, ...approvalAuditMetadata(authorization) },
       });
 
-      return cancelledOrder;
+      return { ...cancelledOrder, effectiveTotal: effectiveOrderTotal(cancelledOrder) };
     }, ORDER_LIFECYCLE_TRANSACTION_OPTIONS);
 
     request.log.info({ operation: "cancel", transactionDurationMs: Date.now() - transactionStartedAt }, "Order lifecycle transaction completed");
@@ -1289,7 +1343,17 @@ async function createProductReturnsInTransaction(
         const existingReturns = await tx.customerReturn.findMany({
           where: { shopId, idempotencyKey: { in: keys } },
         });
-        if (existingReturns.length === keys.length) return { returns: existingReturns, duplicate: true };
+        if (existingReturns.length === keys.length) {
+          const payloadMatches = input.items.every((entry) => existingReturns.some((existing) =>
+            existing.idempotencyKey === `${requestKey}:${entry.orderItemId}` &&
+            existing.orderItemId === entry.orderItemId &&
+            quantityDecimal(existing.quantity).equals(quantityDecimal(entry.quantity)) &&
+            existing.condition === entry.condition &&
+            existing.reason === entry.reason,
+          ));
+          if (!payloadMatches) throw badRequest("The idempotency key was already used for a different return payload.");
+          return { returns: existingReturns, duplicate: true };
+        }
         if (existingReturns.length) throw badRequest("The idempotency key was already used for a different return payload.");
       }
       const created = [];
@@ -1465,240 +1529,93 @@ ordersRouter.post("/:shopId/orders/:orderId/product-returns", async (request, re
   } catch (error) { next(error); }
 });
 
-const saleExchangeInclude = {
-  originalOrder: { include: { items: true, payments: true } },
-  replacementOrder: { include: { customer: true, items: { include: { product: true, variant: true } }, payments: true } },
-  returns: true,
-  payments: true,
-} as const;
-
-function exchangeResponse(exchange: {
-  payments: Array<{ amount: number; scope: string | null }>;
-  replacementOrder: { total: number };
-}, duplicate: boolean) {
-  const returnedValue = Math.abs(exchange.payments.find((payment) => payment.scope === "exchange-return")?.amount ?? 0);
-  const replacementValue = exchange.replacementOrder.total;
-  return {
-    exchange,
-    returnedValue,
-    replacementValue,
-    difference: exchangeDifference(returnedValue, replacementValue),
-    duplicate,
-  };
-}
-
 ordersRouter.post("/:shopId/orders/:orderId/exchanges", async (request, response, next) => {
   try {
     const authUser = getAuthUser(request);
     const { shopId } = paramsSchema.parse(request.params);
     const orderId = z.string().min(1).parse(request.params.orderId);
-    const input = exchangeSchema.parse(request.body);
+    const input = exchangeReturnSchema.parse(request.body);
     const idempotencyKey = z.string().trim().min(1, "Idempotency-Key is required.").parse(request.header("Idempotency-Key"));
-    const approvalPayload = { orderId, ...input };
-    const requestHash = approvalPayloadFingerprint("payment.refund", approvalPayload);
-    const access = await assertShopAccess(authUser.id, shopId);
-
-    const existingExchange = await prisma.saleExchange.findUnique({
-      where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
-      include: saleExchangeInclude,
-    });
-    if (existingExchange) {
-      if (existingExchange.requestHash !== requestHash) {
-        throw badRequest("The idempotency key was already used for a different exchange payload.");
-      }
-      response.status(200).json(exchangeResponse(existingExchange, true));
-      return;
-    }
-
+    await assertUserOwnsShop(authUser.id, shopId);
     const authorization = await authorizeSensitiveAction({
       requesterId: authUser.id,
       shopId,
       action: "payment.refund",
       targetId: orderId,
-      payload: approvalPayload,
+      payload: { orderId, reason: input.reason, returnedItems: input.returnedItems },
       approvalToken: approvalAccessToken(request.headers),
     });
 
-    const transactionStartedAt = Date.now();
-    let result;
-    try {
-      result = await prisma.$transaction(async (tx) => {
-        const duplicate = await tx.saleExchange.findUnique({
-          where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
-          include: saleExchangeInclude,
-        });
-        if (duplicate) {
-          if (duplicate.requestHash !== requestHash) {
-            throw badRequest("The idempotency key was already used for a different exchange payload.");
-          }
-          return exchangeResponse(duplicate, true);
-        }
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({
+        where: { id: orderId, shopId, fulfillmentStatus: "completed" },
+        include: { items: { include: { returns: true } }, payments: true },
+      });
+      if (!order) throw badRequest("Only completed sales can receive exchange returns.");
+      const returnedValue = historicalReturnedValue(order, input.returnedItems);
+      const paidBalance = Math.max(0, order.payments.reduce((sum, payment) => sum + payment.amount, 0));
+      const availableRefund = remainingRefundablePayments(order.payments)
+        .reduce((sum, payment) => sum + payment.refundableAmount, 0);
+      const refundAmount = Math.max(0, Math.min(returnedValue, paidBalance, availableRefund));
+      const returnResult = await createProductReturnsInTransaction(
+        tx,
+        shopId,
+        orderId,
+        { items: input.returnedItems },
+        authUser.id,
+        `${idempotencyKey}:exchange-return`,
+        undefined,
+        refundAmount > 0,
+      );
+      if (returnResult.duplicate) return { ...returnResult, refunds: [], refundedAmount: 0, returnedValue };
 
-        await consumeManagerApproval(tx, authorization);
-        const originalOrder = await tx.order.findFirst({
-          where: { id: orderId, shopId, fulfillmentStatus: "completed" },
-          include: { items: { include: { returns: true } }, payments: true },
-        });
-        if (!originalOrder) throw badRequest("Only completed sales can be exchanged.");
-        if (input.returnedItems.some((returned) => !originalOrder.items.some((item) => item.id === returned.orderItemId))) {
-          throw notFound("Order item not found.");
-        }
-
-        const returnedValue = historicalReturnedValue(originalOrder, input.returnedItems);
-        const paidBalance = originalOrder.payments.reduce((sum, payment) => sum + payment.amount, 0);
-        if (returnedValue > paidBalance) {
-          throw badRequest("The returned value exceeds the original sale's refundable payment balance.");
-        }
-
-        const replacementOrder = await createOrderInTransaction(tx, shopId, {
-          customerId: originalOrder.customerId ?? undefined,
-          fulfillmentStatus: "reserved",
-          note: `Exchange for ${originalOrder.orderNumber || originalOrder.id}: ${input.reason}`,
-          items: input.replacementItems,
-        }, authUser.id);
-        const difference = exchangeDifference(returnedValue, replacementOrder.total);
-        if (difference > 0 && !hasShopPermission(access, "payment.receive")) {
-          throw forbidden("You do not have permission to receive the exchange payment difference.");
-        }
-
-        const exchange = await tx.saleExchange.create({
+      await consumeManagerApproval(tx, authorization);
+      const allocation = allocateRefund(order.payments, refundAmount);
+      if (allocation.unallocatedAmount > 0.0005) throw badRequest("Refund amount exceeds the refundable payment balance.");
+      const refunds = [];
+      for (const entry of allocation.allocations) {
+        const refund = await tx.payment.create({
           data: {
             shopId,
-            originalOrderId: originalOrder.id,
-            replacementOrderId: replacementOrder.id,
-            actorId: authUser.id,
+            orderId,
+            type: "refund",
+            scope: "exchange-return",
+            method: entry.method,
+            amount: -entry.amount,
+            originalPaymentId: entry.originalPaymentId,
             reason: input.reason,
-            idempotencyKey,
-            requestHash,
+            note: input.reason,
           },
         });
-
-        await createProductReturnsInTransaction(
-          tx,
-          shopId,
-          originalOrder.id,
-          { items: input.returnedItems },
-          authUser.id,
-          `${idempotencyKey}:return`,
-          exchange.id,
-          returnedValue > 0,
-        );
-
-        if (returnedValue > 0) {
-          const refund = await tx.payment.create({
-            data: {
-              shopId,
-              orderId: originalOrder.id,
-              exchangeId: exchange.id,
-              type: "refund",
-              scope: "exchange-return",
-              method: input.paymentMethod,
-              amount: -returnedValue,
-              reason: input.reason,
-              note: `Exchange return for replacement order ${replacementOrder.orderNumber || replacementOrder.id}`,
-            },
-          });
-          await writeAuditLog(tx, {
-            shopId,
-            actorId: authUser.id,
-            action: "payment.refund",
-            entity: "Payment",
-            entityId: refund.id,
-            metadata: { orderId: originalOrder.id, exchangeId: exchange.id, amount: returnedValue, method: input.paymentMethod, ...approvalAuditMetadata(authorization) },
-          });
-        }
-
-        const exchangeCredit = Math.min(returnedValue, replacementOrder.total);
-        if (exchangeCredit > 0) {
-          const credit = await tx.payment.create({
-            data: {
-              shopId,
-              orderId: replacementOrder.id,
-              exchangeId: exchange.id,
-              type: "payment",
-              scope: "exchange-credit",
-              method: "Exchange Credit",
-              amount: exchangeCredit,
-              note: `Credit from original order ${originalOrder.orderNumber || originalOrder.id}`,
-            },
-          });
-          await writeAuditLog(tx, {
-            shopId,
-            actorId: authUser.id,
-            action: "payment.receive",
-            entity: "Payment",
-            entityId: credit.id,
-            metadata: { orderId: replacementOrder.id, exchangeId: exchange.id, amount: exchangeCredit, method: "Exchange Credit" },
-          });
-        }
-
-        if (difference > 0) {
-          const payment = await tx.payment.create({
-            data: {
-              shopId,
-              orderId: replacementOrder.id,
-              exchangeId: exchange.id,
-              type: "payment",
-              scope: "exchange-difference",
-              method: input.paymentMethod,
-              amount: difference,
-              note: `Exchange difference for original order ${originalOrder.orderNumber || originalOrder.id}`,
-            },
-          });
-          await writeAuditLog(tx, {
-            shopId,
-            actorId: authUser.id,
-            action: "payment.receive",
-            entity: "Payment",
-            entityId: payment.id,
-            metadata: { orderId: replacementOrder.id, exchangeId: exchange.id, amount: difference, method: input.paymentMethod },
-          });
-        }
-
-        await tx.order.update({ where: { id: replacementOrder.id }, data: { paymentStatus: "paid" } });
-        await updateOrderStatusInTransaction(
-          tx,
-          shopId,
-          replacementOrder.id,
-          { fulfillmentStatus: "completed" },
-          "reserved",
-          authUser.id,
-          `${idempotencyKey}:replacement`,
-        );
         await writeAuditLog(tx, {
           shopId,
           actorId: authUser.id,
-          action: "order.exchange",
-          entity: "SaleExchange",
-          entityId: exchange.id,
-          metadata: {
-            originalOrderId: originalOrder.id,
-            replacementOrderId: replacementOrder.id,
-            returnedValue,
-            replacementValue: replacementOrder.total,
-            difference,
-            returnIds: (await tx.customerReturn.findMany({ where: { exchangeId: exchange.id }, select: { id: true } })).map((entry) => entry.id),
-            ...approvalAuditMetadata(authorization),
-          },
+          action: "payment.refund",
+          entity: "Payment",
+          entityId: refund.id,
+          metadata: { orderId, refundAmount: entry.amount, method: entry.method, scope: "exchange-return", ...approvalAuditMetadata(authorization) },
         });
-
-        const completedExchange = await tx.saleExchange.findUniqueOrThrow({
-          where: { id: exchange.id },
-          include: saleExchangeInclude,
-        });
-        return exchangeResponse(completedExchange, false);
-      }, ORDER_LIFECYCLE_TRANSACTION_OPTIONS);
-    } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
-      const duplicate = await prisma.saleExchange.findUnique({
-        where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
-        include: saleExchangeInclude,
+        refunds.push(refund);
+      }
+      const orderAfterReturns = await tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        include: { items: { include: { returns: true } } },
       });
-      if (!duplicate || duplicate.requestHash !== requestHash) throw error;
-      result = exchangeResponse(duplicate, true);
-    }
+      const payableTotal = effectiveOrderTotal(orderAfterReturns);
+      const netPaid = [...order.payments, ...refunds].reduce((sum, payment) => sum + payment.amount, 0);
+      const paymentStatus = netPaid <= 0 ? "unpaid" : netPaid >= payableTotal ? "paid" : "partial";
+      await tx.order.update({ where: { id: orderId }, data: { paymentStatus, ...(refunds.at(-1) ? { refundId: refunds.at(-1)!.id } : {}) } });
+      await writeAuditLog(tx, {
+        shopId,
+        actorId: authUser.id,
+        action: "order.exchange",
+        entity: "Order",
+        entityId: orderId,
+        metadata: { returnOnly: true, returnedValue, refundedAmount: refundAmount, returnIds: returnResult.returns.map((entry) => entry.id), ...approvalAuditMetadata(authorization) },
+      });
+      return { ...returnResult, refunds, refundedAmount: refundAmount, returnedValue };
+    }, ORDER_LIFECYCLE_TRANSACTION_OPTIONS);
 
-    request.log.info({ operation: "exchange", transactionDurationMs: Date.now() - transactionStartedAt }, "Order lifecycle transaction completed");
     response.status(result.duplicate ? 200 : 201).json(result);
   } catch (error) {
     next(error);

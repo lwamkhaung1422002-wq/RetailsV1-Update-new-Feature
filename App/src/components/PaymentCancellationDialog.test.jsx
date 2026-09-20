@@ -14,13 +14,15 @@ const close = vi.fn();
 function show(kind) {
   const client = new QueryClient();
   const invalidate = vi.spyOn(client, "invalidateQueries");
+  invalidate.setQueriesData = vi.spyOn(client, "setQueriesData");
   render(<QueryClientProvider client={client}><PaymentCancellationDialog kind={kind} recordId="record-1" onClose={close} /></QueryClientProvider>);
   return invalidate;
 }
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.api.suppliers.deliveryRecord.mockResolvedValue({ record: { status: "active", payments: [payment] } });
-  mocks.api.orders.get.mockResolvedValue({ order: { total: 10000, fulfillmentStatus: "completed", payments: [payment] } });
+  mocks.api.orders.get.mockResolvedValue({ order: { total: 10000, paymentTracking: true, fulfillmentStatus: "completed", payments: [payment] } });
+  mocks.api.orders.cancel.mockResolvedValue({ order: { id: "record-1", fulfillmentStatus: "cancelled", effectiveTotal: 5555 } });
 });
 afterEach(cleanup);
 
@@ -67,7 +69,7 @@ it("refunds a sale payment without cancelling the order", async () => {
   expect(mocks.api.orders.cancel).not.toHaveBeenCalled();
 });
 it("allows order cancellation after all payments have been reversed", async () => {
-  mocks.api.orders.get.mockResolvedValue({ order: { total: 10000, fulfillmentStatus: "completed", payments: [payment, { id: "refund", originalPaymentId: "pay-1", amount: -5555 }] } });
+  mocks.api.orders.get.mockResolvedValue({ order: { total: 10000, paymentTracking: true, fulfillmentStatus: "completed", payments: [payment, { id: "refund", originalPaymentId: "pay-1", amount: -5555 }] } });
   show("sale");
   fireEvent.change(await screen.findByLabelText(/Cancellation Reason/), { target: { value: "Wrong order" } });
   fireEvent.click(screen.getByRole("button", { name: "Cancel Order" }));
@@ -75,19 +77,31 @@ it("allows order cancellation after all payments have been reversed", async () =
   expect(mocks.api.orders.cancel).toHaveBeenCalledWith("record-1", { reason: "Wrong order" });
 });
 it("blocks cancellation if a payment was added while the dialog was open", async () => {
-  mocks.api.orders.get.mockResolvedValueOnce({ order: { total: 10000, fulfillmentStatus: "completed", payments: [] } });
+  mocks.api.orders.get.mockResolvedValueOnce({ order: { total: 10000, paymentTracking: true, fulfillmentStatus: "completed", payments: [] } });
   show("sale");
   fireEvent.change(await screen.findByLabelText(/Cancellation Reason/), { target: { value: "Wrong order" } });
   fireEvent.click(screen.getByRole("button", { name: "Cancel Order" }));
   expect(await screen.findByText(/Cancel active payments before/)).toBeTruthy();
   expect(mocks.api.orders.cancel).not.toHaveBeenCalled();
 });
-it("refunds a fully paid sale payment instead of cancelling the order", async () => {
-  mocks.api.orders.get.mockResolvedValue({ order: { total: 5555, fulfillmentStatus: "completed", payments: [payment] } });
+it("refunds a fully paid tracked sale payment instead of cancelling the order", async () => {
+  mocks.api.orders.get.mockResolvedValue({ order: { total: 5555, paymentTracking: true, fulfillmentStatus: "completed", payments: [payment] } });
   show("sale");
   fireEvent.change(await screen.findByLabelText(/Refund Reason/), { target: { value: "Wrong order" } });
   fireEvent.click(screen.getByRole("button", { name: "Refund Payment" }));
   await waitFor(() => expect(close).toHaveBeenCalled());
   expect(mocks.api.orders.cancel).not.toHaveBeenCalled();
   expect(mocks.api.payments.refundOrder).toHaveBeenCalled();
+});
+
+it("skips the refund stage for an untracked sale, cancels directly, and updates order caches", async () => {
+  mocks.api.orders.get.mockResolvedValue({ order: { total: 5555, paymentTracking: false, fulfillmentStatus: "completed", payments: [payment] } });
+  const invalidate = show("sale");
+  expect(await screen.findByText("Cancel Order")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Cancellation Reason/), { target: { value: "Wrong order" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel Order" }));
+  await waitFor(() => expect(close).toHaveBeenCalled());
+  expect(mocks.api.orders.cancel).toHaveBeenCalledWith("record-1", { reason: "Wrong order" });
+  expect(mocks.api.payments.refundOrder).not.toHaveBeenCalled();
+  expect(invalidate.setQueriesData).toHaveBeenCalledWith({ queryKey: ["shops", "shop-1", "orders"] }, expect.any(Function));
 });
