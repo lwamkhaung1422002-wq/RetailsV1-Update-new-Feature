@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -36,8 +36,8 @@ import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
-import { useLocation, useNavigate } from "react-router";
-import { usePurchasesQuery, useShopSettingsQuery, useSupplierDeliveriesQuery, useSuppliersQuery } from "../../hooks/usePosQueries";
+import { useNavigate } from "react-router";
+import { usePurchasesQuery, useSupplierDeliveriesQuery, useSuppliersQuery } from "../../hooks/usePosQueries";
 import { usePosApi } from "../../hooks/useApiResource";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
@@ -46,6 +46,8 @@ import { queryKeys } from "../../lib/queryKeys";
 import { SupplierDetailsCards } from "./SupplierDetailsPage";
 import SupplierHistoryPage from "./SupplierHistoryPage";
 import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
+import SupplierForm from "./SupplierForm";
+import RecordSupplierPaymentPage from "./RecordSupplierPaymentPage";
 
 async function refreshSupplierRecords(queryClient, shopId, { includeSuppliers = false } = {}) {
   const critical = [
@@ -215,7 +217,6 @@ function mapSupplierRecords(purchasesResult, deliveriesResult) {
 export default function SuppliersPage() {
   const isMobile = useMediaQuery("(max-width:768px)");
   const navigate = useNavigate();
-  const location = useLocation();
   const [status, setStatus] = useState("All");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -228,6 +229,7 @@ export default function SuppliersPage() {
   const [paymentCancelTarget, setPaymentCancelTarget] = useState(null);
   const [selectedPaymentId, setSelectedPaymentId] = useState("");
   const [paymentCancelReason, setPaymentCancelReason] = useState("");
+  const [paymentTarget, setPaymentTarget] = useState(null);
   const [archiveError, setArchiveError] = useState("");
   const [archiving, setArchiving] = useState(false);
   const api = usePosApi();
@@ -281,17 +283,7 @@ export default function SuppliersPage() {
       setArchiving(false);
     }
   };
-  const openPayment = async (record) => {
-    try {
-      if (record.deliveryOnly) { navigate(`/suppliers/delivery/${record.apiId}/pay`); return; }
-      const purchase = record.deliveryOnly
-        ? (await api.suppliers.openBalance(record.apiId)).purchase
-        : (purchasesResult?.purchases || []).find((item) => item.id === record.apiId);
-      navigate(`/suppliers/${record.supplierId}/pay`, { state: { purchaseId: purchase?.id || record.apiId, purchase } });
-    } catch (error) {
-      setArchiveError(error.message || "Unable to open supplier payment.");
-    }
-  };
+  const openPayment = (record) => setPaymentTarget(record);
   const today = () => {
     const value = new Date().toISOString().slice(0, 10);
     setFrom(value);
@@ -310,7 +302,7 @@ export default function SuppliersPage() {
   }, []);
 
   if (!isMobile)
-    return <DesktopSuppliers records={apiRecords} openPaymentRecordId={location.state?.openPaymentRecordId || ""} />;
+    return <DesktopSuppliers records={apiRecords} />;
 
   return (
     <Box
@@ -628,6 +620,15 @@ export default function SuppliersPage() {
           {menuRecord?.deliveryOnly && Number(menuRecord?.activePaymentRecordCount || 0) > 0 ? "Cancel Payment" : "Cancel Invoice"}
         </MenuItem>}
       </Menu>
+      <Dialog open={Boolean(paymentTarget)} onClose={() => setPaymentTarget(null)} fullWidth maxWidth="sm" slotProps={{ paper: { sx: { borderRadius: 2.5 } } }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", px: 2.5, pt: 1.5 }}>
+          <Typography sx={{ fontSize: 20, fontWeight: 700 }}>Record Payment</Typography>
+          <IconButton aria-label="Close supplier payment" onClick={() => setPaymentTarget(null)}><CloseRoundedIcon /></IconButton>
+        </Box>
+        <DialogContent sx={{ p: 0 }}>
+          {paymentTarget && <RecordSupplierPaymentPage embeddedRecord={paymentTarget} onSaved={() => setPaymentTarget(null)} />}
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(paymentCancelTarget)} onClose={archiving ? undefined : () => { setPaymentCancelTarget(null); setPaymentCancelReason(""); setArchiveError(""); }} fullWidth slotProps={{ paper: { sx: { m: 2.5, borderRadius: 2.5, maxWidth: 420 } } }}>
         <DialogTitle>Cancel Payment</DialogTitle>
         <DialogContent><Typography color="text.secondary">Choose the supplier payment to cancel.</Typography><TextField select fullWidth label="Payment" value={selectedPaymentId} onChange={(event) => setSelectedPaymentId(event.target.value)} sx={{ mt: 2 }}>{(paymentCancelTarget?.deliveryRecord?.payments || []).filter((payment) => !payment.reversedAt && !payment.reversal).map((payment) => <MenuItem key={payment.id} value={payment.id}>{payment.method} · {money(payment.amount)} · {supplierDate(payment.paidAt)}</MenuItem>)}</TextField><TextField required fullWidth label="Cancel Payment Reason" value={paymentCancelReason} onChange={(event) => setPaymentCancelReason(event.target.value)} sx={{ mt: 1.5 }} />{archiveError && <Typography color="error" sx={{ mt: 1 }}>{archiveError}</Typography>}</DialogContent>
@@ -642,7 +643,7 @@ export default function SuppliersPage() {
   );
 }
 
-function DesktopSuppliers({ records, openPaymentRecordId }) {
+export function DesktopSuppliers({ records }) {
   const api = usePosApi();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -654,17 +655,6 @@ function DesktopSuppliers({ records, openPaymentRecordId }) {
   const [dateRange, setDateRange] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  useEffect(() => {
-    if (!openPaymentRecordId) return;
-    const timer = window.setTimeout(() => {
-      const record = records.find(
-        (item) => item.apiId === openPaymentRecordId && item.deliveryOnly,
-      );
-      if (record) setDialog({ mode: "pay", record });
-      window.history.replaceState({}, "", "/suppliers");
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [openPaymentRecordId, records]);
   const visibleRecords = useMemo(() => records.filter((record) => {
     const query = search.trim().toLowerCase();
     return (
@@ -746,7 +736,7 @@ function DesktopSuppliers({ records, openPaymentRecordId }) {
           <Button
             variant="contained"
             startIcon={<AddRoundedIcon />}
-            onClick={() => navigate("/suppliers/add")}
+            onClick={() => open("add")}
             sx={desktopSupplierAddSx}
           >
             Add Supplier
@@ -1052,6 +1042,7 @@ function DesktopSupplierDialog({ dialog, onClose, onDelete, onOpenPayment }) {
               ? "Cancel Invoice"
               : "Supplier Details";
   const isHistory = mode === "history";
+  const supplierFormId = "desktop-supplier-form";
   return (
     <Dialog
       open
@@ -1070,6 +1061,8 @@ function DesktopSupplierDialog({ dialog, onClose, onDelete, onOpenPayment }) {
           <DesktopSupplierDetailsContent record={record} onOpenPayment={onOpenPayment} />
         ) : mode === "pay" ? (
           <DesktopPaymentFields record={record} onSaved={onClose} />
+        ) : mode === "add" ? (
+          <SupplierForm formId={supplierFormId} desktop onSaved={onClose} />
         ) : (
           <DesktopSupplierFields record={record} />
         )}
@@ -1093,7 +1086,9 @@ function DesktopSupplierDialog({ dialog, onClose, onDelete, onOpenPayment }) {
           mode !== "details" && mode !== "pay" && (
             <Button
               variant="contained"
-              onClick={onClose}
+              type={mode === "add" ? "submit" : "button"}
+              form={mode === "add" ? supplierFormId : undefined}
+              onClick={mode === "add" ? undefined : onClose}
               sx={{ textTransform: "none" }}
             >
               {mode === "pay"
@@ -1205,224 +1200,7 @@ function DesktopSupplierFields({ record }) {
   );
 }
 function DesktopPaymentFields({ record, onSaved }) {
-  const api = usePosApi();
-  const queryClient = useQueryClient();
-  const { shop } = useAuth();
-  const [method, setMethod] = useState("cash");
-  const [amount, setAmount] = useState(String(record.amount || ""));
-  const [cashName, setCashName] = useState("");
-  const [cashPhone, setCashPhone] = useState("");
-  const [mobileName, setMobileName] = useState("");
-  const [mobileNumber, setMobileNumber] = useState("");
-  const [transactionId, setTransactionId] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const { data: settingsResult } = useShopSettingsQuery();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [signature, setSignature] = useState(false);
-  const signatureRef = useRef(null);
-  const paymentMethods = useMemo(() => {
-    const configured = (settingsResult?.settings?.paymentMethods || []).filter((item) => item.active !== false);
-    return [
-      { id: "cash", name: "Cash" },
-      ...configured.filter((item) => item.id !== "cash" && item.name?.trim().toLowerCase() !== "cash"),
-    ];
-  }, [settingsResult]);
-  const fieldSx = {
-    "& .MuiOutlinedInput-root": {
-      minHeight: 50,
-      borderRadius: 1.5,
-      bgcolor: "action.hover",
-      "& fieldset": { border: 0 },
-    },
-  };
-  const startSignature = (event) => {
-    const canvas = signatureRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const context = canvas.getContext("2d");
-    context.beginPath();
-    context.moveTo(event.clientX - rect.left, event.clientY - rect.top);
-    canvas.setPointerCapture(event.pointerId);
-  };
-  const drawSignature = (event) => {
-    const canvas = signatureRef.current;
-    if (!canvas?.hasPointerCapture(event.pointerId)) return;
-    const rect = canvas.getBoundingClientRect();
-    const context = canvas.getContext("2d");
-    context.lineWidth = 2;
-    context.lineCap = "round";
-    context.strokeStyle = "#1f2937";
-    context.lineTo(event.clientX - rect.left, event.clientY - rect.top);
-    context.stroke();
-    setSignature(true);
-  };
-  const clearSignature = () => {
-    const canvas = signatureRef.current;
-    canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-    setSignature(false);
-  };
-  const save = async () => {
-    const numericAmount = Number(amount) || 0;
-    const isCash = method === "cash";
-    const dueRequired = numericAmount > 0 && numericAmount < Number(record.amount || 0);
-    if (numericAmount <= 0 || numericAmount > Number(record.amount || 0)) { setError("Enter a valid payment amount."); return; }
-    if ((!isCash && !transactionId.trim()) || (isCash ? !cashName.trim() || !cashPhone.trim() || !signature : !mobileName.trim() || !mobileNumber.trim()) || (dueRequired && !dueDate)) { setError(!isCash && !transactionId.trim() ? "Transaction ID is required for non-cash payments." : "Please complete the required payment details."); return; }
-    setSaving(true); setError("");
-    try {
-      const configuredMethod = paymentMethods.find((item) => item.id === method);
-      const paymentBody = { amount: numericAmount, method: configuredMethod?.name || "Cash", payerName: isCash ? cashName.trim() : mobileName.trim(), payerPhone: isCash ? cashPhone.trim() : mobileNumber.trim(), mobileAccountName: isCash ? undefined : mobileName.trim(), reference: isCash ? undefined : transactionId.trim(), signatureDataUrl: isCash ? signatureRef.current?.toDataURL() : undefined, notes: dueDate ? `Due date: ${dueDate}` : undefined };
-      if (record.deliveryOnly) await api.suppliers.payDeliveryRecord(record.apiId, paymentBody);
-      else await api.purchases.pay(record.apiId, paymentBody);
-      await refreshSupplierRecords(queryClient, shop?.id);
-      onSaved();
-    } catch (nextError) { setError(nextError.message || "Unable to record payment."); } finally { setSaving(false); }
-  };
-  const numericAmount = Number(amount) || 0;
-  const dueRequired = numericAmount > 0 && numericAmount < Number(record.amount || 0);
-  const isCash = method === "cash";
-  return (
-    <Stack spacing={1.5}>
-      <Paper
-        elevation={0}
-        sx={{
-          p: 1.75,
-          borderRadius: 1.5,
-          bgcolor: "#f4f8ff",
-          border: "1px solid",
-          borderColor: "primary.light",
-        }}
-      >
-        <Typography color="text.secondary" sx={{ fontSize: 13 }}>
-          {record.name} · Outstanding Balance
-        </Typography>
-        <Typography sx={{ mt: 0.25, fontSize: 23, fontWeight: 800 }}>
-          {money(record.amount)}
-        </Typography>
-      </Paper>
-      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
-        <TextField
-          select
-          label="Payment Method *"
-          value={method}
-          onChange={(event) => setMethod(event.target.value)}
-          fullWidth
-          sx={fieldSx}
-        >
-          {paymentMethods.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
-        </TextField>
-        <TextField
-          label="Amount *"
-          type="number"
-          value={amount}
-          onChange={(event) => setAmount(event.target.value)}
-          fullWidth
-          sx={fieldSx}
-        />
-      </Box>
-      {dueRequired && <TextField label="Due Date *" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} fullWidth slotProps={{ inputLabel: { shrink: true } }} sx={fieldSx} />}
-      {isCash ? (
-        <Stack spacing={1.5}>
-          <Box
-            sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}
-          >
-            <TextField
-              label="Receiver Name *"
-              placeholder="Enter receiver name"
-              value={cashName}
-              onChange={(event) => setCashName(event.target.value)}
-              fullWidth
-              sx={fieldSx}
-            />
-            <TextField
-              label="Receiver Phone *"
-              placeholder="Enter receiver phone"
-              value={cashPhone}
-              onChange={(event) => setCashPhone(event.target.value)}
-              fullWidth
-              sx={fieldSx}
-            />
-          </Box>
-          <Box>
-            <Typography sx={{ mb: 0.75, fontSize: 14, fontWeight: 600 }}>
-              Receiver Signature *
-            </Typography>
-            <Box
-              sx={{
-                position: "relative",
-                height: 142,
-                border: "1px dashed",
-                borderColor: signature ? "primary.main" : "primary.light",
-                borderRadius: 1.5,
-                bgcolor: "#fafcff",
-                overflow: "hidden",
-              }}
-            >
-              <Box
-                component="canvas"
-                ref={signatureRef}
-                width={560}
-                height={142}
-                aria-label="Receiver signature pad"
-                onPointerDown={startSignature}
-                onPointerMove={drawSignature}
-                sx={{
-                  width: "100%",
-                  height: "100%",
-                  touchAction: "none",
-                  cursor: "crosshair",
-                }}
-              />
-              <Button
-                size="small"
-                onClick={clearSignature}
-                sx={{
-                  position: "absolute",
-                  right: 8,
-                  bottom: 6,
-                  textTransform: "none",
-                }}
-              >
-                Clear signature
-              </Button>
-            </Box>
-          </Box>
-        </Stack>
-      ) : (
-        <Stack spacing={1.5}>
-          <Box
-            sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}
-          >
-            <TextField
-              label="Receiver Mobile Payment User Name *"
-              placeholder="Enter user name"
-              value={mobileName}
-              onChange={(event) => setMobileName(event.target.value)}
-              fullWidth
-              sx={fieldSx}
-            />
-            <TextField
-              label="Receiver Mobile Payment Number *"
-              placeholder="Enter mobile number"
-              value={mobileNumber}
-              onChange={(event) => setMobileNumber(event.target.value)}
-              fullWidth
-              sx={fieldSx}
-            />
-          </Box>
-          <TextField
-            label="Transaction ID *"
-            placeholder="Enter transaction ID"
-            value={transactionId}
-            onChange={(event) => setTransactionId(event.target.value)}
-            fullWidth
-            sx={fieldSx}
-          />
-        </Stack>
-      )}
-      {error && <Typography color="error" sx={{ fontSize: 14 }}>{error}</Typography>}
-      <Button variant="contained" onClick={save} disabled={saving} sx={{ minHeight: 50, textTransform: "none", fontWeight: 700 }}>{saving ? "Saving…" : "Add Payment"}</Button>
-    </Stack>
-  );
+  return <RecordSupplierPaymentPage embeddedRecord={record} onSaved={onSaved} />;
 }
 export function DesktopSupplierHistory() {
   const [filterOpen, setFilterOpen] = useState(false);

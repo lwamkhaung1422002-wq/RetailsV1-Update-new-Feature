@@ -6,6 +6,8 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogContent,
   IconButton,
   Paper,
   Toolbar,
@@ -20,7 +22,9 @@ import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
 import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
 import StorefrontOutlinedIcon from "@mui/icons-material/StorefrontOutlined";
 import AccountCircleOutlinedIcon from "@mui/icons-material/AccountCircleOutlined";
+import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import { usePosApi } from "../../hooks/useApiResource";
+import RecordSupplierPaymentPage from "./RecordSupplierPaymentPage";
 
 const money = (value) =>
   `${new Intl.NumberFormat("en-US").format(Number(value || 0))} ကျပ်`;
@@ -54,6 +58,8 @@ export default function SupplierDetailsPage({ embeddedSupplierId, embeddedRecord
   const [purchase, setPurchase] = useState(null);
   const [outstandingPurchase, setOutstandingPurchase] = useState(null);
   const [error, setError] = useState("");
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const backTo = location.state?.from || "/suppliers";
   useEffect(() => {
     if (recordId) {
@@ -109,7 +115,7 @@ export default function SupplierDetailsPage({ embeddedSupplierId, embeddedRecord
     return () => {
       active = false;
     };
-  }, [api, location.state?.purchaseId, recordId, supplierId]);
+  }, [api, location.state?.purchaseId, recordId, reloadVersion, supplierId]);
   const delivery = supplier?.deliveryRecords?.[0];
   if (error)
     return (
@@ -125,6 +131,17 @@ export default function SupplierDetailsPage({ embeddedSupplierId, embeddedRecord
     );
   const paymentActivity = supplierPaymentActivity(purchase?.payments || []);
   const invoiceStatus = delivery.invoiceStatus || (delivery.status === "cancelled" ? "Cancelled" : "Credit");
+  const activePaid = (purchase?.payments || []).filter((payment) => !payment.reversedAt && !payment.reversal).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const remaining = recordId
+    ? Number(delivery.remaining ?? Math.max(0, Number(delivery.amount || 0) - activePaid))
+    : Math.max(0, Number(outstandingPurchase?.total || 0) - Number(outstandingPurchase?.paidAmount || 0));
+  const paymentTarget = outstandingPurchase ? {
+    deliveryOnly: Boolean(recordId),
+    apiId: outstandingPurchase.id,
+    supplierId,
+    name: supplier.name,
+    amount: remaining,
+  } : null;
   return (
     <Box
       sx={{
@@ -184,7 +201,7 @@ export default function SupplierDetailsPage({ embeddedSupplierId, embeddedRecord
           />
           <Detail
             icon={<PersonOutlineRoundedIcon />}
-            label="Receiver Name"
+            label="Recorded By"
             value={delivery.receiverName}
           />
           <Detail
@@ -217,11 +234,7 @@ export default function SupplierDetailsPage({ embeddedSupplierId, embeddedRecord
             fullWidth
             variant="contained"
             startIcon={<PaymentsOutlinedIcon />}
-            onClick={() =>
-              navigate(recordId ? `/suppliers/delivery/${recordId}/pay` : `/suppliers/${supplierId}/pay`, {
-                state: { from: backTo, purchaseId: outstandingPurchase.id },
-              })
-            }
+            onClick={() => setPaymentOpen(true)}
             sx={{
               mt: 2.5,
               minHeight: 56,
@@ -235,6 +248,15 @@ export default function SupplierDetailsPage({ embeddedSupplierId, embeddedRecord
           </Button>
         )}
       </Box>
+      <Dialog open={paymentOpen} onClose={() => setPaymentOpen(false)} fullWidth maxWidth="sm" slotProps={{ paper: { sx: { borderRadius: 2.5 } } }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", px: 2.5, pt: 1.5 }}>
+          <Typography sx={{ fontSize: 20, fontWeight: 700 }}>Record Payment</Typography>
+          <IconButton aria-label="Close supplier payment" onClick={() => setPaymentOpen(false)}><CloseRoundedIcon /></IconButton>
+        </Box>
+        <DialogContent sx={{ p: 0 }}>
+          {paymentTarget && <RecordSupplierPaymentPage embeddedRecord={paymentTarget} onSaved={() => { setPaymentOpen(false); setReloadVersion((value) => value + 1); }} />}
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }
@@ -332,7 +354,7 @@ export function SupplierDetailsCards({ supplier, delivery, payments = [] }) {
       <Detail icon={<ReceiptLongOutlinedIcon />} label="Status" value={status} accent={status === "Cancelled"} />
       <Detail icon={<LocalShippingOutlinedIcon />} label="Delivery Name" value={delivery.deliveryName} />
       <Detail icon={<PhoneOutlinedIcon />} label="Delivery Phone" value={delivery.deliveryPhone} />
-      <Detail icon={<PersonOutlineRoundedIcon />} label="Receiver Name" value={delivery.receiverName} />
+      <Detail icon={<PersonOutlineRoundedIcon />} label="Recorded By" value={delivery.receiverName} />
       <Detail icon={<CalendarTodayOutlinedIcon />} label="Receive Date" value={date(delivery.receivedAt)} />
       <Detail icon={<PaymentsOutlinedIcon />} label="Total Amount" value={money(delivery.amount)} accent />
       {status === "Credit" && <Detail icon={<PaymentsOutlinedIcon />} label="Remaining Amount" value={money(remaining)} accent />}

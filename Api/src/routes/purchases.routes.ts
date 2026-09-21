@@ -29,7 +29,6 @@ const supplierDeliveryInput = z.object({
   invoiceNumber: z.string().trim().min(1).max(160),
   deliveryName: z.string().trim().min(1).max(160),
   deliveryPhone: z.string().trim().min(1).max(80),
-  receiverName: z.string().trim().min(1).max(160),
   receivedAt: z.coerce.date(),
   dueAt: z.coerce.date(),
   amount: money.positive(),
@@ -247,10 +246,13 @@ purchasesRouter.post("/:shopId/suppliers", async (request, response, next) => {
     if (!input.phone || !input.deliveryRecord) throw badRequest("Supplier phone and delivery record are required.");
     const supplierPhone = input.phone;
     const deliveryRecord = input.deliveryRecord;
+    const creator = await prisma.user.findUnique({ where: { id: auth.id }, select: { name: true } });
+    const creatorName = creator?.name?.trim();
+    if (!creatorName) throw badRequest("Authenticated supplier creator name could not be resolved.");
     const existingRecord = await prisma.supplierDeliveryRecord.findFirst({ where: { shopId, invoiceNumber: deliveryRecord.invoiceNumber }, select: { id: true } });
     if (existingRecord) throw conflict("This invoice number already exists.");
     const record = await prisma.$transaction(async (tx) => {
-      const created = await tx.supplierDeliveryRecord.create({ data: { shopId, supplierName: input.name, supplierPhone, ...deliveryRecord } });
+      const created = await tx.supplierDeliveryRecord.create({ data: { shopId, supplierName: input.name, supplierPhone, ...deliveryRecord, receiverName: creatorName } });
       await writeAuditLog(tx, { shopId, actorId: auth.id, action: "supplier.delivery.create", entity: "SupplierDeliveryRecord", entityId: created.id, metadata: { invoiceNumber: created.invoiceNumber } });
       return created;
     });
@@ -283,7 +285,12 @@ purchasesRouter.patch("/:shopId/suppliers/:supplierId", async (request, response
           throw badRequest("Amount cannot be reduced below the original created amount.");
         }
         if (latest) await tx.supplierDeliveryRecord.update({ where: { id: latest.id }, data: input.deliveryRecord });
-        else await tx.supplierDeliveryRecord.create({ data: { shopId, supplierId: existing.id, supplierName: input.name || existing.name, supplierPhone: input.phone || existing.phone || "", ...input.deliveryRecord } });
+        else {
+          const creator = await tx.user.findUnique({ where: { id: auth.id }, select: { name: true } });
+          const creatorName = creator?.name?.trim();
+          if (!creatorName) throw badRequest("Authenticated supplier creator name could not be resolved.");
+          await tx.supplierDeliveryRecord.create({ data: { shopId, supplierId: existing.id, supplierName: input.name || existing.name, supplierPhone: input.phone || existing.phone || "", ...input.deliveryRecord, receiverName: creatorName } });
+        }
       }
       return updated;
     });

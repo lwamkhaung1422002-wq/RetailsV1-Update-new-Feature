@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
   AppBar,
@@ -11,7 +11,6 @@ import {
   TextField,
   Toolbar,
   Typography,
-  useMediaQuery,
 } from "@mui/material";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import CalendarTodayOutlinedIcon from "@mui/icons-material/CalendarTodayOutlined";
@@ -42,15 +41,26 @@ const inputSx = {
     { WebkitAppearance: "none", margin: 0 },
 };
 
-export default function RecordSupplierPaymentPage() {
+export default function RecordSupplierPaymentPage({ embeddedRecord = null, onSaved }) {
   const navigate = useNavigate();
-  const isMobile = useMediaQuery("(max-width:768px)");
-  const { supplierId, recordId } = useParams();
+  const routeParams = useParams();
+  const supplierId = embeddedRecord?.supplierId || routeParams.supplierId;
+  const recordId = embeddedRecord?.deliveryOnly ? embeddedRecord.apiId : routeParams.recordId;
   const location = useLocation();
   const api = usePosApi();
   const queryClient = useQueryClient();
   const { shop } = useAuth();
-  const preloadedPurchase = recordId ? null : location.state?.purchase || null;
+  const preloadedPurchase = useMemo(() => recordId
+    ? null
+    : embeddedRecord
+      ? {
+          id: embeddedRecord.apiId,
+          total: Number(embeddedRecord.amount || 0),
+          paidAmount: 0,
+          supplier: { name: embeddedRecord.name || "Supplier" },
+        }
+      : location.state?.purchase || null,
+  [embeddedRecord, location.state?.purchase, recordId]);
   const preloadedSupplier = preloadedPurchase
     ? {
         name: preloadedPurchase.supplier?.name || "Supplier",
@@ -78,9 +88,6 @@ export default function RecordSupplierPaymentPage() {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    if (!isMobile && recordId) navigate("/suppliers", { replace: true, state: { openPaymentRecordId: recordId } });
-  }, [isMobile, navigate, recordId]);
   useEffect(() => {
     if (recordId) {
       let active = true;
@@ -225,11 +232,12 @@ export default function RecordSupplierPaymentPage() {
           queryKey: ["shops", shop?.id, "supplier-deliveries"],
           refetchType: "all",
         }),
+        queryClient.invalidateQueries({
+          queryKey: ["shops", shop?.id, "payments"],
+        }),
       ]);
-      void queryClient.invalidateQueries({
-        queryKey: ["shops", shop?.id, "payments"],
-      });
-      navigate(location.state?.from || "/suppliers");
+      if (onSaved) onSaved();
+      else navigate(location.state?.from || "/suppliers");
     } catch (nextError) {
       const message = nextError.message || "Unable to record payment.";
       if (/transaction id/i.test(message)) setFieldErrors({ transactionId: message });
@@ -273,12 +281,12 @@ export default function RecordSupplierPaymentPage() {
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: embeddedRecord ? 0 : "100vh",
         bgcolor: "background.default",
         fontFamily: "Inter, Roboto, Noto Sans Myanmar, sans-serif",
       }}
     >
-      <AppBar position="sticky" elevation={0} sx={{ bgcolor: "primary.main" }}>
+      {!embeddedRecord && <AppBar position="sticky" elevation={0} sx={{ bgcolor: "primary.main" }}>
         <Toolbar
           sx={{
             minHeight: 64,
@@ -298,7 +306,7 @@ export default function RecordSupplierPaymentPage() {
           </Typography>
           <Box />
         </Toolbar>
-      </AppBar>
+      </AppBar>}
       <Box sx={{ px: 2.5, py: 3, maxWidth: 520, mx: "auto" }}>
         <Paper elevation={1} sx={{ p: 2, mb: 3, borderRadius: 2 }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>

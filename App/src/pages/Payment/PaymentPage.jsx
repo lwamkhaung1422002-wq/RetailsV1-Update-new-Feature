@@ -35,6 +35,7 @@ import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import SupplierHistoryPage from "../Suppliers/SupplierHistoryPage";
 import OrderDetailsPage from "../Sale/OrderDetailsPage";
 import SupplierDetailsPage from "../Suppliers/SupplierDetailsPage";
+import RecordSupplierPaymentPage from "../Suppliers/RecordSupplierPaymentPage";
 import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
 import { usePosApi } from "../../hooks/useApiResource";
 import { usePaymentWorklistQuery, useShopSettingsQuery } from "../../hooks/usePosQueries";
@@ -700,14 +701,8 @@ export default function PaymentPage() {
         {((menuPayment?.kind === "supplier-delivery" && menuPayment?.allowedActions?.pay) || ["Unpaid", "Partial"].includes(menuPayment?.status)) && (
           <MenuItem
             onClick={() => {
-              if (menuPayment.kind === "supplier-delivery")
-                navigate(`/suppliers/delivery/${menuPayment.apiId}/pay`, {
-                  state: { from: "/payment" },
-                });
-              else if (menuPayment.kind === "supplier")
-                navigate(`/suppliers/${menuPayment.supplierId}/pay`, {
-                  state: { from: "/payment" },
-                });
+              if (["supplier", "supplier-delivery"].includes(menuPayment.kind))
+                setMobileDialog({ mode: "supplier-pay", record: menuPayment });
               else if (menuPayment.kind === "sale")
                 setMobileDialog({ mode: "order-pay", record: menuPayment });
               closeMenu();
@@ -803,8 +798,19 @@ export default function PaymentPage() {
           {detailPayment.kind === "sale" ? <OrderDetailsPage embeddedOrderId={detailPayment.apiId} embeddedOnClose={() => setDetailPayment(null)} forceMobileLayout hideBackButton /> : <SupplierDetailsPage embeddedSupplierId={detailPayment.supplierId} embeddedRecordId={detailPayment.kind === "supplier-delivery" ? detailPayment.apiId : undefined} hideBackButton />}
         </DialogContent>
       </Dialog>}
+      {mobileDialog?.mode === "supplier-pay" && (
+        <Dialog open onClose={() => setMobileDialog(null)} fullWidth maxWidth="sm" slotProps={{ paper: { sx: { borderRadius: 2.5 } } }}>
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", px: 2.5, pt: 1.5 }}>
+            <Typography sx={{ fontSize: 20, fontWeight: 700 }}>Record Payment</Typography>
+            <IconButton aria-label="Close supplier payment" onClick={() => setMobileDialog(null)}><CloseRoundedIcon /></IconButton>
+          </Box>
+          <DialogContent sx={{ p: 0 }}>
+            <RecordSupplierPaymentPage embeddedRecord={mobileDialog.record} onSaved={() => setMobileDialog(null)} />
+          </DialogContent>
+        </Dialog>
+      )}
       <MobilePaymentDialog
-        dialog={mobileDialog}
+        dialog={mobileDialog?.mode === "supplier-pay" ? null : mobileDialog}
         saving={savingPayment}
         error={paymentError}
         onClose={() => {

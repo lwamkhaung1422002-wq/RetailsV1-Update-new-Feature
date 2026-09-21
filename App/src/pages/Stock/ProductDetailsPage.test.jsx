@@ -79,5 +79,7 @@ describe("Product Details inventory polish", () => {
     expect(screen.queryByText("Product History")).toBeNull();
     expect(screen.getByLabelText("View cost price history")).toBeTruthy();
     expect(screen.getByLabelText("View stock source history")).toBeTruthy();
+    expect(screen.getByLabelText("Edit product").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByLabelText("Delete product")).toBeTruthy();
   });
 });

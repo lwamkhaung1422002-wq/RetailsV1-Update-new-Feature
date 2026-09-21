@@ -604,6 +604,8 @@ pricingRouter.patch("/:shopId/promotion-campaigns/:id", async (request, response
     const campaign = await prisma.$transaction(async (tx) => {
       const existing = await tx.promotionCampaign.findFirst({ where: { id, shopId }, include: { promotions: true } });
       if (!existing) throw notFound("Promotion campaign not found."); if (existing.version !== input.expectedVersion) throw conflict("Promotion campaign was changed by another request.");
+      const existingEffectiveState = existing.promotions[0] ? effectivePromotionState(existing.promotions[0]) : existing.state;
+      if (["ENDED", "CANCELLED"].includes(existingEffectiveState) || existing.state === "CANCELLED") throw conflict("Ended or cancelled promotions cannot be edited.");
       const state = input.state ?? existing.state;
       const promotionData = { state, ...(input.name ? { name: input.name } : {}), ...(input.type ? { type: input.type } : {}), ...(input.value !== undefined ? { value: String(input.value) } : {}), ...(input.minimumQuantity !== undefined ? { minimumQuantity: String(input.minimumQuantity) } : {}), ...(input.discountBase ? { discountBase: input.discountBase } : {}), ...(input.startsAt ? { startsAt: input.startsAt } : {}), ...(input.endsAt ? { endsAt: input.endsAt } : {}), ...(input.timeZone ? { timeZone: input.timeZone } : {}), ...(input.channel ? { channel: input.channel.toUpperCase() } : {}), ...(input.priority !== undefined ? { priority: input.priority } : {}), ...(input.note !== undefined ? { note: input.note } : {}), ...(input.reason ? { reason: input.reason } : {}), actorId: auth.id, version: { increment: 1 } };
       await tx.promotion.updateMany({ where: { campaignId: id }, data: promotionData });
@@ -662,6 +664,7 @@ pricingRouter.patch("/:shopId/promotions/:id", async (request, response, next) =
     const promotion = await prisma.$transaction(async (tx) => {
       const existing = await tx.promotion.findFirst({ where: { id, shopId } }); if (!existing) throw notFound("Promotion not found.");
       if (existing.version !== input.expectedVersion) throw conflict("Promotion was changed by another request.");
+      if (["ENDED", "CANCELLED"].includes(effectivePromotionState(existing))) throw conflict("Ended or cancelled promotions cannot be edited.");
       const merged = {
         ...existing,
         productId: input.productId ?? existing.productId,

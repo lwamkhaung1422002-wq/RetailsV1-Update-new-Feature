@@ -23,9 +23,9 @@ import { useOrderQuery } from "../../hooks/usePosQueries";
 import { buildExchangeReceiptHtml, buildInvoiceReceiptHtml } from "../../lib/receipt";
 import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
 import ReturnRefundDialog from "../../components/ReturnRefundDialog";
-import { previewReturnedValue } from "../../lib/exchangePreview";
 import { refundableSalePayments } from "../../lib/refundablePayments";
 import { buildPaymentActivity, buildReturnActivity } from "../../lib/orderActivity";
+import { getOrderReturnSummary } from "./orderSummary";
 
 const formatKyat = (amount) =>
   `${new Intl.NumberFormat("en-US").format(amount)} ကျပ်`;
@@ -169,8 +169,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
   const paymentActivity = buildPaymentActivity(receipt);
   const paidAmount = paymentActivity.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const activePaymentRecordCount = paymentRecords.length;
-  const returnedQuantities = Object.fromEntries((record.items || []).map((item) => [item.id, (item.returns || []).reduce((sum, entry) => sum + Number(entry.quantity || 0), 0)]));
-  const effectiveTotal = Number(record.effectiveTotal ?? receipt?.effectiveTotal ?? Math.max(0, Number(record.total || 0) - previewReturnedValue(record, returnedQuantities)));
+  const { effectiveTotal, originalTotal, returnedSaleValue } = getOrderReturnSummary(record, receipt);
   const remainingAmount = Math.max(0, effectiveTotal - paidAmount);
   const returnActivity = buildReturnActivity(receipt);
   const showPaymentSummary =
@@ -722,6 +721,12 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                   }
                   tone={discount > 0 ? "#d14343" : "inherit"}
                 />
+                {returnedSaleValue > 0 && (
+                  <>
+                    <DetailRow label="Original Total" value={formatKyat(originalTotal)} />
+                    <DetailRow label="Returned Value" value={`- ${formatKyat(returnedSaleValue)}`} tone="#d14343" />
+                  </>
+                )}
               </Stack>
               <Divider sx={{ my: 2.25, borderColor: colors.divider }} />
               <DetailRow
