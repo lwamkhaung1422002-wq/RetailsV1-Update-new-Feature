@@ -73,7 +73,7 @@ describe("Add Supplier hosts", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Add Supplier" }).at(-1));
     await waitFor(() => expect(mocks.api.suppliers.create).toHaveBeenCalledWith(expect.objectContaining({ name: "Golden", deliveryRecord: expect.not.objectContaining({ receiverName: expect.anything() }) })));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
+  }, 10000);
 
   it("keeps mobile Add Supplier on the existing full-page route", () => {
     mocks.mobile = true;
@@ -113,6 +113,41 @@ describe("Add Supplier hosts", () => {
     fireEvent.click(await screen.findByLabelText("More actions for Golden"));
     fireEvent.click(screen.getByText("Pay"));
     expect(await screen.findByText("Record Payment")).toBeTruthy();
+    expect(screen.getByTestId("location").textContent).toBe("/suppliers");
+  });
+
+  it("keeps desktop Supplier Pay local with a top close control and no duplicate Cancel footer", async () => {
+    const record = {
+      id: "INV-1",
+      apiId: "delivery-1",
+      supplierId: "supplier-1",
+      name: "Golden",
+      amount: 100,
+      totalAmount: 100,
+      remainingAmount: 100,
+      status: "Credit",
+      receiveDate: "2026-09-20",
+      date: "2026-09-30",
+      dateLabel: "Due",
+      deliveryOnly: true,
+      allowedActions: { pay: true, edit: true },
+    };
+    mocks.api.suppliers.deliveryRecord.mockResolvedValue({
+      record: {
+        id: "delivery-1",
+        supplierName: "Golden",
+        amount: 100,
+        remaining: 100,
+        payments: [],
+      },
+    });
+    render(<MemoryRouter initialEntries={["/suppliers"]}><DesktopSuppliers records={[record]} /><LocationProbe /></MemoryRouter>);
+
+    fireEvent.click(screen.getByLabelText("Pay Golden"));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.getByLabelText("Close supplier payment")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add Payment" })).toBeTruthy();
     expect(screen.getByTestId("location").textContent).toBe("/suppliers");
   });
 

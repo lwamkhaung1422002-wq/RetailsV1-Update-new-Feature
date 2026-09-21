@@ -1048,11 +1048,11 @@ function DesktopSupplierDialog({ dialog, onClose, onDelete, onOpenPayment }) {
       open
       onClose={onClose}
       fullWidth
-      maxWidth={isHistory ? "md" : mode === "details" ? "sm" : "sm"}
+      maxWidth={isHistory || mode === "add" ? "md" : "sm"}
       slotProps={{ paper: { sx: { borderRadius: 2.5 } } }}
     >
-      {!isHistory && <DialogTitle sx={{ fontWeight: 800, pb: 1 }}>{title}</DialogTitle>}
-      <DialogContent dividers sx={{ p: mode === "history" ? 2 : 2.5 }}>
+      {!isHistory && <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, fontWeight: 800, pb: 1 }}>{title}{mode === "pay" && <IconButton aria-label="Close supplier payment" onClick={onClose} size="small"><CloseRoundedIcon /></IconButton>}</DialogTitle>}
+      <DialogContent dividers sx={{ p: mode === "history" ? 2 : mode === "add" ? 3 : 2.5 }}>
         {mode === "delete" ? (
           <><Typography color="text.secondary">Cancel <strong>{record.name}</strong>? A cancellation reason is required.</Typography><TextField autoFocus fullWidth required label="Cancel Invoice Reason" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} sx={{ mt: 2 }} /></>
         ) : mode === "history" ? (
@@ -1067,7 +1067,7 @@ function DesktopSupplierDialog({ dialog, onClose, onDelete, onOpenPayment }) {
           <DesktopSupplierFields record={record} />
         )}
       </DialogContent>
-      <DialogActions sx={{ px: 3, py: 1.75, gap: 1 }}>
+      {mode !== "pay" && <DialogActions sx={{ px: 3, py: 1.75, gap: 1 }}>
         <Button onClick={onClose} sx={{ textTransform: "none" }}>
           {isHistory || mode === "details" ? "Close" : "Cancel"}
         </Button>
@@ -1099,7 +1099,7 @@ function DesktopSupplierDialog({ dialog, onClose, onDelete, onOpenPayment }) {
             </Button>
           )
         )}
-      </DialogActions>
+      </DialogActions>}
     </Dialog>
   );
 }

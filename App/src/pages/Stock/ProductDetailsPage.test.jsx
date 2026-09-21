@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 
 const mocks = vi.hoisted(() => ({
   mobile: false,
+  hasSaleHistory: false,
   api: {
     products: {
       get: vi.fn(),
@@ -30,7 +31,7 @@ beforeEach(() => {
     removeListener: vi.fn(),
     dispatchEvent: vi.fn(),
   }));
-  mocks.api.products.get.mockResolvedValue({
+  mocks.api.products.get.mockImplementation(async () => ({
     product: {
       id: "product-1",
       name: "Coffee",
@@ -46,14 +47,15 @@ beforeEach(() => {
       updatedAt: "2026-09-19T00:00:00.000Z",
     },
     activeBarcode: null,
-    hasSaleHistory: false,
-  });
+    hasSaleHistory: mocks.hasSaleHistory,
+  }));
   mocks.api.inventory.movements.mockResolvedValue({ movements: [] });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mocks.hasSaleHistory = false;
 });
 
 function renderPage() {
@@ -79,7 +81,23 @@ describe("Product Details inventory polish", () => {
     expect(screen.queryByText("Product History")).toBeNull();
     expect(screen.getByLabelText("View cost price history")).toBeTruthy();
     expect(screen.getByLabelText("View stock source history")).toBeTruthy();
-    expect(screen.getByLabelText("Edit product").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByLabelText("Edit product").hasAttribute("disabled")).toBe(false);
     expect(screen.getByLabelText("Delete product")).toBeTruthy();
+  });
+
+  it.each([
+    ["desktop", false, false],
+    ["desktop", false, true],
+    ["mobile", true, false],
+    ["mobile", true, true],
+  ])("matches the Product List edit rule on %s (mobile: %s) when sale history is %s", async (_view, mobile, hasSaleHistory) => {
+    mocks.mobile = mobile;
+    mocks.hasSaleHistory = hasSaleHistory;
+    renderPage();
+
+    const edit = await screen.findByLabelText("Edit product");
+    const remove = screen.getByLabelText("Delete product");
+    expect(edit.hasAttribute("disabled")).toBe(hasSaleHistory);
+    expect(remove.hasAttribute("disabled")).toBe(hasSaleHistory);
   });
 });
