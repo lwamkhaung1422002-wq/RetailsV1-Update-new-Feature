@@ -7,6 +7,8 @@ import {
   Card,
   CardContent,
   Divider,
+  Dialog,
+  DialogContent,
   Menu,
   MenuItem,
   IconButton,
@@ -36,6 +38,7 @@ import { queryKeys } from "../../lib/queryKeys";
 import { useAuth } from "../../context/AuthContext";
 import BarcodeManagerDialog from "../../components/Barcode/BarcodeManagerDialog";
 import BarcodeScannerDialog from "../../components/BarcodeScanner/BarcodeScannerDialog";
+import ProductDetailsPage from "./ProductDetailsPage";
 
 const formatMoney = (amount) => `${new Intl.NumberFormat("en-US").format(amount)} ကျပ်`;
 
@@ -57,6 +60,7 @@ export default function StockPage() {
   const [barcodeGeneratorOpen, setBarcodeGeneratorOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanNotice, setScanNotice] = useState(null);
+  const [desktopProductId, setDesktopProductId] = useState(null);
   const inventoryProducts = useMemo(() => {
     const categoryNames = new Map((categoryResult?.categories || []).map((category) => [category.id, category.name]));
     const totals = new Map();
@@ -124,7 +128,7 @@ export default function StockPage() {
   };
 
   const requestError = apiError || productsError || categoriesError || inventoryError;
-  if (!isMobile) return <><DesktopInventoryPage products={visibleProducts} search={search} setSearch={setSearch} summary={inventorySummary} lowStockOnly={lowStockOnly} setLowStockOnly={setLowStockOnly} navigate={navigate} onDelete={(id) => deleteProduct(id).catch((error) => setApiError(error))} onGenerateBarcodes={() => setBarcodeGeneratorOpen(true)} /><BarcodeManagerDialog open={barcodeGeneratorOpen} onClose={() => setBarcodeGeneratorOpen(false)} api={api} standalone />{requestError && <Alert severity="warning" sx={{ mt: 1.5 }}>{requestError.message || "Inventory request failed."}</Alert>}</>;
+  if (!isMobile) return <><DesktopInventoryPage products={visibleProducts} search={search} setSearch={setSearch} summary={inventorySummary} lowStockOnly={lowStockOnly} setLowStockOnly={setLowStockOnly} navigate={navigate} onOpenProduct={setDesktopProductId} onDelete={(id) => deleteProduct(id).catch((error) => setApiError(error))} onGenerateBarcodes={() => setBarcodeGeneratorOpen(true)} /><Dialog open={Boolean(desktopProductId)} onClose={() => setDesktopProductId(null)} fullWidth maxWidth="lg" slotProps={{ paper: { sx: { maxHeight: "calc(100vh - 48px)", borderRadius: 3 } } }}><DialogContent sx={{ p: 3, overflowX: "hidden" }}>{desktopProductId && <ProductDetailsPage key={desktopProductId} embeddedProductId={desktopProductId} embeddedOnClose={() => setDesktopProductId(null)} embeddedOnDeleted={() => queryClient.invalidateQueries({ queryKey: queryKeys.products(shop?.id) })} />}</DialogContent></Dialog><BarcodeManagerDialog open={barcodeGeneratorOpen} onClose={() => setBarcodeGeneratorOpen(false)} api={api} standalone />{requestError && <Alert severity="warning" sx={{ mt: 1.5 }}>{requestError.message || "Inventory request failed."}</Alert>}</>;
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default", px: 3, pt: 2, pb: "174px" }}>
@@ -202,7 +206,7 @@ export default function StockPage() {
   );
 }
 
-function DesktopInventoryPage({ products, search, setSearch, summary, lowStockOnly, setLowStockOnly, navigate, onDelete, onGenerateBarcodes }) {
+function DesktopInventoryPage({ products, search, setSearch, summary, lowStockOnly, setLowStockOnly, navigate, onOpenProduct, onDelete, onGenerateBarcodes }) {
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuProduct, setMenuProduct] = useState(null);
   return <Box sx={{ width: "100%", maxWidth: "none", mx: 0, py: 0.5 }}>
@@ -223,7 +227,7 @@ function DesktopInventoryPage({ products, search, setSearch, summary, lowStockOn
       <InventorySummary icon={<AccountBalanceWalletRoundedIcon />} iconBg="#fff3e1" iconColor="#dc8a19" value={formatMoney(summary.value)} label="Total Value" bordered />
     </Paper>
     <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 2 }}>
-      {products.map((product) => <Card key={product.id} onClick={() => navigate(`/stock/${product.id}`)} sx={{ minWidth: 0, borderRadius: 2.25, border: "1px solid", borderColor: "divider", boxShadow: "0 2px 8px rgba(15,23,42,.05)", cursor: "pointer", overflow: "hidden", "&:hover": { boxShadow: "0 7px 18px rgba(15,23,42,.12)", transform: "translateY(-1px)" } }}>
+      {products.map((product) => <Card key={product.id} onClick={() => onOpenProduct(product.id)} sx={{ minWidth: 0, borderRadius: 2.25, border: "1px solid", borderColor: "divider", boxShadow: "0 2px 8px rgba(15,23,42,.05)", cursor: "pointer", overflow: "hidden", "&:hover": { boxShadow: "0 7px 18px rgba(15,23,42,.12)", transform: "translateY(-1px)" } }}>
         <CardContent sx={{ p: 1.75, "&:last-child": { pb: 1.75 } }}>
           <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography noWrap sx={{ minWidth: 0, fontSize: 17, fontWeight: 700 }}>{product.name}<Box component="span" sx={{ ml: 0.75, color: "text.secondary", fontSize: 13, fontWeight: 400 }}>· {product.category}</Box></Typography><IconButton aria-label={`Actions for ${product.name}`} onClick={(event) => { event.stopPropagation(); setMenuAnchor(event.currentTarget); setMenuProduct(product); }} size="small"><MoreVertRoundedIcon /></IconButton></Box>
           <Divider sx={{ my: 1.5 }} />

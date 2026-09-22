@@ -55,6 +55,34 @@ afterEach(() => {
 });
 
 describe("Add Supplier hosts", () => {
+  it("keeps desktop Amount and Actions in separate aligned columns without changing row actions", () => {
+    const record = {
+      id: "INV-1",
+      apiId: "delivery-1",
+      supplierId: "supplier-1",
+      name: "Golden",
+      amount: 100,
+      totalAmount: 100,
+      remainingAmount: 100,
+      status: "Credit",
+      receiveDate: "2026-09-20",
+      date: "2026-09-30",
+      dateLabel: "Due",
+      deliveryOnly: true,
+      allowedActions: { pay: true, edit: true },
+    };
+
+    render(<MemoryRouter><DesktopSuppliers records={[record]} /></MemoryRouter>);
+
+    expect(getComputedStyle(screen.getByText("ACTIONS")).textAlign).toBe("right");
+    expect(getComputedStyle(screen.getByTestId("desktop-supplier-amount")).textAlign).toBe("right");
+    expect(getComputedStyle(screen.getByTestId("desktop-supplier-amount")).paddingRight).toBe("16px");
+    expect(screen.getByTestId("desktop-supplier-actions").previousElementSibling).toBe(screen.getByTestId("desktop-supplier-amount"));
+    expect(screen.getByLabelText("Pay Golden")).toBeTruthy();
+    expect(screen.getByLabelText("Edit Golden")).toBeTruthy();
+    expect(screen.getByLabelText("Delete Golden")).toBeTruthy();
+  });
+
   it("opens and saves the real Add Supplier form in a desktop modal without navigating", async () => {
     render(<MemoryRouter initialEntries={["/suppliers"]}><DesktopSuppliers records={[]} /><LocationProbe /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "Add Supplier" }));

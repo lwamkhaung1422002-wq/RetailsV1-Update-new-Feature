@@ -12,6 +12,7 @@ import {
   useMediaQuery,
 } from "@mui/material";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
+import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import PrintRoundedIcon from "@mui/icons-material/PrintRounded";
@@ -488,17 +489,16 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
             color: isMobile ? "common.white" : colors.text,
           }}
         >
-          <IconButton
+          {hideBackButton ? <Box /> : <IconButton
             aria-label="Back to orders"
             onClick={() => embeddedOnClose ? embeddedOnClose() : navigate(location.state?.from || "/sale")}
             sx={{
-              visibility: hideBackButton ? "hidden" : "visible",
               color: isMobile ? "common.white" : colors.text,
               justifySelf: "start",
             }}
           >
             <ArrowBackRoundedIcon sx={{ fontSize: 31 }} />
-          </IconButton>
+          </IconButton>}
           <Typography
             noWrap
             sx={{
@@ -509,7 +509,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
           >
             {order.id}
           </Typography>
-          <Box />
+          {hideBackButton && embeddedOnClose ? <IconButton aria-label="Close order details" onClick={embeddedOnClose} sx={{ color: isMobile ? "common.white" : colors.text, justifySelf: "end" }}><CloseRoundedIcon sx={{ fontSize: 29 }} /></IconButton> : <Box />}
         </Box>
         <Box sx={{ px: isMobile ? 2.5 : 0, pt: isMobile ? 1.5 : 0, pb: 4 }}>
           <Card sx={cardSx}>

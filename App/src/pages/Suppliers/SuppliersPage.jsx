@@ -822,8 +822,8 @@ export function DesktopSuppliers({ records }) {
           <DesktopSupplierHeader>STATUS</DesktopSupplierHeader>
           <DesktopSupplierHeader>RECEIVE DATE</DesktopSupplierHeader>
           <DesktopSupplierHeader>DUE/PAID DATE</DesktopSupplierHeader>
-          <DesktopSupplierHeader align="right">AMOUNT</DesktopSupplierHeader>
-          <DesktopSupplierHeader align="right"></DesktopSupplierHeader>
+          <DesktopSupplierHeader align="right" sx={{ pr: 2 }}>AMOUNT</DesktopSupplierHeader>
+          <DesktopSupplierHeader align="right">ACTIONS</DesktopSupplierHeader>
         </Box>
         {visibleRecords.map((record, index) => (
           <Box
@@ -872,7 +872,7 @@ export function DesktopSuppliers({ records }) {
                 ? `${record.dateLabel}: ${record.date.split("-").reverse().join("/")}`
                 : "--"}
             </Typography>
-            <Box sx={{ justifySelf: "end", minWidth: 0, textAlign: "right" }}>
+            <Box data-testid="desktop-supplier-amount" sx={{ justifySelf: "end", minWidth: 0, pr: 2, textAlign: "right" }}>
               <Typography noWrap sx={{ fontSize: 15.5, lineHeight: 1.25, fontWeight: 800 }}>
                 {money(record.totalAmount ?? record.amount)}
               </Typography>
@@ -883,6 +883,7 @@ export function DesktopSuppliers({ records }) {
               )}
             </Box>
             <Stack
+              data-testid="desktop-supplier-actions"
               direction="row"
               spacing={0.75}
               justifySelf="end"
@@ -1259,11 +1260,11 @@ function DesktopHistoryPaymentCard({ record }) {
   return <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 1.75, border: "1px solid", borderColor: "#e4e8ed", boxShadow: "0 2px 8px rgba(24, 52, 82, 0.11)" }}><Box sx={{ p: 2.25, pb: 1.875, display: "grid", gridTemplateColumns: "76px minmax(0, 1fr) auto", columnGap: 1.25, alignItems: "start" }}><Chip label="Paid" variant="outlined" sx={{ mt: 0.1, height: 40, minWidth: 72, borderRadius: 1.25, color: "#168437", borderColor: "#36a55a", bgcolor: "#f6fff8", "& .MuiChip-label": { px: 1.4, fontSize: 14, fontWeight: 600 } }} /><Box sx={{ minWidth: 0, pt: 0.15 }}><Typography noWrap sx={{ fontSize: 17.5, lineHeight: 1.3, fontWeight: 600 }}>{record.supplier}</Typography>{record.invoice && <Typography sx={{ mt: 0.95, fontSize: 13.5, lineHeight: 1.2, color: "text.secondary" }}>Invoice: {record.invoice}</Typography>}</Box><Stack direction="row" spacing={0.75} alignItems="center" justifyContent="flex-end" sx={{ whiteSpace: "nowrap" }}><Typography sx={{ color: record.method === "Cash" ? "#d87816" : "#238a3a", fontSize: 18, lineHeight: 1.28, fontWeight: 600 }}>{record.method}</Typography><Typography noWrap sx={{ fontSize: 18, lineHeight: 1.28, fontWeight: 600 }}>{money(record.amount)}</Typography></Stack></Box><Divider sx={{ mx: 2.25 }} /><Stack spacing={0.85} sx={{ px: 2.25, py: 1.75 }}>{record.kind === "mobile" && <DesktopHistoryDetailRow icon={<DescriptionOutlinedIcon />} label="Transaction ID" value={record.id} />}<DesktopHistoryDetailRow icon={<CalendarTodayOutlinedIcon />} label={record.dateLabel || "Payment Date"} value={record.paymentDate} /></Stack>{showSignature && <><Divider sx={{ mx: 2.25 }} /><Box sx={{ minHeight: 56, px: 2.25, display: "flex", alignItems: "center", gap: 1.4, color: "primary.main" }}><DrawOutlinedIcon sx={{ fontSize: 23 }} /><Typography sx={{ flex: 1, fontSize: 14, fontWeight: 500 }}>Receiver Signature</Typography><Typography sx={{ color: "text.primary", fontSize: 18, fontFamily: "cursive", fontStyle: "italic" }}>{record.signature}</Typography></Box></>}<Divider /><Box sx={{ minHeight: 58, px: 2.25, display: "flex", alignItems: "center", gap: 1.25, color: "text.secondary" }}><HistoryRoundedIcon sx={{ fontSize: 24, color: "primary.main" }} /><Typography sx={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>{record.relativeTime}</Typography><Typography noWrap sx={{ fontSize: 12.5 }}>{record.timestamp}</Typography></Box></Paper>;
 }
 
-function DesktopSupplierHeader({ children, align }) {
+function DesktopSupplierHeader({ children, align, sx }) {
   return (
     <Typography
       color="text.secondary"
-      sx={{ fontSize: 14, fontWeight: 700, textAlign: align }}
+      sx={{ fontSize: 14, fontWeight: 700, textAlign: align, ...sx }}
     >
       {children}
     </Typography>
@@ -1301,7 +1302,7 @@ function DesktopSupplierFilter({ label, active, icon, onClick, tone }) {
 }
 
 const desktopSupplierGrid =
-  "52px minmax(160px, 1.2fr) minmax(120px, .9fr) 92px minmax(120px, .9fr) minmax(145px, 1fr) minmax(150px, 1fr) 128px";
+  "52px minmax(160px, 1.2fr) minmax(120px, .9fr) 92px minmax(120px, .9fr) minmax(145px, 1fr) minmax(140px, 1fr) 152px";
 const desktopSupplierSearchSx = {
   "& .MuiOutlinedInput-root": {
     minHeight: 46,

@@ -470,7 +470,7 @@ function DesktopOrderDetailsModalExact({ order, onClose }) {
   if (!order) return null;
   return <Dialog open onClose={onClose} fullWidth maxWidth="sm" PaperProps={{ sx: { borderRadius: 3, maxHeight: "calc(100vh - 48px)" } }}>
     <DialogContent sx={{ p: 0, overflowX: "hidden" }}>
-      <OrderDetailsPage embeddedOrderId={order.id} embeddedOnClose={onClose} forceMobileLayout />
+      <OrderDetailsPage embeddedOrderId={order.id} embeddedOnClose={onClose} forceMobileLayout hideBackButton />
     </DialogContent>
   </Dialog>;
 }
