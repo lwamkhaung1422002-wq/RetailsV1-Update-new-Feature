@@ -81,7 +81,7 @@ describe("Product Details inventory polish", () => {
     expect(screen.queryByText("Product History")).toBeNull();
     expect(screen.getByLabelText("View cost price history")).toBeTruthy();
     expect(screen.getByLabelText("View stock source history")).toBeTruthy();
-    expect(screen.getByLabelText("Edit product").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByLabelText("Edit product").hasAttribute("disabled")).toBe(false);
     expect(screen.getByLabelText("Delete product")).toBeTruthy();
   });
 
@@ -90,14 +90,14 @@ describe("Product Details inventory polish", () => {
     ["desktop", false, true],
     ["mobile", true, false],
     ["mobile", true, true],
-  ])("keeps Edit visible and disabled on %s (mobile: %s), while preserving the existing delete rule when sale history is %s", async (_view, mobile, hasSaleHistory) => {
+  ])("matches the Product List edit rule on %s (mobile: %s) when sale history is %s", async (_view, mobile, hasSaleHistory) => {
     mocks.mobile = mobile;
     mocks.hasSaleHistory = hasSaleHistory;
     renderPage();
 
     const edit = await screen.findByLabelText("Edit product");
     const remove = screen.getByLabelText("Delete product");
-    expect(edit.hasAttribute("disabled")).toBe(true);
+    expect(edit.hasAttribute("disabled")).toBe(hasSaleHistory);
     expect(remove.hasAttribute("disabled")).toBe(hasSaleHistory);
   });
 });
