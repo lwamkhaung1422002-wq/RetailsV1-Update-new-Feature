@@ -692,7 +692,7 @@ export function DesktopSuppliers({ records }) {
   };
 
   return (
-    <Box sx={{ maxWidth: 1540, mx: "auto", py: 0.25 }}>
+    <Box sx={{ width: "100%", maxWidth: "none", mx: 0, py: 0.25 }}>
       <Paper
         sx={{
           p: 1.5,

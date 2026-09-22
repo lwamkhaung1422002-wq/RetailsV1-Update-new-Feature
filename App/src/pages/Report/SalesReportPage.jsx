@@ -369,7 +369,7 @@ export default function SalesReportPage() {
     );
 
   return (
-    <Box sx={{ maxWidth: 1500, mx: "auto", py: 1 }}>
+    <Box sx={{ width: "100%", maxWidth: "none", mx: 0, py: 1 }}>
       <Box
         sx={{
           display: "flex",

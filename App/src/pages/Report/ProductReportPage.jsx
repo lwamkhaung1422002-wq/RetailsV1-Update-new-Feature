@@ -119,7 +119,7 @@ export default function ProductReportPage() {
 
   if (isMobile) return <MobileProductReport tab={tab} setTab={setTab} visibleReports={visibleReports} detailKey={detailKey} detailRows={detailRows} summary={reportData.summary} products={reportData.products} navigate={navigate} filterAnchor={filterAnchor} setFilterAnchor={setFilterAnchor} dateRange={dateRange} setDateRange={setDateRange} from={from} setFrom={setFrom} to={to} setTo={setTo} category={category} setCategory={setCategory} search={search} setSearch={setSearch} t={t} />;
 
-  return <Box sx={{ maxWidth: 1500, mx: "auto", py: 1 }}>
+  return <Box sx={{ width: "100%", maxWidth: "none", mx: 0, py: 1 }}>
     <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2.5 }}>
       <Stack direction="row" spacing={0.5} sx={{ minWidth: 0 }}>
         {tabs.map((item) => <Button key={item} variant={tab === item ? "contained" : "text"} onClick={() => setTab(item)} sx={{ minHeight: 40, px: 1.5, borderRadius: 1.5, textTransform: "none", color: tab === item ? "common.white" : "text.primary", whiteSpace: "nowrap", fontSize: 14, fontWeight: tab === item ? 600 : 500 }}>{t(item)}</Button>)}

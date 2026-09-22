@@ -17,6 +17,9 @@ const querySchema = z.object({
   branchId: z.string().min(1).optional(),
   method: z.string().trim().min(1).optional(),
   staffId: z.string().trim().min(1).optional(),
+  search: z.string().trim().max(160).optional(),
+  cursor: z.string().trim().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 function dateKey(value = new Date()) {
@@ -39,7 +42,7 @@ paymentReportRouter.get("/:shopId/reports/payments", async (request, response, n
     const [shop, allPayments, periodPayments, audits, orders] = await Promise.all([
       prisma.shop.findUniqueOrThrow({ where: { id: targetShopId }, select: { id: true, name: true } }),
       prisma.payment.findMany({ where: { shopId: targetShopId }, select: { id: true, method: true, amount: true, type: true, scope: true, originalPaymentId: true } }),
-      prisma.payment.findMany({ where: { shopId: targetShopId, paidAt }, include: { order: { select: { id: true, orderNumber: true } } }, orderBy: { paidAt: "desc" } }),
+      prisma.payment.findMany({ where: { shopId: targetShopId, paidAt }, include: { order: { select: { id: true, orderNumber: true } } }, orderBy: [{ paidAt: "desc" }, { id: "desc" }] }),
       prisma.auditLog.findMany({ where: { shopId: targetShopId, entity: "Payment", createdAt: paidAt }, orderBy: { createdAt: "desc" } }),
       prisma.order.findMany({ where: { shopId: targetShopId, fulfillmentStatus: "completed" }, select: { id: true, total: true, completedAt: true, items: { select: { recognizedAt: true } }, payments: { select: { amount: true, type: true, scope: true } } } }),
     ]);
@@ -50,23 +53,43 @@ paymentReportRouter.get("/:shopId/reports/payments", async (request, response, n
     const users = await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } });
     const usersById = new Map(users.map((user) => [user.id, user]));
     const cashMovements = paymentReportCashMovements(periodPayments);
-    const attributed = cashMovements.map((payment) => ({ payment, audit: auditByPayment.get(payment.id) }));
+    const attributed = cashMovements.map((payment) => {
+      const audit = auditByPayment.get(payment.id);
+      const metadata = typeof audit?.metadata === "object" && audit.metadata !== null ? audit.metadata : {};
+      const approvedById = "approvedById" in metadata ? String(metadata.approvedById) : null;
+      const method = paymentMethodFor(payment, byId);
+      const type = isFinancialRefund(payment) ? "Refund" : payment.scope === "cod-settlement-void" ? "Void" : "Collection";
+      const source = payment.order ? `Sale Invoice #${payment.order.orderNumber || payment.order.id}` : "—";
+      const actor = audit?.actorId ? usersById.get(audit.actorId) ?? { id: audit.actorId, name: "Staff" } : null;
+      const approver = approvedById ? usersById.get(approvedById) ?? { id: approvedById, name: "Manager" } : null;
+      return {
+        payment,
+        audit,
+        report: { id: payment.id, paidAt: payment.paidAt, method, amount: isFinancialRefund(payment) ? -Math.abs(payment.amount) : payment.amount, type, source, actor, approver },
+      };
+    });
     const staffFiltered = attributed.filter(({ audit }) => !query.staffId || (query.staffId === "unassigned" ? !audit?.actorId : audit?.actorId === query.staffId));
-    const methodFiltered = staffFiltered.filter(({ payment }) => !query.method || paymentMethodFor(payment, byId) === query.method);
-    const selectedPayments = methodFiltered.map(({ payment }) => payment);
+    const methodFiltered = staffFiltered.filter(({ report }) => !query.method || report.method === query.method);
+    const search = query.search?.toLocaleLowerCase();
+    const matched = methodFiltered.filter(({ report }) => !search || [report.type, report.method, report.source, report.actor?.name || "Unassigned/System"].some((value) => value.toLocaleLowerCase().includes(search)));
+    const selectedPayments = matched.map(({ payment }) => payment);
     const summary = paymentReportMetrics(selectedPayments);
     const recognizedOrders = orders.filter((order) => {
       const recognizedAt = order.completedAt ?? order.items.map((item) => item.recognizedAt).filter((value): value is Date => Boolean(value)).sort((left, right) => left.getTime() - right.getTime())[0];
       return recognizedAt && recognizedAt >= paidAt.gte && recognizedAt <= paidAt.lte;
     });
     const outstanding = recognizedOrders.reduce((sum, order) => sum + Math.max(0, order.total - order.payments.filter((payment) => payment.scope !== "cod-settlement-void").reduce((paid, payment) => paid + payment.amount, 0)), 0);
-    const methods = [...selectedPayments.reduce((groups, payment) => {
-      const method = paymentMethodFor(payment, byId);
+    const methods = [...matched.reduce((groups, { payment, report }) => {
+      const method = report.method;
       const current = groups.get(method) ?? [];
       current.push({ ...payment, method });
       groups.set(method, current);
       return groups;
     }, new Map<string, typeof selectedPayments>()).entries()].map(([method, payments]) => ({ method, ...paymentReportMetrics(payments) })).sort((left, right) => right.netCollected - left.netCollected);
+    const cursorIndex = query.cursor ? matched.findIndex(({ payment }) => payment.id === query.cursor) : -1;
+    const pageStart = query.cursor ? (cursorIndex < 0 ? matched.length : cursorIndex + 1) : 0;
+    const page = matched.slice(pageStart, pageStart + query.pageSize);
+    const hasMore = pageStart + page.length < matched.length;
     response.json({
       branch: shop,
       range: { from, to },
@@ -77,11 +100,8 @@ paymentReportRouter.get("/:shopId/reports/payments", async (request, response, n
         { status: "Refunded", count: selectedPayments.filter(isFinancialRefund).length, amount: summary.refunds },
       ],
       staff: users.filter((user) => attributed.some(({ audit }) => audit?.actorId === user.id)),
-      recent: methodFiltered.slice(0, 50).map(({ payment, audit }) => {
-        const metadata = typeof audit?.metadata === "object" && audit.metadata !== null ? audit.metadata : {};
-        const approvedById = "approvedById" in metadata ? String(metadata.approvedById) : null;
-        return { id: payment.id, paidAt: payment.paidAt, method: paymentMethodFor(payment, byId), amount: isFinancialRefund(payment) ? -Math.abs(payment.amount) : payment.amount, type: isFinancialRefund(payment) ? "Refund" : payment.scope === "cod-settlement-void" ? "Void" : "Collection", source: payment.order ? `Sale Invoice #${payment.order.orderNumber || payment.order.id}` : "—", actor: audit?.actorId ? usersById.get(audit.actorId) ?? { id: audit.actorId, name: "Staff" } : null, approver: approvedById ? usersById.get(approvedById) ?? { id: approvedById, name: "Manager" } : null };
-      }),
+      recent: page.map(({ report }) => report),
+      pagination: { pageSize: query.pageSize, hasMore, nextCursor: hasMore ? page.at(-1)?.payment.id ?? null : null },
     });
   } catch (error) { next(error); }
 });

@@ -2640,8 +2640,9 @@ const menuItemSx = {
   color: "text.primary",
 };
 const desktopPaymentPageSx = {
-  maxWidth: 1600,
-  mx: "auto",
+  width: "100%",
+  maxWidth: "none",
+  mx: 0,
   p: 2.25,
   borderRadius: 2.25,
   border: "1px solid",

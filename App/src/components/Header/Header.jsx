@@ -103,7 +103,7 @@ export default function Header() {
       <Toolbar sx={{ justifyContent: "space-between", minHeight: 72, px: { md: 4, lg: 5 } }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           {(isDesktopStockDetails || isDesktopStockHistory || isDesktopCreateOrder) && <IconButton aria-label={isDesktopCreateOrder ? "Back to orders" : "Back to inventory"} onClick={() => navigate(isDesktopCreateOrder ? "/sale" : "/stock")} sx={{ ml: -1 }}><ArrowBackRoundedIcon /></IconButton>}
-          {!isSupplierDetails && <Typography variant="h6" fontWeight={800}>{t(pathname === "/" ? "Dashboard" : isDesktopStockDetails ? "Stock Details" : isDesktopStockHistory ? "Stock Movement" : pathname === "/report/sales" ? "Sale Report" : pathname === "/report/products" ? "Product Report" : pathname.startsWith("/report") ? "Reports" : pageTitles[pathname] ?? "POS System")}</Typography>}
+          {!isSupplierDetails && <Typography variant="h6" fontWeight={800}>{t(pathname === "/" ? "Dashboard" : isDesktopStockDetails ? "Stock Details" : isDesktopStockHistory ? "Stock Movement" : pathname === "/report/sales" ? "Sale Report" : pathname === "/report/products" ? "Product Report" : pathname === "/report/payments" ? "Payment Report" : pathname.startsWith("/report") ? "Reports" : pageTitles[pathname] ?? "POS System")}</Typography>}
         </Box>
         <Stack direction="row" spacing={1}>
           {hasBranchSelector && <Button color="inherit" onClick={(event) => setShopAnchor(event.currentTarget)} endIcon={<KeyboardArrowDownRoundedIcon />} sx={{ textTransform: "none", fontWeight: 700 }}>{shop?.name}</Button>}

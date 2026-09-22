@@ -205,7 +205,7 @@ export default function StockPage() {
 function DesktopInventoryPage({ products, search, setSearch, summary, lowStockOnly, setLowStockOnly, navigate, onDelete, onGenerateBarcodes }) {
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuProduct, setMenuProduct] = useState(null);
-  return <Box sx={{ maxWidth: 1500, mx: "auto", py: 0.5 }}>
+  return <Box sx={{ width: "100%", maxWidth: "none", mx: 0, py: 0.5 }}>
     <Box sx={{ display: "grid", gridTemplateColumns: "minmax(300px, 1fr) auto auto auto", gap: 1.5, alignItems: "center" }}>
       <TextField fullWidth value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by product code, name or barcode..." InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon /></InputAdornment> }} sx={{ "& .MuiOutlinedInput-root": { minHeight: 52, borderRadius: 2, bgcolor: "background.paper" } }} />
       <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => navigate("/stock/add")} sx={desktopPrimaryButtonSx}>Create Product</Button>
