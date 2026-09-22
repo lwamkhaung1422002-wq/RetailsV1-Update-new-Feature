@@ -823,7 +823,7 @@ export function DesktopSuppliers({ records }) {
           <DesktopSupplierHeader>RECEIVE DATE</DesktopSupplierHeader>
           <DesktopSupplierHeader>DUE/PAID DATE</DesktopSupplierHeader>
           <DesktopSupplierHeader align="right" sx={{ pr: 2 }}>AMOUNT</DesktopSupplierHeader>
-          <DesktopSupplierHeader align="right">ACTIONS</DesktopSupplierHeader>
+          <DesktopSupplierHeader align="right" />
         </Box>
         {visibleRecords.map((record, index) => (
           <Box

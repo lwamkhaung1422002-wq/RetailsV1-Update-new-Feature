@@ -74,7 +74,7 @@ describe("Add Supplier hosts", () => {
 
     render(<MemoryRouter><DesktopSuppliers records={[record]} /></MemoryRouter>);
 
-    expect(getComputedStyle(screen.getByText("ACTIONS")).textAlign).toBe("right");
+    expect(screen.queryByText("ACTIONS")).toBeNull();
     expect(getComputedStyle(screen.getByTestId("desktop-supplier-amount")).textAlign).toBe("right");
     expect(getComputedStyle(screen.getByTestId("desktop-supplier-amount")).paddingRight).toBe("16px");
     expect(screen.getByTestId("desktop-supplier-actions").previousElementSibling).toBe(screen.getByTestId("desktop-supplier-amount"));
