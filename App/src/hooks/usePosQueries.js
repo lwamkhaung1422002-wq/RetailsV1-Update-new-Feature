@@ -106,6 +106,23 @@ export const useSuppliersQuery = (query = {}) => {
   const api = usePosApi();
   return useShopQuery((shopId) => queryKeys.suppliers(shopId, query), () => api.suppliers.list(query), catalogOptions);
 };
+export const useCustomersQuery = (query = {}, options = {}) => {
+  const api = usePosApi();
+  return useShopQuery((shopId) => queryKeys.customers(shopId, query), () => api.customers.list(query), { ...catalogOptions, ...options });
+};
+export const useAllCustomersQuery = () => {
+  const api = usePosApi();
+  return useShopQuery((shopId) => queryKeys.customers(shopId, { all: true }), async () => {
+    const query = { pageSize: 100, sort: "name", direction: "asc" };
+    const firstPage = await api.customers.list({ ...query, page: 1 });
+    const totalCount = firstPage.totalCount || (firstPage.customers || []).length;
+    const pages = await Promise.all(Array.from(
+      { length: Math.max(0, Math.ceil(totalCount / 100) - 1) },
+      (_, index) => api.customers.list({ ...query, page: index + 2 }),
+    ));
+    return { ...firstPage, customers: [firstPage, ...pages].flatMap((page) => page.customers || []) };
+  }, catalogOptions);
+};
 export const usePaymentWorklistQuery = () => {
   const api = usePosApi();
   const query = { view: "worklist" };

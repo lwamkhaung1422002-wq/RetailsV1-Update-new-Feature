@@ -20,6 +20,7 @@ export const loadProductReportPage = () => import("./pages/Report/ProductReportP
 export const loadSalesReportPage = () => import("./pages/Report/SalesReportPage");
 export const loadSaleRecordPage = () => import("./pages/SaleRecord/SaleRecordPage");
 export const loadSuppliersPage = () => import("./pages/Suppliers/SuppliersPage");
+export const loadCustomersPage = () => import("./pages/Customers/CustomersPage");
 export const loadAddSupplierPage = () => import("./pages/Suppliers/AddSupplierPage");
 export const loadRecordSupplierPaymentPage = () => import("./pages/Suppliers/RecordSupplierPaymentPage");
 export const loadSupplierDetailsPage = () => import("./pages/Suppliers/SupplierDetailsPage");

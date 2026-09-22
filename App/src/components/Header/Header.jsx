@@ -22,6 +22,7 @@ const pageTitles = {
   "/report": "Reports",
   "/price": "Price & Discount",
   "/suppliers": "Suppliers",
+  "/customers": "Customers",
   "/settings": "Settings",
   "/settings/staff-access": "Staff & Access",
   "/branches": "Branches",
@@ -57,7 +58,7 @@ export default function Header() {
 
   if (isMobile) {
     const mobileShopHeader = ["/", "/sale", "/stock", "/settings", "/branches"].includes(pathname);
-    if (!mobileShopHeader && (pathname.startsWith("/sale/") || pathname.startsWith("/stock/") || pathname === "/suppliers" || pathname.startsWith("/suppliers/") || pathname.startsWith("/supplier-delivery/") || pathname === "/payment" || pathname.startsWith("/payment/") || pathname === "/price" || pathname.startsWith("/price/") || pathname.startsWith("/settings/") || pathname.startsWith("/report/"))) return null;
+    if (!mobileShopHeader && (pathname.startsWith("/sale/") || pathname.startsWith("/stock/") || pathname === "/customers" || pathname === "/suppliers" || pathname.startsWith("/suppliers/") || pathname.startsWith("/supplier-delivery/") || pathname === "/payment" || pathname.startsWith("/payment/") || pathname === "/price" || pathname.startsWith("/price/") || pathname.startsWith("/settings/") || pathname.startsWith("/report/"))) return null;
     const action = pathname === "/stock"
       ? { label: "Sort inventory", icon: <FilterListRoundedIcon />, event: "inventory-sort" }
       : pathname === "/sale"

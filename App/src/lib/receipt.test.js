@@ -32,6 +32,14 @@ describe("receipt presentation", () => {
     expect(input).toEqual(before);
   });
 
+  it("shows persisted Logistic Charge only when it is non-zero", () => {
+    const charged = receipt();
+    charged.totals.deliveryFee = 5_000;
+    charged.totals.total = 95_000;
+    expect(buildInvoiceReceiptHtml(charged, { reprint: true })).toContain("Logistic Charge");
+    expect(buildInvoiceReceiptHtml(receipt(), { reprint: true })).not.toContain("Logistic Charge");
+  });
+
   it.each([
     [10_000, "customer-payment", "Customer paid 10,000 MMK"],
     [-10_000, "refund", "Refund 10,000 MMK"],

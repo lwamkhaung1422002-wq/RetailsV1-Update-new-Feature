@@ -378,11 +378,13 @@ ordersRouter.get("/:shopId/orders", async (request, response, next) => {
           orderNumber: true,
           subtotal: true,
           discount: true,
+          deliveryFee: true,
           total: true,
           paymentTracking: true,
           paymentStatus: true,
           fulfillmentStatus: true,
           createdAt: true,
+          customer: { select: { id: true, name: true } },
           items: { select: { id: true, quantity: true, baseQuantity: true, productName: true, lineTotal: true, returns: { select: { quantity: true } } } },
           payments: {
             select: { id: true, amount: true, method: true, paidAt: true, createdAt: true, originalPaymentId: true },
@@ -649,6 +651,9 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
       const initialPaymentAmount = input.initialPayment?.amount ?? 0;
       if (initialPaymentAmount > total) {
         throw badRequest("Initial payment cannot exceed the order total.");
+      }
+      if (initialPaymentAmount < total && !customerId) {
+        throw badRequest("Please select a customer for unpaid or partial orders.");
       }
       const paymentStatus = initialPaymentAmount >= total
         ? "paid"

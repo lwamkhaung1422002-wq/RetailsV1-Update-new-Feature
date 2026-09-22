@@ -161,6 +161,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
   });
   const subtotal = Number(receipt?.totals?.subtotal ?? record.subtotal ?? 0);
   const discount = Number(receipt?.totals?.orderDiscount ?? record.discount ?? 0);
+  const deliveryFee = Number(receipt?.totals?.deliveryFee ?? record.deliveryFee ?? 0);
   const paymentRecords = refundableSalePayments(record.payments || [])
     .sort(
       (left, right) =>
@@ -406,7 +407,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
     });
     invoice.setFillColor(246, 249, 255);
     invoice.setDrawColor(212, 224, 247);
-    invoice.roundedRect(margin, y + 1, contentWidth, 29, 3, 3, "FD");
+    invoice.roundedRect(margin, y + 1, contentWidth, 29 + (deliveryFee > 0 ? 6 : 0), 3, 3, "FD");
     y += 8;
     invoice.setTextColor(17, 38, 82);
     invoice.setFont("helvetica", "normal");
@@ -423,6 +424,11 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
       y,
       { align: "right" },
     );
+    if (deliveryFee > 0) {
+      y += 6;
+      invoice.text("Logistic Charge", margin + 5, y);
+      invoice.text(money(deliveryFee), pageWidth - margin - 5, y, { align: "right" });
+    }
     invoice.setDrawColor(185, 202, 234);
     invoice.line(margin + 4, y + 4, pageWidth - margin - 4, y + 4);
     y += 12;
@@ -721,6 +727,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                   }
                   tone={discount > 0 ? "#d14343" : "inherit"}
                 />
+                {deliveryFee > 0 && <DetailRow label="Logistic Charge" value={formatKyat(deliveryFee)} />}
                 {returnedSaleValue > 0 && (
                   <>
                     <DetailRow label="Original Total" value={formatKyat(originalTotal)} />

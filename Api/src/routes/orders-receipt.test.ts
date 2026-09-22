@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   orderFind: vi.fn(),
+  orderFindMany: vi.fn(),
+  orderCount: vi.fn(),
+  transaction: vi.fn(),
   allocatedPayments: vi.fn(),
   auditFind: vi.fn(),
   usersFind: vi.fn(),
@@ -17,7 +20,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../lib/prisma.js", () => ({ prisma: {
-  order: { findFirst: mocks.orderFind, create: mocks.orderCreate },
+  $transaction: mocks.transaction,
+  order: { findFirst: mocks.orderFind, findMany: mocks.orderFindMany, count: mocks.orderCount, create: mocks.orderCreate },
   payment: { findMany: mocks.allocatedPayments, create: mocks.paymentCreate },
   auditLog: { findFirst: mocks.auditFind },
   user: { findMany: mocks.usersFind },
@@ -49,14 +53,15 @@ describe("order receipt read model", () => {
     mocks.auditFind.mockResolvedValue({ actorId: "cashier-1" });
     mocks.usersFind.mockResolvedValue([{ id: "cashier-1", name: "Ko Aung" }]);
     mocks.allocatedPayments.mockResolvedValue([]);
+    mocks.transaction.mockImplementation((operations: Promise<unknown>[]) => Promise.all(operations));
     mocks.orderFind.mockResolvedValue({
       id: "order-1",
       shopId: "shop-1",
       orderNumber: "INV-00125",
       subtotal: 100_000,
       discount: 10_000,
-      deliveryFee: 0,
-      total: 90_000,
+      deliveryFee: 5_000,
+      total: 95_000,
       paymentStatus: "partial",
       fulfillmentStatus: "completed",
       createdAt: new Date("2026-09-10T03:00:00.000Z"),
@@ -80,7 +85,7 @@ describe("order receipt read model", () => {
       shop: { id: "shop-1", name: "Hledan" },
       cashier: { id: "cashier-1", name: "Ko Aung" },
       items: [{ unitPrice: 50_000, lineTotal: 100_000, promotionDiscount: 20_000 }],
-      totals: { subtotal: 100_000, orderDiscount: 10_000, total: 90_000, paid: 40_000, outstanding: 50_000 },
+      totals: { subtotal: 100_000, orderDiscount: 10_000, deliveryFee: 5_000, total: 95_000, paid: 40_000, outstanding: 55_000 },
     });
     expect(mocks.orderCreate).not.toHaveBeenCalled();
     expect(mocks.paymentCreate).not.toHaveBeenCalled();
@@ -88,5 +93,16 @@ describe("order receipt read model", () => {
     expect(mocks.returnCreate).not.toHaveBeenCalled();
     expect(mocks.exchangeCreate).not.toHaveBeenCalled();
     expect(mocks.auditWrite).not.toHaveBeenCalled();
+  });
+
+  it("includes minimal customer identity and delivery fee in the sale summary", async () => {
+    mocks.orderFindMany.mockResolvedValue([{ id: "order-1", subtotal: 0, discount: 0, total: 5_000, items: [], payments: [], customer: { id: "customer-1", name: "Aye Aye" }, deliveryFee: 5_000 }]);
+    mocks.orderCount.mockResolvedValue(1);
+
+    const result = await request(app).get("/shop-1/orders?view=summary&pageSize=100");
+
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+    expect(result.body.orders[0]).toMatchObject({ customer: { id: "customer-1", name: "Aye Aye" }, deliveryFee: 5_000 });
+    expect(mocks.orderFindMany).toHaveBeenCalledWith(expect.objectContaining({ select: expect.objectContaining({ deliveryFee: true, customer: { select: { id: true, name: true } } }) }));
   });
 });

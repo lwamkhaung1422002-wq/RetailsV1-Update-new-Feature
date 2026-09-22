@@ -23,6 +23,7 @@ import {
   LogoutRounded as LogoutIcon,
   FactCheckRounded as OperationsIcon,
   GroupsRounded as StaffAccessIcon,
+  PeopleAltRounded as CustomersIcon,
   SettingsRounded as SettingsRoundedIcon,
   ShoppingCartRounded as SaleIcon,
   ShoppingCartSharp as SuppliersIcon,
@@ -32,6 +33,7 @@ import {
 const menuItems = [
   { label: "Home", path: "/", icon: <HomeIcon /> },
   { label: "Orders", path: "/sale", icon: <SaleIcon />, permission: "order.view" },
+  { label: "Customers", path: "/customers", icon: <CustomersIcon />, permission: "order.view" },
   { label: "Inventory", path: "/stock", icon: <InventoryIcon />, permission: "stock.view" },
   {
     label: "Suppliers",

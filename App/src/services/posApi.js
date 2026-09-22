@@ -138,6 +138,12 @@ export function createPosApi({
           { method: "POST" },
         ),
     },
+    customers: {
+      list: (query) => shopRequest(`/customers${queryString(query)}`),
+      create: (body) => shopRequest("/customers", { method: "POST", body }),
+      update: (id, body) =>
+        shopRequest(`/customers/${id}`, { method: "PATCH", body }),
+    },
     purchases: {
       list: (query) => shopRequest(`/purchases${queryString(query)}`),
       create: (body) => shopRequest("/purchases", { method: "POST", body }),

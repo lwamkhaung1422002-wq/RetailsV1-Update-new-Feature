@@ -61,4 +61,17 @@ describe("authenticated POS requests", () => {
     expect(apiRequest).toHaveBeenNthCalledWith(4, "/shops/shop-1/staff/member-1/reset-login", { token: "token", method: "POST" });
     expect(apiRequest).toHaveBeenNthCalledWith(5, "/shops/shop-1/staff/member-1", { token: "token", method: "PATCH", body: { active: false } });
   });
+
+  it("wires customer list, create, and edit to the selected shop", async () => {
+    apiRequest.mockResolvedValue({});
+    const api = createPosApi({ token: "token", shopId: "shop-1" });
+
+    await api.customers.list({ search: "Aye", pageSize: 100 });
+    await api.customers.create({ name: "Aye Aye", phone: "09123", address: "Main Road", city: "Yangon" });
+    await api.customers.update("customer-1", { name: "Aye Aye Win", phone: "09456", address: "Main Road", city: "Yangon" });
+
+    expect(apiRequest).toHaveBeenNthCalledWith(1, "/shops/shop-1/customers?search=Aye&pageSize=100", { token: "token" });
+    expect(apiRequest).toHaveBeenNthCalledWith(2, "/shops/shop-1/customers", { token: "token", method: "POST", body: { name: "Aye Aye", phone: "09123", address: "Main Road", city: "Yangon" } });
+    expect(apiRequest).toHaveBeenNthCalledWith(3, "/shops/shop-1/customers/customer-1", { token: "token", method: "PATCH", body: { name: "Aye Aye Win", phone: "09456", address: "Main Road", city: "Yangon" } });
+  });
 });

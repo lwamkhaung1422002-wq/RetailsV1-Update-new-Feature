@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import {
   AppBar,
   Alert,
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -38,13 +39,34 @@ import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import SellOutlinedIcon from "@mui/icons-material/SellOutlined";
 import BarcodeScannerDialog from "../../components/BarcodeScanner/BarcodeScannerDialog";
 import { usePosApi } from "../../hooks/useApiResource";
-import { useProductsQuery } from "../../hooks/usePosQueries";
+import { useAllCustomersQuery, useProductsQuery } from "../../hooks/usePosQueries";
 import { queryKeys } from "../../lib/queryKeys";
 import { toPricedCartItem } from "../../lib/cartPricing";
 import { resolveCheckoutPayment } from "../../lib/checkoutPayment";
 import { useAuth } from "../../context/AuthContext";
+import CustomerDialog from "../Customers/CustomerDialog";
+import { calculateOrderTotals, checkoutCustomerError, checkoutOrderFields, filterCustomerOptions } from "./checkoutCustomer";
 
 const initialItems = [];
+
+function CustomerSelector({ customers, value, onChange, onAdd }) {
+  return (
+    <Stack spacing={1}>
+      <Autocomplete
+        value={value}
+        onChange={(_event, customer) => onChange(customer)}
+        options={customers}
+        autoHighlight
+        getOptionLabel={(option) => [option?.name, option?.phone].filter(Boolean).join(" · ")}
+        isOptionEqualToValue={(option, selected) => option.id === selected.id}
+        filterOptions={(options, state) => filterCustomerOptions(options, state.inputValue)}
+        renderOption={(props, customer) => <Box component="li" {...props} key={customer.id}><Box sx={{ minWidth: 0 }}><Typography noWrap fontWeight={700}>{customer.name}</Typography><Typography noWrap color="text.secondary" sx={{ fontSize: 13 }}>{[customer.phone, customer.city].filter(Boolean).join(" · ") || "No contact details"}</Typography></Box></Box>}
+        renderInput={(params) => <TextField {...params} placeholder="Search or select customer..." />}
+      />
+      <Button size="small" startIcon={<AddRoundedIcon />} onClick={onAdd} sx={{ alignSelf: "flex-start", textTransform: "none" }}>Add New Customer</Button>
+    </Stack>
+  );
+}
 
 function printReceipt(order, items, totals, method) {
   const popup = window.open("", "_blank", "width=420,height=700");
@@ -299,7 +321,9 @@ export default function CreateOrderPage() {
   const [otherAnchor, setOtherAnchor] = useState(null);
   const [otherPayment, setOtherPayment] = useState("unpaid");
   const [amountReceived, setAmountReceived] = useState("0");
-  const [buyerName, setBuyerName] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
+  const [logisticCharge, setLogisticCharge] = useState("");
   const [note, setNote] = useState("");
   const [productPickerOpen, setProductPickerOpen] = useState(false);
   const [productSearch, setProductSearch] = useState("");
@@ -317,6 +341,8 @@ export default function CreateOrderPage() {
   } = useProductsQuery(
     { status: "active", page: 1, pageSize: 100, sort: "name", direction: "asc", view: "catalog" },
   );
+  const { data: customerResponse } = useAllCustomersQuery();
+  const customers = customerResponse?.customers || [];
   const catalog = useMemo(() => (catalogResponse?.products || []).map((product) => ({ ...product, price: Number(product.price || 0), stock: Number(product.currentStock || 0), color: "#1976d2", icon: <Inventory2RoundedIcon />, promotion: { type: "regular", text: "Regular price" } })), [catalogResponse]);
   const catalogError = catalogQueryError?.message || "";
 
@@ -362,19 +388,8 @@ export default function CreateOrderPage() {
       active = false;
     };
   }, [api]);
-  const totals = useMemo(() => {
-    const quantity = items.reduce((total, item) => total + item.quantity, 0);
-    const itemsTotal = items.reduce(
-      (total, item) => total + item.price * item.quantity,
-      0,
-    );
-    const discount = items.reduce(
-      (total, item) =>
-        total + (item.promotion.type === "discount" ? item.promotion.value : 0),
-      0,
-    );
-    return { quantity, itemsTotal, discount, total: itemsTotal - discount };
-  }, [items]);
+  const deliveryFee = Number(logisticCharge) || 0;
+  const totals = useMemo(() => calculateOrderTotals(items, deliveryFee), [deliveryFee, items]);
 
   const cashAmount = Number(amountReceived.replace(/,/g, "")) || 0;
   const isPartial = paymentMethod === "other" && otherPayment === "partial";
@@ -430,12 +445,9 @@ export default function CreateOrderPage() {
       setOrderError("Add at least one product before creating the order.");
       return;
     }
-    if (
-      paymentMethod === "other" &&
-      ["unpaid", "partial"].includes(otherPayment) &&
-      !buyerName.trim()
-    ) {
-      setOrderError("Buyer name is required for unpaid and partial orders.");
+    const customerError = checkoutCustomerError(paymentMethod, otherPayment, selectedCustomer?.id);
+    if (customerError) {
+      setOrderError(customerError);
       return;
     }
     setCreatingOrder(true);
@@ -444,6 +456,7 @@ export default function CreateOrderPage() {
       const { initialPaymentAmount } = checkoutPayment;
       const result = await api.orders.create({
         fulfillmentStatus: "reserved",
+        ...checkoutOrderFields(selectedCustomer, deliveryFee),
         ...(initialPaymentAmount > 0 ? {
           initialPayment: {
             method: paymentName,
@@ -451,7 +464,6 @@ export default function CreateOrderPage() {
             note: note.trim() || undefined,
           },
         } : {}),
-        ...(buyerName.trim() ? { customer: { name: buyerName.trim() } } : {}),
         note: note.trim() || undefined,
         items: items.map((item) => ({
           productId: item.id,
@@ -479,7 +491,8 @@ export default function CreateOrderPage() {
       pendingQuantityRef.current.clear();
       commitItems([]);
       setProductSearch("");
-      setBuyerName("");
+      setSelectedCustomer(null);
+      setLogisticCharge("");
       setNote("");
       setAmountReceived("0");
       setPaymentMethod("cash");
@@ -622,6 +635,8 @@ export default function CreateOrderPage() {
 
   if (!isMobile)
     return (
+      <>
+      <CustomerDialog open={customerDialogOpen} onClose={() => setCustomerDialogOpen(false)} onSaved={setSelectedCustomer} />
       <DesktopCreateOrder
         items={items}
         catalog={catalog}
@@ -634,8 +649,12 @@ export default function CreateOrderPage() {
         setPaymentMethod={setPaymentMethod}
         amountReceived={amountReceived}
         setAmountReceived={updateAmountReceived}
-        buyerName={buyerName}
-        setBuyerName={setBuyerName}
+        customers={customers}
+        selectedCustomer={selectedCustomer}
+        setSelectedCustomer={setSelectedCustomer}
+        openCustomerDialog={() => setCustomerDialogOpen(true)}
+        logisticCharge={logisticCharge}
+        setLogisticCharge={setLogisticCharge}
         note={note}
         setNote={setNote}
         productSearch={productSearch}
@@ -659,10 +678,12 @@ export default function CreateOrderPage() {
         setNewPaymentMethod={setNewPaymentMethod}
         savePaymentMethod={savePaymentMethod}
       />
+      </>
     );
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f8fafc", pb: 12 }}>
+      <CustomerDialog open={customerDialogOpen} onClose={() => setCustomerDialogOpen(false)} onSaved={setSelectedCustomer} />
       <AppBar position="sticky" elevation={0} sx={{ bgcolor: "#1976d2" }}>
         <Toolbar
           sx={{
@@ -743,15 +764,30 @@ export default function CreateOrderPage() {
                 value={formatMoney(totals.discount)}
                 valueColor="#278a45"
               />
+              <TextField
+                fullWidth
+                label="Logistic Charge"
+                value={logisticCharge}
+                onChange={(event) => setLogisticCharge(event.target.value.replace(/[^0-9]/g, ""))}
+                inputMode="numeric"
+                size="small"
+              />
               <Box sx={{ borderTop: "1px solid #cbd5e1", pt: 1.25, mt: 0.4 }}>
                 <SummaryRow
-                  label="Total"
+                  label="Grand Total"
                   value={formatMoney(totals.total)}
                   strong
                   valueColor="#1976d2"
                 />
               </Box>
             </Stack>
+          </CardContent>
+        </Card>
+
+        <Card sx={{ mt: 2, borderRadius: 2.5, boxShadow: "0 2px 8px rgba(15,23,42,0.14)" }}>
+          <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+            <Typography fontWeight={700} sx={{ mb: 1.25 }}>Customer</Typography>
+            <CustomerSelector customers={customers} value={selectedCustomer} onChange={setSelectedCustomer} onAdd={() => setCustomerDialogOpen(true)} />
           </CardContent>
         </Card>
 
@@ -858,21 +894,6 @@ export default function CreateOrderPage() {
                   fontWeight: 500,
                 }}
               />
-            )}
-
-            {paymentMethod === "other" && ["unpaid", "partial"].includes(otherPayment) && (
-              <>
-                <Typography variant="body2" sx={{ mt: 1.75, mb: 0.7 }}>
-                  Buyer name
-                </Typography>
-                <TextField
-                  fullWidth
-                  required
-                  value={buyerName}
-                  onChange={(event) => setBuyerName(event.target.value)}
-                  placeholder="Enter buyer name"
-                />
-              </>
             )}
 
             {showsAmountReceived && (
@@ -1199,8 +1220,12 @@ export function DesktopCreateOrder({
   setPaymentMethod,
   amountReceived,
   setAmountReceived,
-  buyerName,
-  setBuyerName,
+  customers,
+  selectedCustomer,
+  setSelectedCustomer,
+  openCustomerDialog,
+  logisticCharge,
+  setLogisticCharge,
   note,
   setNote,
   productSearch,
@@ -1370,6 +1395,14 @@ export function DesktopCreateOrder({
                   value={totals.discount > 0 ? `-${formatMoney(totals.discount)}` : formatMoney(0)}
                   color="success.main"
                 />
+                <TextField
+                  fullWidth
+                  label="Logistic Charge"
+                  value={logisticCharge}
+                  onChange={(event) => setLogisticCharge(event.target.value.replace(/[^0-9]/g, ""))}
+                  inputMode="numeric"
+                  size="small"
+                />
                 <Divider />
                 <DesktopTotal
                   label="Grand Total"
@@ -1377,6 +1410,12 @@ export function DesktopCreateOrder({
                   strong
                 />
               </Stack>
+            </CardContent>
+          </Card>
+          <Card sx={panelSx}>
+            <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
+              <Typography sx={{ fontSize: 18, fontWeight: 700, mb: 2 }}>Customer</Typography>
+              <CustomerSelector customers={customers} value={selectedCustomer} onChange={setSelectedCustomer} onAdd={openCustomerDialog} />
             </CardContent>
           </Card>
           <Card sx={panelSx}>
@@ -1429,16 +1468,6 @@ export function DesktopCreateOrder({
                   </Box>
                 </>
               )}
-              {paymentMethod === "other" && ["unpaid", "partial"].includes(otherPayment) && <TextField
-                fullWidth
-                value={buyerName}
-                onChange={(event) => setBuyerName(event.target.value)}
-                placeholder="Buyer name (for unpaid or partial orders)"
-                sx={{
-                  mt: 2,
-                  "& .MuiOutlinedInput-root": { borderRadius: 1.5 },
-                }}
-              />}
               <TextField
                 fullWidth
                 value={note}

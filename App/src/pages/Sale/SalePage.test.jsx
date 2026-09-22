@@ -22,6 +22,7 @@ vi.mock("./OrderDetailsPage", () => ({
 import SalePage from "./SalePage";
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   window.matchMedia = vi.fn().mockImplementation(() => ({
     matches: false,
     media: "(max-width:768px)",
@@ -42,9 +43,21 @@ beforeEach(() => {
     paymentStatus: "paid",
     fulfillmentStatus: "completed",
     createdAt: "2026-09-20T00:00:00.000Z",
+    customer: { id: "customer-1", name: "Aye Aye" },
     items: [{ productName: "Coffee", quantity: 1 }],
     payments: [],
   }];
+});
+
+it("shows the customer under the order number and includes it in sale search", () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={queryClient}><MemoryRouter><SalePage /></MemoryRouter></QueryClientProvider>);
+
+  expect(screen.getByText("Aye Aye")).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText(/Search by order number, customer/), { target: { value: "aye aye" } });
+  expect(screen.getByText("INV-1")).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText(/Search by order number, customer/), { target: { value: "missing customer" } });
+  expect(screen.queryByText("INV-1")).toBeNull();
 });
 
 afterEach(() => {
