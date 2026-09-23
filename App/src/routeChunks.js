@@ -1,6 +1,7 @@
 // Keep route imports in one place so the router and app shell can share the
 // same chunk promises. This only changes when code is fetched, never routing.
 export const loadAuthPage = () => import("./pages/Auth/AuthPage");
+export const loadForgotPasswordPage = () => import("./pages/Auth/ForgotPasswordPage");
 export const loadStaffLinkPage = () => import("./pages/Auth/StaffLinkPage");
 export const loadSalePage = () => import("./pages/Sale/SalePage");
 export const loadStockPage = () => import("./pages/Stock/StockPage");

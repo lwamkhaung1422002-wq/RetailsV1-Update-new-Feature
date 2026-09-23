@@ -242,6 +242,7 @@ function DesktopAuthPage({ mode }) {
                 helperText={isRegister ? "At least 8 characters" : undefined}
                 sx={fieldSx}
               />
+              {!isRegister && <Box sx={{ textAlign: "right" }}><Link component={RouterLink} to="/forgot-password" underline="hover" fontWeight={600} variant="body2">Forgot Password?</Link></Box>}
               <Button
                 type="submit"
                 variant="contained"
@@ -557,6 +558,7 @@ function MobileAuthPage({ mode }) {
               inputProps: { minLength: isRegister ? 8 : undefined },
               endAdornment: passwordAdornment(showPassword, setShowPassword),
             })}
+            {!isRegister && <Box sx={{ textAlign: "right" }}><Link component={RouterLink} to="/forgot-password" underline="hover" sx={{ fontSize: 13, fontWeight: 600 }}>Forgot Password?</Link></Box>}
             {isRegister && (
               <>
                 <Typography

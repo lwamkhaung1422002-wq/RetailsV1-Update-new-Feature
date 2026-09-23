@@ -11,8 +11,10 @@ import { hashStaffToken } from "../lib/staff-tokens.js";
 import { applyTemplateDefaults } from "../lib/store-capabilities.js";
 import { type AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
 import { authRateLimit } from "../middleware/rate-limit.middleware.js";
+import { ownerPasswordResetRouter } from "./owner-password-reset.routes.js";
 
 export const authRouter = Router();
+authRouter.use(ownerPasswordResetRouter);
 
 const registerSchema = z.object({
   name: z.string().trim().min(1, "Name is required."),

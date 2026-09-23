@@ -10,7 +10,7 @@ import App from "./App";
 import Home from "./pages/Home/HomePage";
 import {
   loadAddPricePage, loadAddProductPage, loadAddPromotionPage, loadAddStockMovementPage,
-  loadAuthPage, loadCategoryManagementPage, loadCreateOrderPage, loadNotePage, loadPaymentMethodManagementPage,
+  loadAuthPage, loadForgotPasswordPage, loadCategoryManagementPage, loadCreateOrderPage, loadNotePage, loadPaymentMethodManagementPage,
   loadOrderDetailsPage, loadPaymentPage, loadPriceHistoryPage, loadPromotionReportPage,
   loadPricePage, loadProductDetailsPage, loadProductReportPage, loadRecordSupplierPaymentPage,
   loadReportPage, loadSalePage, loadSaleRecordPage, loadSalesReportPage, loadSettingsPage,
@@ -19,6 +19,7 @@ import {
 } from "./routeChunks";
 
 const AuthPage = lazy(loadAuthPage);
+const ForgotPasswordPage = lazy(loadForgotPasswordPage);
 const StaffLinkPage = lazy(loadStaffLinkPage);
 const Sale = lazy(loadSalePage);
 const Stock = lazy(loadStockPage);
@@ -66,6 +67,7 @@ function FeatureRoute({ rule, children }) {
 
 const router = createBrowserRouter([
   { path: "/login", element: <RouteContent><AuthPage mode="login" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
+  { path: "/forgot-password", element: <RouteContent><ForgotPasswordPage /></RouteContent>, errorElement: <RouteErrorBoundary /> },
   { path: "/register", element: <RouteContent><AuthPage mode="register" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
   { path: "/staff/invite", element: <RouteContent><StaffLinkPage mode="invite" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
   { path: "/staff/reset-login", element: <RouteContent><StaffLinkPage mode="reset" /></RouteContent>, errorElement: <RouteErrorBoundary /> },
