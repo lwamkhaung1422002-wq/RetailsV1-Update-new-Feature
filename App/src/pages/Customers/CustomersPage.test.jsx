@@ -5,15 +5,17 @@ import { MemoryRouter } from "react-router";
 
 const mocks = vi.hoisted(() => ({
   customers: [
-    { id: "customer-1", name: "Aye Aye", phone: "091111", address: "Main Road", city: "Yangon" },
-    { id: "customer-2", name: "Ko Min", phone: "092222", address: "Lake Road", city: "Mandalay" },
+    { id: "customer-1", name: "Aye Aye", phone: "091111", address: "Main Road", city: "Yangon", visitCount: 12, totalAmount: 1250000 },
+    { id: "customer-2", name: "Ko Min", phone: "092222", address: "Lake Road", city: "Mandalay", visitCount: 0, totalAmount: 0 },
   ],
+  permissions: new Set(["order.view", "sale.create"]),
+  customerQuery: vi.fn(),
   api: { customers: { create: vi.fn(), update: vi.fn() } },
 }));
 
-vi.mock("../../context/AuthContext", () => ({ useAuth: () => ({ shop: { id: "shop-1" } }) }));
+vi.mock("../../context/AuthContext", () => ({ useAuth: () => ({ shop: { id: "shop-1" }, hasPermission: (permission) => mocks.permissions.has(permission) }) }));
 vi.mock("../../hooks/useApiResource", () => ({ usePosApi: () => mocks.api }));
-vi.mock("../../hooks/usePosQueries", () => ({ useAllCustomersQuery: () => ({ data: { customers: mocks.customers }, isLoading: false }) }));
+vi.mock("../../hooks/usePosQueries", () => ({ useAllCustomersQuery: (options) => { mocks.customerQuery(options); return { data: { customers: mocks.customers }, isLoading: false }; } }));
 
 import CustomersPage from "./CustomersPage";
 import CustomerDialog from "./CustomerDialog";
@@ -25,6 +27,7 @@ function renderPage() {
 
 beforeEach(() => {
   window.matchMedia = vi.fn().mockImplementation(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  mocks.permissions = new Set(["order.view", "sale.create"]);
   mocks.api.customers.create.mockResolvedValue({ customer: { id: "customer-3", name: "Su Su" } });
   mocks.api.customers.update.mockResolvedValue({ customer: { ...mocks.customers[0], name: "Aye Aye Win" } });
 });
@@ -35,6 +38,18 @@ afterEach(() => {
 });
 
 describe("Customers page", () => {
+  it("shows desktop top controls and all eight customer columns with backend stats", () => {
+    renderPage();
+    expect(mocks.customerQuery).toHaveBeenCalledWith({ includeStats: true });
+    expect(screen.queryByText("Manage saved customer contact information.")).toBeNull();
+    expect(screen.queryByText("Customers")).toBeNull();
+    const labels = ["NO.", "CUSTOMER", "PHONE", "ADDRESS", "CITY", "VISITS", "AMOUNT", "ACTIONS"];
+    expect(labels.map((label) => screen.getByText(label).textContent)).toEqual(labels);
+    expect(screen.getByText("1,250,000 ကျပ်")).toBeTruthy();
+    const searchControl = screen.getByPlaceholderText("Search by name or phone").closest(".MuiFormControl-root");
+    expect(searchControl.parentElement.contains(screen.getByRole("button", { name: "Add Customer" }))).toBe(true);
+  });
+
   it("searches by name and phone and exposes Edit without Delete", () => {
     renderPage();
     expect(screen.getByText("Aye Aye")).toBeTruthy();
@@ -81,8 +96,39 @@ describe("Customers page", () => {
     renderPage();
 
     expect(screen.getByLabelText("Back to More")).toBeTruthy();
+    expect(screen.getByText("Aye Aye").parentElement.contains(screen.getByText("091111"))).toBe(true);
+    expect(screen.getByText("Main Road").parentElement.contains(screen.getByText("Yangon"))).toBe(true);
+    expect(screen.getByText("Main Road").parentElement.contains(screen.getByLabelText("Actions for Aye Aye"))).toBe(true);
+    expect(screen.getByText("Visits 12")).toBeTruthy();
+    expect(screen.getByText("1,250,000 ကျပ်")).toBeTruthy();
+    expect(screen.getByText("Visits 12").parentElement.contains(screen.getByText("1,250,000 ကျပ်"))).toBe(true);
+    expect(screen.getByRole("button", { name: "Add Customer" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
     fireEvent.click(screen.getByLabelText("Actions for Aye Aye"));
     expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: /delete/i })).toBeNull();
   }, 20_000);
+
+  it("opens Add from the mobile FAB", () => {
+    window.matchMedia = vi.fn().mockImplementation(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Add Customer" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("hides desktop and mobile mutation controls without sale.create", () => {
+    mocks.permissions = new Set(["order.view"]);
+    const view = renderPage();
+    expect(screen.getByText("Aye Aye")).toBeTruthy();
+    expect(screen.getByText("1,250,000 ကျပ်")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add Customer" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("Search by name or phone"), { target: { value: "092222" } });
+    expect(screen.getByText("Ko Min")).toBeTruthy();
+    view.unmount();
+    window.matchMedia = vi.fn().mockImplementation(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Add Customer" })).toBeNull();
+    expect(screen.queryByLabelText("Actions for Aye Aye")).toBeNull();
+  });
 });

@@ -49,15 +49,27 @@ beforeEach(() => {
   }];
 });
 
-it("shows the customer under the order number and includes it in sale search", () => {
+it("shows a separate desktop customer column and includes it in sale search", () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={queryClient}><MemoryRouter><SalePage /></MemoryRouter></QueryClientProvider>);
 
   expect(screen.getByText("Aye Aye")).toBeTruthy();
+  expect(screen.getByText("CUSTOMER")).toBeTruthy();
+  expect(screen.getByText("INV-1").nextElementSibling.textContent).toBe("Aye Aye");
   fireEvent.change(screen.getByPlaceholderText(/Search by order number, customer/), { target: { value: "aye aye" } });
   expect(screen.getByText("INV-1")).toBeTruthy();
   fireEvent.change(screen.getByPlaceholderText(/Search by order number, customer/), { target: { value: "missing customer" } });
   expect(screen.queryByText("INV-1")).toBeNull();
+});
+
+it("shows the customer before the invoice on mobile and keeps the Walk-in fallback", () => {
+  window.matchMedia = vi.fn().mockImplementation(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  mocks.orders.push({ ...mocks.orders[0], id: "order-2", orderNumber: "INV-2", customer: null });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={queryClient}><MemoryRouter><SalePage /></MemoryRouter></QueryClientProvider>);
+
+  expect(screen.getByText("Aye Aye").nextElementSibling.textContent).toBe("INV-1");
+  expect(screen.getByText("Walk-in").nextElementSibling.textContent).toBe("INV-2");
 });
 
 afterEach(() => {

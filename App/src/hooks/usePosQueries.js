@@ -110,10 +110,10 @@ export const useCustomersQuery = (query = {}, options = {}) => {
   const api = usePosApi();
   return useShopQuery((shopId) => queryKeys.customers(shopId, query), () => api.customers.list(query), { ...catalogOptions, ...options });
 };
-export const useAllCustomersQuery = () => {
+export const useAllCustomersQuery = ({ includeStats = false } = {}) => {
   const api = usePosApi();
-  return useShopQuery((shopId) => queryKeys.customers(shopId, { all: true }), async () => {
-    const query = { pageSize: 100, sort: "name", direction: "asc" };
+  return useShopQuery((shopId) => queryKeys.customers(shopId, { all: true, includeStats }), async () => {
+    const query = { pageSize: 100, sort: "name", direction: "asc", ...(includeStats ? { includeStats: true } : {}) };
     const firstPage = await api.customers.list({ ...query, page: 1 });
     const totalCount = firstPage.totalCount || (firstPage.customers || []).length;
     const pages = await Promise.all(Array.from(

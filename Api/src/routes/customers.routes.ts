@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { assertUserOwnsShop } from "../lib/shop-access.js";
+import { effectiveOrderTotal } from "../lib/order-return-refund.js";
 import { prisma } from "../lib/prisma.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
@@ -27,6 +28,7 @@ const listQuerySchema = z.object({
   direction: z.enum(["asc", "desc"]).default("desc"),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().refine((value) => [25, 50, 100].includes(value)).default(25),
+  includeStats: z.enum(["true", "false"]).default("false"),
 });
 
 customersRouter.use(requireAuth);
@@ -49,8 +51,41 @@ customersRouter.get("/:shopId/customers", async (request, response, next) => {
       prisma.customer.count({ where }),
     ]);
 
+    let customersWithStats = customers;
+    if (query.includeStats === "true" && customers.length) {
+      const whereOrders = {
+        shopId,
+        customerId: { in: customers.map((customer) => customer.id) },
+        fulfillmentStatus: "completed",
+        cancelledAt: null,
+      };
+      const [totals, returnedOrders] = await Promise.all([
+        prisma.order.groupBy({ by: ["customerId"], where: whereOrders, _count: { _all: true }, _sum: { total: true } }),
+        prisma.order.findMany({
+          where: { ...whereOrders, items: { some: { returns: { some: {} } } } },
+          select: {
+            customerId: true, total: true, subtotal: true, discount: true, deliveryFee: true,
+            items: { select: { id: true, quantity: true, baseQuantity: true, lineTotal: true, returns: { select: { quantity: true } } } },
+          },
+        }),
+      ]);
+      const stats = new Map(totals.map((row) => [row.customerId, {
+        visitCount: row._count._all,
+        totalAmount: row._sum.total ?? 0,
+      }]));
+      for (const order of returnedOrders) {
+        const customerStats = stats.get(order.customerId);
+        if (customerStats) customerStats.totalAmount -= order.total - effectiveOrderTotal(order);
+      }
+      customersWithStats = customers.map((customer) => ({
+        ...customer,
+        visitCount: stats.get(customer.id)?.visitCount ?? 0,
+        totalAmount: stats.get(customer.id)?.totalAmount ?? 0,
+      }));
+    }
+
     response.status(200).json({
-      customers,
+      customers: customersWithStats,
       totalCount: total,
       pagination: { page: query.page, pageSize: query.pageSize, total },
     });
