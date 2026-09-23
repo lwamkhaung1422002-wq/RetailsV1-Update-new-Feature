@@ -89,9 +89,17 @@ ownerPasswordResetRouter.post("/forgot-password/verify", authRateLimit, async (r
     if (!challenge || challenge.expiresAt <= now || challenge.attemptCount >= maximumAttempts) throw invalidChallenge(invalidCodeMessage);
 
     if (!await bcrypt.compare(code, challenge.codeHash)) {
-      await prisma.ownerPasswordResetChallenge.updateMany({
-        where: { id: challenge.id, attemptCount: challenge.attemptCount, verifiedAt: null, usedAt: null, invalidatedAt: null, expiresAt: { gt: now } },
-        data: { attemptCount: { increment: 1 }, ...(challenge.attemptCount + 1 >= maximumAttempts ? { invalidatedAt: now } : {}) },
+      await prisma.$transaction(async (transaction) => {
+        const updated = await transaction.ownerPasswordResetChallenge.updateMany({
+          where: { id: challenge.id, attemptCount: { lt: maximumAttempts }, verifiedAt: null, usedAt: null, invalidatedAt: null, expiresAt: { gt: now } },
+          data: { attemptCount: { increment: 1 } },
+        });
+        if (updated.count === 1) {
+          await transaction.ownerPasswordResetChallenge.updateMany({
+            where: { id: challenge.id, attemptCount: { gte: maximumAttempts }, verifiedAt: null, usedAt: null, invalidatedAt: null },
+            data: { invalidatedAt: now },
+          });
+        }
       });
       throw invalidChallenge(invalidCodeMessage);
     }

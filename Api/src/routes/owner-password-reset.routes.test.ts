@@ -43,9 +43,12 @@ function matches(record: Record<string, unknown>, where: Record<string, unknown>
     const value = record[key];
     if (expected === null) return value == null;
     if (typeof expected === "object" && expected !== null && !(expected instanceof Date)) {
-      const check = expected as { gt?: Date; not?: null };
-      if (check.gt) return value instanceof Date && value > check.gt;
+      const check = expected as { gt?: Date; gte?: number; lt?: number; not?: null };
+      if (check.gt && !(value instanceof Date && value > check.gt)) return false;
+      if (check.gte !== undefined && !(typeof value === "number" && value >= check.gte)) return false;
+      if (check.lt !== undefined && !(typeof value === "number" && value < check.lt)) return false;
       if ("not" in check) return value != null;
+      return true;
     }
     return value === expected;
   });
@@ -163,10 +166,54 @@ describe("owner code verification and password reset", () => {
     challenges[0]!.expiresAt = new Date(Date.now() + 60_000);
     const correctCode = mocks.send.mock.calls[0]![1];
     const wrongCode = correctCode === "000000" ? "000001" : "000000";
-    for (let index = 0; index < 5; index += 1) await verifyCode(wrongCode).expect(400);
+    for (let index = 1; index <= 5; index += 1) {
+      await verifyCode(wrongCode).expect(400);
+      expect(challenges[0]!.attemptCount).toBe(index);
+    }
+    expect(challenges[0]!.attemptCount).toBe(5);
+    expect(challenges[0]!.invalidatedAt).toBeInstanceOf(Date);
+    await verifyCode(wrongCode).expect(400);
+    expect(challenges[0]!.attemptCount).toBe(5);
+    await verifyCode(correctCode).expect(400);
+  });
+
+  it("counts concurrent wrong attempts even when every request reads the same stale count", async () => {
+    await requestCode();
+    const correctCode = mocks.send.mock.calls[0]![1];
+    const wrongCode = correctCode === "000000" ? "000001" : "000000";
+    const staleChallenge = { ...challenges[0]! };
+    let reads = 0;
+    let releaseReads!: () => void;
+    const allRead = new Promise<void>((resolve) => { releaseReads = resolve; });
+    mocks.challengeFindFirst.mockImplementation(async ({ where }) => {
+      if (where.verifiedAt !== null) return challenges.find((entry) => matches(entry as unknown as Record<string, unknown>, where)) ?? null;
+      reads += 1;
+      if (reads === 6) releaseReads();
+      await allRead;
+      return { ...staleChallenge };
+    });
+
+    const responses = await Promise.all(Array.from({ length: 6 }, () => verifyCode(wrongCode)));
+    expect(responses.every((response) => response.status === 400 && response.body.message === "Invalid or expired verification code.")).toBe(true);
+    expect(reads).toBe(6);
     expect(challenges[0]!.attemptCount).toBe(5);
     expect(challenges[0]!.invalidatedAt).toBeInstanceOf(Date);
     await verifyCode(correctCode).expect(400);
+    expect(challenges[0]!.resetTokenHash).toBeNull();
+  });
+
+  it("rejects a correct code with a stale read after the fifth wrong attempt wins", async () => {
+    await requestCode();
+    const correctCode = mocks.send.mock.calls[0]![1];
+    const wrongCode = correctCode === "000000" ? "000001" : "000000";
+    challenges[0]!.attemptCount = 4;
+    const staleChallenge = { ...challenges[0]! };
+    await verifyCode(wrongCode).expect(400);
+    expect(challenges[0]!.attemptCount).toBe(5);
+    mocks.challengeFindFirst.mockResolvedValueOnce(staleChallenge);
+    await verifyCode(correctCode).expect(400);
+    expect(challenges[0]!.verifiedAt).toBeNull();
+    expect(challenges[0]!.resetTokenHash).toBeNull();
   });
 
   it("verifies a correct code and stores only a hash of a separate high-entropy token", async () => {
