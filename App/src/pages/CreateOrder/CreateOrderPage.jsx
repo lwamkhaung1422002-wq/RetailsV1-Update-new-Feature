@@ -516,9 +516,18 @@ export default function CreateOrderPage() {
   };
 
   const priceCartItem = useCallback(async (product, quantity) => {
-    const resolved = await api.pricing.resolve({ productId: product.id, quantity, ...(selectedSellingUnit(product) ? { productUnitId: selectedSellingUnit(product).id } : {}) });
+    const resolved = await api.pricing.resolve({ productId: product.id, quantity, priceGroupId: selectedCustomer?.priceGroupId || null, ...(selectedSellingUnit(product) ? { productUnitId: selectedSellingUnit(product).id } : {}) });
     return toPricedCartItem(product, quantity, resolved.pricing);
-  }, [api]);
+  }, [api, selectedCustomer?.priceGroupId]);
+  useEffect(() => {
+    for (const item of itemsRef.current) {
+      const revision = nextPricingRevision(item.id);
+      void priceCartItem(item, item.quantity).then((priced) => {
+        if (pricingRevisionRef.current.get(item.id) !== revision) return;
+        commitItems(itemsRef.current.map((entry) => entry.id === item.id ? priced : entry));
+      }).catch((error) => setOrderError(error.message || "Customer price could not be refreshed."));
+    }
+  }, [priceCartItem, nextPricingRevision, commitItems]);
   const setQuantity = useCallback((id, quantity) => {
     const item = itemsRef.current.find((current) => current.id === id);
     if (!item) return;
@@ -592,7 +601,7 @@ export default function CreateOrderPage() {
     if (quantity < 1) { setOrderError("Insufficient stock for this unit."); return; }
     const revision = nextPricingRevision(product.id);
     try {
-      if (!existing && quantity === 1 && initialPricing) {
+      if (!existing && quantity === 1 && initialPricing && !selectedCustomer?.priceGroupId) {
         pendingQuantityRef.current.delete(product.id);
         commitItems([...itemsRef.current, toPricedCartItem(selectedProduct, quantity, initialPricing)]);
         setOrderError("");

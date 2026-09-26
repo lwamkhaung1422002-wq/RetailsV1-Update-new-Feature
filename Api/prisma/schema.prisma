@@ -230,6 +230,8 @@ model ShopSetting {
   receiptFooter      String   @default("Thank you for shopping with us.")
   notifyLowStock     Boolean  @default(true)
   notifyPayments     Boolean  @default(true)
+  defaultCreditLimit Int      @default(0)
+  defaultPaymentTermsDays Int @default(30)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   shop               Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -249,6 +251,8 @@ model Customer {
   shop         Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
   orders       Order[]
   priceGroupId String?
+  creditLimitOverride Int?
+  paymentTermsDaysOverride Int?
   priceGroup   CustomerPriceGroup? @relation(fields: [priceGroupId], references: [id], onDelete: SetNull)
 
   @@index([shopId])
@@ -599,6 +603,8 @@ model Order {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   paymentTracking   Boolean          @default(false)
+  paymentTermsDaysSnapshot Int?
+  dueAt             DateTime?
   shop              Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   customer          Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items             OrderItem[]
@@ -1275,6 +1281,7 @@ model Promotion {
   priceGroupId    String?
   targetKey       String
   channel         String              @default("ALL")
+  audienceType    String              @default("ALL")
   type            String
   value           Decimal             @db.Decimal(18, 4)
   minimumQuantity Decimal             @default(1) @db.Decimal(18, 3)

@@ -171,7 +171,7 @@ export async function resolvePrice(
           { productUnitId: productUnit?.id ?? null, minimumQuantity: { lte: enteredQuantity } },
           { productUnitId: null, minimumQuantity: { lte: baseQuantity } },
         ] },
-        { OR: [{ priceGroupId: input.priceGroupId ?? null }, { priceGroupId: null }] },
+        { priceGroupId: input.priceGroupId ?? null },
       ],
     },
   });
@@ -182,6 +182,7 @@ export async function resolvePrice(
       startsAt: { lte: at },
       endsAt: { gt: at },
       state: { in: ["SCHEDULED", "RUNNING"] },
+      audienceType: { in: ["ALL", input.priceGroupId ? "WHOLESALE" : "RETAIL"] },
       OR: [
         { productUnitId: productUnit?.id ?? null, minimumQuantity: { lte: enteredQuantity } },
         { productUnitId: null, minimumQuantity: { lte: baseQuantity } },
@@ -200,10 +201,12 @@ export async function resolvePrice(
   const regularUnitPrice = entryIsUnitSpecific || !productUnit
     ? baseRegularPrice
     : roundMoney(new Prisma.Decimal(baseRegularPrice).mul(conversionFactor));
-  const tier = tiers.sort((a, b) => {
-    const specificityA = Number(Boolean(a.variantId)) + Number(Boolean(a.productUnitId)) + Number(Boolean(a.priceGroupId));
-    const specificityB = Number(Boolean(b.variantId)) + Number(Boolean(b.productUnitId)) + Number(Boolean(b.priceGroupId));
-    if (specificityA !== specificityB) return specificityB - specificityA;
+  // Wholesale V1 is always tied to an explicit selling unit; old generic
+  // group tiers must not silently price a different pack/carton quantity.
+  const eligibleTiers = input.priceGroupId ? tiers.filter((item) => item.productUnitId !== null) : tiers;
+  const tier = eligibleTiers.sort((a, b) => {
+    if (Boolean(a.variantId) !== Boolean(b.variantId)) return Number(Boolean(b.variantId)) - Number(Boolean(a.variantId));
+    if (Boolean(a.productUnitId) !== Boolean(b.productUnitId)) return Number(Boolean(b.productUnitId)) - Number(Boolean(a.productUnitId));
     return Number(b.minimumQuantity.minus(a.minimumQuantity).toString());
   })[0] ?? null;
   const tierUnitPrice = tier
@@ -229,9 +232,14 @@ export async function resolvePrice(
   }
   const finalUnitPrice = afterPromotion - manualDiscount;
   return {
+    pricingType: input.priceGroupId ? "WHOLESALE" : "RETAIL",
+    priceGroupId: input.priceGroupId ?? null,
+    priceGroupName: input.priceGroupId ? "Wholesale" : null,
     regularUnitPrice,
     tierUnitPrice,
     appliedTierId: tier?.id ?? null,
+    appliedTierMinimumQuantity: tier?.minimumQuantity?.toString() ?? null,
+    appliedTierUnitId: tier?.productUnitId ?? null,
     promotionId: promotion?.id ?? null,
     promotionName: promotion?.name ?? null,
     promotionType: promotion?.type ?? null,

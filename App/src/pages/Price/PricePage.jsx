@@ -20,6 +20,7 @@ import { useManagerApproval } from "../../context/approval-context";
 import { queryKeys } from "../../lib/queryKeys";
 import PriceHistoryPage from "./PriceHistoryPage";
 import PromotionReportPage from "./PromotionReportPage";
+import WholesalePricingSection from "./WholesalePricingSection";
 import { promotionIsTerminal } from "./promotionState";
 const yangonDateKey = (value = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Yangon", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
@@ -210,6 +211,7 @@ function DesktopPriceForm({ products, categories, promotion, onClose, onPromotio
   const [manualPrice, setManualPrice] = useState("");
   const [reason, setReason] = useState("");
   const [promotionName, setPromotionName] = useState("");
+  const [audienceType, setAudienceType] = useState("ALL");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [submitError, setSubmitError] = useState("");
@@ -229,7 +231,7 @@ function DesktopPriceForm({ products, categories, promotion, onClose, onPromotio
     setSaving(true); setSubmitError("");
     try {
       if (promotion) {
-        await api.pricing.createPromotionCampaign({ name: promotionName.trim(), scope: scope === "individual" ? "PRODUCT" : scope.toUpperCase(), ...(scope === "individual" ? { productId: selectedId } : scope === "category" ? { categoryId: category } : {}), type: "PERCENTAGE", value: Number(percentage), startsAt: new Date(`${start}T00:00:00+06:30`).toISOString(), endsAt: new Date(`${end}T23:59:59+06:30`).toISOString(), state: "SCHEDULED", reason: reason.trim(), timeZone: "Asia/Yangon" });
+        await api.pricing.createPromotionCampaign({ name: promotionName.trim(), scope: scope === "individual" ? "PRODUCT" : scope.toUpperCase(), ...(scope === "individual" ? { productId: selectedId } : scope === "category" ? { categoryId: category } : {}), type: "PERCENTAGE", value: Number(percentage), startsAt: new Date(`${start}T00:00:00+06:30`).toISOString(), endsAt: new Date(`${end}T23:59:59+06:30`).toISOString(), state: "SCHEDULED", reason: reason.trim(), timeZone: "Asia/Yangon", audienceType });
       } else if (scope === "individual") {
         const body = { productId: selectedId, unitPrice: Number(shownPrice), effectiveFrom: new Date().toISOString(), reason: reason.trim() };
         await runWithApproval({ permission: "price.edit", action: "price.override", actionLabel: "Price override", targetId: selectedId, targetLabel: selected?.name, amountLabel: money(body.unitPrice), payload: body, initialReason: body.reason }, (approvalToken) => api.pricing.createPrice(body, approvalToken));
@@ -251,8 +253,10 @@ function DesktopPriceForm({ products, categories, promotion, onClose, onPromotio
     {scope === "category" && <FormControl fullWidth sx={{ mt: 2 }}><InputLabel>Select category</InputLabel><Select label="Select category" value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</Select></FormControl>}
     {scope === "individual" && <><TextField fullWidth value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search product by name or barcode" slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon color="action" /></InputAdornment> } }} sx={{ mt: 2 }} /><Paper variant="outlined" sx={{ mt: 1, borderRadius: 1.5, overflow: "hidden", maxHeight: 170, overflowY: "auto" }}>{results.map((product, index) => <Box key={product.id} onClick={() => setSelectedId(product.id)} sx={{ px: 1.75, py: 1.2, cursor: "pointer", bgcolor: selectedId === product.id ? "#eaf3ff" : "background.paper" }}><Typography sx={{ fontSize: 14, fontWeight: 700 }}>{product.name} <Box component="span" sx={{ color: "text.secondary", fontWeight: 400 }}>· {product.code}</Box></Typography>{index < results.length - 1 && <Divider sx={{ mt: 1.15 }} />}</Box>)}</Paper></>}
     {promotion && <><TextField fullWidth label="Promotion name" value={promotionName} onChange={(event) => setPromotionName(event.target.value)} placeholder="e.g. August discount" sx={{ mt: 2 }} /><Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5, mt: 1.5 }}><TextField label="Start date" type="date" value={start} onChange={(event) => setStart(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /><TextField label="End date" type="date" value={end} onChange={(event) => setEnd(event.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Box></>}
+    {promotion && <TextField select fullWidth label="Audience" value={audienceType} onChange={(event) => setAudienceType(event.target.value)} sx={{ mt: 1.5 }}><MenuItem value="ALL">All Customers</MenuItem><MenuItem value="RETAIL">Retail Only</MenuItem><MenuItem value="WHOLESALE">Wholesale Only</MenuItem></TextField>}
     {selected && <Paper variant="outlined" sx={{ mt: 2, p: 1.5, borderRadius: 1.5 }}><Typography sx={{ fontSize: 15, fontWeight: 700 }}>{selected.name}</Typography><Box sx={{ display: "grid", gridTemplateColumns: "1fr 1px 1fr", columnGap: 1.5, mt: 1.25 }}><DesktopPriceMetric label={promotion ? "Current Sell Price" : "Cost Price"} value={money(promotion ? selected.price : selected.cost)} /><Box sx={{ bgcolor: "divider" }} /><DesktopPriceMetric label={promotion ? "Promotion Price" : "Current Sell Price"} value={shownPrice ? money(Number(shownPrice)) : money(selected.price)} /></Box></Paper>}
     {scope === "individual" ? <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5, mt: 2 }}><TextField label={promotion ? "Discount percentage" : "Margin percentage"} value={shownPercentage} onChange={(event) => updatePercentage(event.target.value)} placeholder={promotion ? "e.g. 10" : "e.g. 15"} inputMode="decimal" /><TextField label={promotion ? "Manual promotion price" : "New sell price"} value={shownPrice} onChange={(event) => updateManualPrice(event.target.value)} inputMode="numeric" /></Box> : <TextField fullWidth label={promotion ? "Discount percentage" : "Margin percentage"} value={percentage} onChange={(event) => updatePercentage(event.target.value)} placeholder={promotion ? "e.g. 10" : "e.g. 15"} inputMode="decimal" sx={{ mt: 2 }} />}
+    {!promotion && scope === "individual" && selected && <WholesalePricingSection key={selected.id} product={selected} />}
     <TextField fullWidth label="Reason" value={reason} onChange={(event) => setReason(event.target.value)} placeholder={promotion ? "Why is this promotion being created?" : "Why is this price being changed?"} multiline minRows={2} sx={{ mt: 1.5 }} />
     {submitError && <Typography color="error" sx={{ mt: 1.5 }}>{submitError}</Typography>}<Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.25, mt: 2.5 }}><Button onClick={onClose} variant="outlined" sx={desktopCancelButtonSx}>Cancel</Button><Button onClick={submit} disabled={saving} variant="contained" startIcon={<CheckRoundedIcon />} sx={desktopModalButtonSx}>{saving ? "Saving…" : promotion ? "Create Promotion" : "Apply Price"}</Button></Box>
   </DialogContent>;

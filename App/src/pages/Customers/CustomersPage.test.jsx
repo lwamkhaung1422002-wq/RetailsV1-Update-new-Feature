@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   ],
   permissions: new Set(["order.view", "sale.create"]),
   customerQuery: vi.fn(),
-  api: { customers: { create: vi.fn(), update: vi.fn() } },
+  api: { customers: { create: vi.fn(), update: vi.fn(), creditReport: vi.fn() }, shop: { getSettings: vi.fn() } },
 }));
 
 vi.mock("../../context/AuthContext", () => ({ useAuth: () => ({ shop: { id: "shop-1" }, hasPermission: (permission) => mocks.permissions.has(permission) }) }));
@@ -30,6 +30,8 @@ beforeEach(() => {
   mocks.permissions = new Set(["order.view", "sale.create"]);
   mocks.api.customers.create.mockResolvedValue({ customer: { id: "customer-3", name: "Su Su" } });
   mocks.api.customers.update.mockResolvedValue({ customer: { ...mocks.customers[0], name: "Aye Aye Win" } });
+  mocks.api.customers.creditReport.mockResolvedValue({ report: { effectiveCreditLimit: 0, outstanding: 0, availableCredit: 0, overdueAmount: 0, creditInvoices: 0, paidOnTime: 0, paidLate: 0, currentlyOverdue: 0, averageDaysLate: 0, longestDelay: 0, lastPayment: null, recentInvoices: [] } });
+  mocks.api.shop.getSettings.mockResolvedValue({ settings: { defaultCreditLimit: 0, defaultPaymentTermsDays: 30 } });
 });
 
 afterEach(() => {
@@ -69,7 +71,7 @@ describe("Customers page", () => {
     fireEvent.change(screen.getByLabelText("City"), { target: { value: "Bago" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(mocks.api.customers.create).toHaveBeenCalledWith({ name: "Su Su", phone: "093333", address: "Market Road", city: "Bago" }));
+    await waitFor(() => expect(mocks.api.customers.create).toHaveBeenCalledWith({ name: "Su Su", phone: "093333", address: "Market Road", city: "Bago", pricingType: "RETAIL", creditLimitOverride: null, paymentTermsDaysOverride: null }));
   }, 20_000);
 
   it("edits a saved customer", async () => {
@@ -78,7 +80,7 @@ describe("Customers page", () => {
     fireEvent.change(screen.getByLabelText(/Customer Name/), { target: { value: "Aye Aye Win" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(mocks.api.customers.update).toHaveBeenCalledWith("customer-1", { name: "Aye Aye Win", phone: "091111", address: "Main Road", city: "Yangon" }));
+    await waitFor(() => expect(mocks.api.customers.update).toHaveBeenCalledWith("customer-1", { name: "Aye Aye Win", phone: "091111", address: "Main Road", city: "Yangon", pricingType: "RETAIL", creditLimitOverride: null, paymentTermsDaysOverride: null }));
   }, 20_000);
 
   it("returns the newly created customer so Quick Add can select it", async () => {
@@ -89,6 +91,21 @@ describe("Customers page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ id: "customer-3", name: "Su Su" }));
+  }, 20_000);
+
+  it("keeps explicit zero credit overrides and shows the factual report for an existing customer", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><CustomerDialog open customer={mocks.customers[0]} onClose={vi.fn()} /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByText("Credit Summary")).toBeTruthy());
+    expect(mocks.api.customers.creditReport).toHaveBeenCalledWith("customer-1");
+    fireEvent.mouseDown(screen.getByLabelText("Credit Limit"));
+    fireEvent.click(screen.getByRole("option", { name: "Custom" }));
+    fireEvent.change(screen.getByLabelText("Custom Credit Limit"), { target: { value: "0" } });
+    fireEvent.mouseDown(screen.getByLabelText("Payment Terms"));
+    fireEvent.click(screen.getByRole("option", { name: "Custom" }));
+    fireEvent.change(screen.getByLabelText("Custom Payment Terms (days)"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.api.customers.update).toHaveBeenCalledWith("customer-1", expect.objectContaining({ creditLimitOverride: 0, paymentTermsDaysOverride: 0 })));
   }, 20_000);
 
   it("uses the compact mobile row action menu with Edit only", () => {

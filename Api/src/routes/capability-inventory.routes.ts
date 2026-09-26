@@ -62,11 +62,26 @@ function badRequest(message: string) {
   return Object.assign(new Error(message), { name: "BadRequestError" });
 }
 
+async function unitInUse(db: Prisma.TransactionClient, unitId: string) {
+  const references = await Promise.all([
+    db.productUnit.findFirst({ where: { unitId }, select: { id: true } }),
+    db.inventoryMovement.findFirst({ where: { unitId }, select: { id: true } }),
+    db.orderItem.findFirst({ where: { unitId }, select: { id: true } }),
+    db.purchaseItem.findFirst({ where: { unitId }, select: { id: true } }),
+  ]);
+  return references.some(Boolean);
+}
+
+function unitInUseConflict() {
+  return Object.assign(new Error("This unit is already in use and cannot be deleted."), { name: "ConflictError" });
+}
+
 capabilityInventoryRouter.get("/:shopId/units", async (request, response, next) => {
   try {
     const auth = getAuthUser(request); const { shopId } = params.parse(request.params);
     await assertUserOwnsShop(auth.id, shopId);
-    response.json({ units: await prisma.unitOfMeasure.findMany({ where: { shopId }, orderBy: { name: "asc" } }) });
+    const units = await prisma.unitOfMeasure.findMany({ where: { shopId }, orderBy: { name: "asc" } });
+    response.json({ units: await Promise.all(units.map(async (unit) => ({ ...unit, canDelete: !(await unitInUse(prisma, unit.id)) }))) });
   } catch (error) { next(error); }
 });
 
@@ -75,7 +90,28 @@ capabilityInventoryRouter.post("/:shopId/units", async (request, response, next)
     const auth = getAuthUser(request); const { shopId } = params.parse(request.params); const input = unitInput.parse(request.body);
     await assertUserOwnsShop(auth.id, shopId); await assertCapability(prisma, shopId, "catalog.units");
     const unit = await prisma.unitOfMeasure.create({ data: { shopId, ...input } });
-    response.status(201).json({ unit });
+    response.status(201).json({ unit: { ...unit, canDelete: true } });
+  } catch (error) { next(error); }
+});
+
+capabilityInventoryRouter.delete("/:shopId/units/:unitId", async (request, response, next) => {
+  try {
+    const auth = getAuthUser(request);
+    const { shopId, unitId } = params.extend({ unitId: z.string().min(1) }).parse(request.params);
+    await assertUserOwnsShop(auth.id, shopId);
+    await assertCapability(prisma, shopId, "catalog.units");
+    await prisma.$transaction(async (tx) => {
+      const unit = await tx.unitOfMeasure.findFirst({ where: { id: unitId, shopId }, select: { id: true } });
+      if (!unit) throw Object.assign(new Error("Unit not found."), { name: "NotFoundError" });
+      if (await unitInUse(tx, unitId)) throw unitInUseConflict();
+      try {
+        await tx.unitOfMeasure.delete({ where: { id: unitId } });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") throw unitInUseConflict();
+        throw error;
+      }
+    });
+    response.status(204).end();
   } catch (error) { next(error); }
 });
 

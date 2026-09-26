@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
+import { ensureWholesalePriceGroup } from "../lib/customer-pricing.js";
 import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import {
   activateDuePriceEntries,
@@ -62,6 +63,7 @@ const bulkPriceChangeInput = z.object({
 const promotionInput = priceTargetInput.extend({
   name: z.string().trim().min(2).max(160),
   priceGroupId: z.string().optional().nullable(),
+  audienceType: z.enum(["ALL", "RETAIL", "WHOLESALE"]).default("ALL"),
   channel: z.string().trim().min(1).max(30).default("ALL"),
   type: z.enum(["FIXED_PRICE", "PERCENTAGE"]),
   value: z.coerce.number().positive(),
@@ -92,6 +94,9 @@ function conflict(message: string) { return Object.assign(new Error(message), { 
 function notFound(message: string) { return Object.assign(new Error(message), { name: "NotFoundError" }); }
 function assertPriceAtOrAboveCost(price: number, cost: unknown) {
   if (price < Number(cost ?? 0)) throw badRequest("Sell price cannot be lower than the product cost price.");
+}
+function overlappingAudiences(audience: "ALL" | "RETAIL" | "WHOLESALE") {
+  return audience === "ALL" ? ["ALL", "RETAIL", "WHOLESALE"] : ["ALL", audience];
 }
 function assertValidBarcode(value: string, symbology: (typeof barcodeSymbologies)[number]) {
   const message = validateBarcode(value, symbology);
@@ -197,6 +202,15 @@ pricingRouter.post("/:shopId/barcodes/internal", async (request, response, next)
     });
     response.status(201).json({ barcode });
   } catch (error) { next(error); }
+});
+const wholesalePricingInput = z.object({
+  productUnitId: z.string().min(1),
+  variantId: z.string().min(1).nullable().optional(),
+  levels: z.array(z.object({
+    id: z.string().min(1).optional(),
+    minimumQuantity: z.coerce.number().positive(),
+    unitPrice: z.coerce.number().int().nonnegative(),
+  })).max(50),
 });
 const campaignInput = promotionInput.omit({ productId: true, variantId: true, productUnitId: true }).extend({
   scope: z.enum(["PRODUCT", "CATEGORY", "ALL"]),
@@ -450,6 +464,56 @@ pricingRouter.post("/:shopId/pricing/resolve", async (request, response, next) =
   } catch (error) { next(error); }
 });
 
+pricingRouter.get("/:shopId/wholesale-pricing/:productId", async (request, response, next) => {
+  try {
+    const auth = getAuthUser(request);
+    const { shopId, productId } = shopParams.extend({ productId: z.string().min(1) }).parse(request.params);
+    await assertUserOwnsShop(auth.id, shopId);
+    if (!await prisma.product.findFirst({ where: { id: productId, shopId }, select: { id: true } })) throw notFound("Product not found.");
+    const group = await prisma.customerPriceGroup.findFirst({ where: { shopId, name: "Wholesale" }, select: { id: true } });
+    const tiers = group ? await prisma.priceTier.findMany({
+      where: { productId, priceGroupId: group.id, productUnitId: { not: null } },
+      orderBy: [{ productUnitId: "asc" }, { minimumQuantity: "asc" }],
+    }) : [];
+    response.json({ tiers });
+  } catch (error) { next(error); }
+});
+
+pricingRouter.put("/:shopId/wholesale-pricing/:productId", async (request, response, next) => {
+  try {
+    const auth = getAuthUser(request);
+    const { shopId, productId } = shopParams.extend({ productId: z.string().min(1) }).parse(request.params);
+    const input = wholesalePricingInput.parse(request.body);
+    await assertUserOwnsShop(auth.id, shopId);
+    const thresholds = input.levels.map((level) => new Prisma.Decimal(level.minimumQuantity));
+    const submittedIds = input.levels.map((level) => level.id).filter((id): id is string => Boolean(id));
+    if (new Set(submittedIds).size !== submittedIds.length) throw badRequest("Duplicate Wholesale price level ID.");
+    if (thresholds.some((value) => value.decimalPlaces() > 3) || new Set(thresholds.map(String)).size !== thresholds.length) {
+      throw badRequest("Wholesale minimum quantities must be unique and have at most 3 decimal places.");
+    }
+    const tiers = await prisma.$transaction(async (tx) => {
+      const target = await assertPricingTarget(tx, shopId, { productId, variantId: input.variantId, productUnitId: input.productUnitId });
+      if (!target.productUnit?.canSell || target.productUnit.unit.isActive === false) throw badRequest("Select an active selling unit for Wholesale Pricing.");
+      const selectedUnitCost = Number(new Prisma.Decimal(target.variant?.cost ?? target.product.cost ?? 0)
+        .mul(target.productUnit.conversionFactor).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP));
+      for (const level of input.levels) assertPriceAtOrAboveCost(level.unitPrice, selectedUnitCost);
+      const group = await ensureWholesalePriceGroup(tx, shopId);
+      const where = { productId, variantId: input.variantId ?? null, productUnitId: input.productUnitId, priceGroupId: group.id };
+      const existing = await tx.priceTier.findMany({ where });
+      const existingIds = new Set(existing.map((tier) => tier.id));
+      if (input.levels.some((level) => level.id && !existingIds.has(level.id))) throw badRequest("Wholesale price level does not belong to the selected product, variant and unit.");
+      const retainedIds = input.levels.map((level) => level.id).filter((id): id is string => Boolean(id));
+      await tx.priceTier.deleteMany({ where: { ...where, id: { notIn: retainedIds } } });
+      for (const level of input.levels) {
+        if (level.id) await tx.priceTier.update({ where: { id: level.id }, data: { minimumQuantity: level.minimumQuantity, unitPrice: level.unitPrice } });
+        else await tx.priceTier.create({ data: { ...where, minimumQuantity: level.minimumQuantity, unitPrice: level.unitPrice } });
+      }
+      return tx.priceTier.findMany({ where, orderBy: { minimumQuantity: "asc" } });
+    });
+    response.json({ tiers });
+  } catch (error) { next(error); }
+});
+
 pricingRouter.get("/:shopId/promotions", async (request, response, next) => {
   try {
     const auth = getAuthUser(request); const { shopId } = shopParams.parse(request.params); const query = pagination(request.query); await assertUserOwnsShop(auth.id, shopId);
@@ -586,9 +650,9 @@ pricingRouter.post("/:shopId/promotion-campaigns", async (request, response, nex
       const created = await tx.promotionCampaign.create({ data: { shopId, name: input.name, scope: input.scope, state: input.state, ...(input.categoryId ? { categoryId: input.categoryId } : {}) } });
       for (const product of products) {
         const targetKey = promotionTargetKey({ productId: product.id, channel: input.channel.toUpperCase() });
-        const overlap = await tx.promotion.findFirst({ where: { shopId, targetKey, state: { in: ["SCHEDULED", "RUNNING"] }, startsAt: { lt: input.endsAt }, endsAt: { gt: input.startsAt } } });
+        const overlap = await tx.promotion.findFirst({ where: { shopId, targetKey, audienceType: { in: overlappingAudiences(input.audienceType) }, state: { in: ["SCHEDULED", "RUNNING"] }, startsAt: { lt: input.endsAt }, endsAt: { gt: input.startsAt } } });
         if (overlap && input.state !== "DRAFT") throw conflict("Promotion overlaps another scheduled or running promotion for a selected product.");
-        await tx.promotion.create({ data: { shopId, campaignId: created.id, name: input.name, productId: product.id, targetKey, channel: input.channel.toUpperCase(), type: input.type, value: String(input.value), minimumQuantity: String(input.minimumQuantity), discountBase: input.discountBase, startsAt: input.startsAt, endsAt: input.endsAt, timeZone: input.timeZone, state: input.state, priority: input.priority, actorId: auth.id, ...(input.note !== undefined ? { note: input.note } : {}), ...(input.reason !== undefined ? { reason: input.reason } : {}) } });
+        await tx.promotion.create({ data: { shopId, campaignId: created.id, name: input.name, productId: product.id, targetKey, channel: input.channel.toUpperCase(), audienceType: input.audienceType, type: input.type, value: String(input.value), minimumQuantity: String(input.minimumQuantity), discountBase: input.discountBase, startsAt: input.startsAt, endsAt: input.endsAt, timeZone: input.timeZone, state: input.state, priority: input.priority, actorId: auth.id, ...(input.note !== undefined ? { note: input.note } : {}), ...(input.reason !== undefined ? { reason: input.reason } : {}) } });
       }
       await writeAuditLog(tx, { shopId, actorId: auth.id, action: "promotion.campaign.create", entity: "PromotionCampaign", entityId: created.id, metadata: { scope: input.scope, productCount: products.length } });
       return created;
@@ -608,7 +672,7 @@ pricingRouter.patch("/:shopId/promotion-campaigns/:id", async (request, response
       const existingEffectiveState = existing.promotions[0] ? effectivePromotionState(existing.promotions[0]) : existing.state;
       if (["ENDED", "CANCELLED"].includes(existingEffectiveState) || existing.state === "CANCELLED") throw conflict("Ended or cancelled promotions cannot be edited.");
       const state = input.state ?? existing.state;
-      const promotionData = { state, ...(input.name ? { name: input.name } : {}), ...(input.type ? { type: input.type } : {}), ...(input.value !== undefined ? { value: String(input.value) } : {}), ...(input.minimumQuantity !== undefined ? { minimumQuantity: String(input.minimumQuantity) } : {}), ...(input.discountBase ? { discountBase: input.discountBase } : {}), ...(input.startsAt ? { startsAt: input.startsAt } : {}), ...(input.endsAt ? { endsAt: input.endsAt } : {}), ...(input.timeZone ? { timeZone: input.timeZone } : {}), ...(input.channel ? { channel: input.channel.toUpperCase() } : {}), ...(input.priority !== undefined ? { priority: input.priority } : {}), ...(input.note !== undefined ? { note: input.note } : {}), ...(input.reason ? { reason: input.reason } : {}), actorId: auth.id, version: { increment: 1 } };
+      const promotionData = { state, ...(input.name ? { name: input.name } : {}), ...(input.type ? { type: input.type } : {}), ...(input.value !== undefined ? { value: String(input.value) } : {}), ...(input.minimumQuantity !== undefined ? { minimumQuantity: String(input.minimumQuantity) } : {}), ...(input.discountBase ? { discountBase: input.discountBase } : {}), ...(input.startsAt ? { startsAt: input.startsAt } : {}), ...(input.endsAt ? { endsAt: input.endsAt } : {}), ...(input.timeZone ? { timeZone: input.timeZone } : {}), ...(input.channel ? { channel: input.channel.toUpperCase() } : {}), ...(input.audienceType ? { audienceType: input.audienceType } : {}), ...(input.priority !== undefined ? { priority: input.priority } : {}), ...(input.note !== undefined ? { note: input.note } : {}), ...(input.reason ? { reason: input.reason } : {}), actorId: auth.id, version: { increment: 1 } };
       await tx.promotion.updateMany({ where: { campaignId: id }, data: promotionData });
       if (input.channel !== undefined) {
         await Promise.all(existing.promotions.map((promotion) => tx.promotion.update({
@@ -649,9 +713,9 @@ pricingRouter.post("/:shopId/promotions", async (request, response, next) => {
       await assertPricingTarget(tx, shopId, input);
       const targetKey = promotionTargetKey(input);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${shopId}:${targetKey}`}))`;
-      const overlap = await tx.promotion.findFirst({ where: { shopId, targetKey, state: { in: ["SCHEDULED", "RUNNING"] }, startsAt: { lt: input.endsAt }, endsAt: { gt: input.startsAt } } });
+      const overlap = await tx.promotion.findFirst({ where: { shopId, targetKey, audienceType: { in: overlappingAudiences(input.audienceType) }, state: { in: ["SCHEDULED", "RUNNING"] }, startsAt: { lt: input.endsAt }, endsAt: { gt: input.startsAt } } });
       if (overlap && input.state !== "DRAFT") throw conflict("Promotion overlaps another scheduled or running promotion for this target.");
-      const created = await tx.promotion.create({ data: { shopId, name: input.name, productId: input.productId, targetKey, channel: input.channel.toUpperCase(), type: input.type, value: String(input.value), minimumQuantity: String(input.minimumQuantity), discountBase: input.discountBase, startsAt: input.startsAt, endsAt: input.endsAt, timeZone: input.timeZone, state: input.state, priority: input.priority, actorId: auth.id, ...(input.note !== undefined ? { note: input.note } : {}), ...(input.reason !== undefined ? { reason: input.reason } : {}), ...(input.variantId ? { variantId: input.variantId } : {}), ...(input.productUnitId ? { productUnitId: input.productUnitId } : {}), ...(input.priceGroupId ? { priceGroupId: input.priceGroupId } : {}) } });
+      const created = await tx.promotion.create({ data: { shopId, name: input.name, productId: input.productId, targetKey, channel: input.channel.toUpperCase(), audienceType: input.audienceType, type: input.type, value: String(input.value), minimumQuantity: String(input.minimumQuantity), discountBase: input.discountBase, startsAt: input.startsAt, endsAt: input.endsAt, timeZone: input.timeZone, state: input.state, priority: input.priority, actorId: auth.id, ...(input.note !== undefined ? { note: input.note } : {}), ...(input.reason !== undefined ? { reason: input.reason } : {}), ...(input.variantId ? { variantId: input.variantId } : {}), ...(input.productUnitId ? { productUnitId: input.productUnitId } : {}), ...(input.priceGroupId ? { priceGroupId: input.priceGroupId } : {}) } });
       await writeAuditLog(tx, { shopId, actorId: auth.id, action: "promotion.create", entity: "Promotion", entityId: created.id, metadata: { targetKey, state: input.state } });
       return created;
     });
@@ -685,7 +749,7 @@ pricingRouter.patch("/:shopId/promotions/:id", async (request, response, next) =
       const targetKey = promotionTargetKey(merged);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${shopId}:${targetKey}`}))`;
       if (["SCHEDULED", "RUNNING"].includes(merged.state)) {
-        const overlap = await tx.promotion.findFirst({ where: { id: { not: id }, shopId, targetKey, state: { in: ["SCHEDULED", "RUNNING"] }, startsAt: { lt: merged.endsAt }, endsAt: { gt: merged.startsAt } } });
+        const overlap = await tx.promotion.findFirst({ where: { id: { not: id }, shopId, targetKey, audienceType: { in: overlappingAudiences(input.audienceType ?? existing.audienceType as "ALL" | "RETAIL" | "WHOLESALE") }, state: { in: ["SCHEDULED", "RUNNING"] }, startsAt: { lt: merged.endsAt }, endsAt: { gt: merged.startsAt } } });
         if (overlap) throw conflict("Promotion overlaps another scheduled or running promotion for this target.");
       }
       const updated = await tx.promotion.update({ where: { id }, data: {
@@ -695,6 +759,7 @@ pricingRouter.patch("/:shopId/promotions/:id", async (request, response, next) =
         ...(input.variantId !== undefined ? { variantId: input.variantId } : {}),
         ...(input.productUnitId !== undefined ? { productUnitId: input.productUnitId } : {}),
         ...(input.priceGroupId !== undefined ? { priceGroupId: input.priceGroupId } : {}),
+        ...(input.audienceType !== undefined ? { audienceType: input.audienceType } : {}),
         ...(input.channel !== undefined ? { channel: input.channel.toUpperCase() } : {}),
         ...(input.type !== undefined ? { type: input.type } : {}),
         ...(input.value !== undefined ? { value: String(input.value) } : {}),

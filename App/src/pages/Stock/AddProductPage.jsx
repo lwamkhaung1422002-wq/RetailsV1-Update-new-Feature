@@ -29,6 +29,7 @@ import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import CategoryRoundedIcon from "@mui/icons-material/CategoryRounded";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
+import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import CurrencyExchangeRoundedIcon from "@mui/icons-material/CurrencyExchangeRounded";
 import DocumentScannerRoundedIcon from "@mui/icons-material/DocumentScannerRounded";
 import Inventory2RoundedIcon from "@mui/icons-material/Inventory2Rounded";
@@ -92,6 +93,8 @@ export default function AddProductPage() {
   const [hasExistingUnits, setHasExistingUnits] = useState(false);
   const [baseUnitLocked, setBaseUnitLocked] = useState(false);
   const [unitDialogTarget, setUnitDialogTarget] = useState(null);
+  const [unitToDelete, setUnitToDelete] = useState(null);
+  const [deletingUnit, setDeletingUnit] = useState(false);
   const [inventoryBatches, setInventoryBatches] = useState([]);
   const [activeBarcode, setActiveBarcode] = useState(null);
   const [activeShortCode, setActiveShortCode] = useState(null);
@@ -211,6 +214,24 @@ export default function AddProductPage() {
     else if (typeof unitDialogTarget === "number") updateAdditionalUnit(unitDialogTarget, { unitId: created.id });
     setUnitEdited(true);
     setUnitDialogTarget(null);
+  };
+  const deleteUnit = async () => {
+    if (!unitToDelete) return;
+    setDeletingUnit(true);
+    try {
+      await api.units.remove(unitToDelete.id);
+      setUnits((current) => current.filter((unit) => unit.id !== unitToDelete.id));
+      setForm((current) => current.unitId === unitToDelete.id ? { ...current, unitId: "" } : current);
+      setAdditionalUnits((current) => current.map((unit) => unit.unitId === unitToDelete.id ? { ...unit, unitId: "" } : unit));
+      setUnitEdited(true);
+      setUnitToDelete(null);
+    } catch (error) {
+      setMessage({ severity: "error", text: error.message || "Unable to delete unit." });
+      setUnits((current) => current.map((unit) => unit.id === unitToDelete.id ? { ...unit, canDelete: false } : unit));
+      setUnitToDelete(null);
+    } finally {
+      setDeletingUnit(false);
+    }
   };
   const selectedCategory = categories.find(
     (item) => item.id === form.categoryId,
@@ -406,6 +427,10 @@ export default function AddProductPage() {
     setUnitDialogTarget,
     unitDialogTarget,
     createUnit,
+    unitToDelete,
+    setUnitToDelete,
+    deletingUnit,
+    deleteUnit,
     selectedCategory,
     categoryDialogOpen,
     setCategoryDialogOpen,
@@ -648,7 +673,18 @@ function PricingFields({ form, update }) {
     </Box>
   );
 }
-function UnitField({ form, update, units, setUnitDialogTarget, baseUnitLocked }) {
+function unitOption(unit, onDelete) {
+  return <MenuItem key={unit.id} value={unit.id} sx={{ display: "flex", justifyContent: "space-between" }}>
+    {unit.name}
+    {unit.canDelete && <IconButton
+      size="small"
+      aria-label={`Delete ${unit.name} unit`}
+      onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+      onClick={(event) => { event.preventDefault(); event.stopPropagation(); onDelete(unit); }}
+    ><CloseRoundedIcon fontSize="small" /></IconButton>}
+  </MenuItem>;
+}
+function UnitField({ form, update, units, setUnitDialogTarget, setUnitToDelete, baseUnitLocked }) {
   return (
     <Field
       label="Unit"
@@ -656,15 +692,14 @@ function UnitField({ form, update, units, setUnitDialogTarget, baseUnitLocked })
       value={form.unitId}
       onChange={(event) => event.target.value === createUnitOption ? setUnitDialogTarget("base") : update("unitId")(event)}
       disabled={baseUnitLocked}
+      selectRenderValue={(unitId) => units.find((unit) => unit.id === unitId)?.name || ""}
       helperText={baseUnitLocked ? "Base unit cannot be changed after stock or sales activity." : undefined}
       icon={<StraightenRoundedIcon />}
     >
       {units
         .filter((unit) => unit.isActive !== false || unit.id === form.unitId)
         .map((unit) => (
-          <MenuItem key={unit.id} value={unit.id}>
-            {unit.name}
-          </MenuItem>
+          unitOption(unit, setUnitToDelete)
         ))}
       <Divider />
       <MenuItem value={createUnitOption}>+ Create New Unit</MenuItem>
@@ -700,7 +735,7 @@ function SupplierField({ value, onChange, options }) {
     </Box>
   );
 }
-function AdditionalUnitsField({ form, units, additionalUnits, updateAdditionalUnit, addAdditionalUnit, removeAdditionalUnit, setUnitDialogTarget }) {
+function AdditionalUnitsField({ form, units, additionalUnits, updateAdditionalUnit, addAdditionalUnit, removeAdditionalUnit, setUnitDialogTarget, setUnitToDelete }) {
   const baseName = units.find((unit) => unit.id === form.unitId)?.name || "Base Unit";
   return (
     <Box sx={{ mb: { xs: 2, md: 1.25 }, minWidth: 0 }}>
@@ -711,8 +746,8 @@ function AdditionalUnitsField({ form, units, additionalUnits, updateAdditionalUn
           return (
           <Box key={index} sx={{ p: 1.25, border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))" }, gap: 1 }}>
-              <TextField size="small" select label="Unit" value={item.unitId} onChange={(event) => event.target.value === createUnitOption ? setUnitDialogTarget(index) : updateAdditionalUnit(index, { unitId: event.target.value })}>
-                {units.filter((unit) => (unit.isActive !== false || unit.id === item.unitId) && (unit.id === item.unitId || (unit.id !== form.unitId && !additionalUnits.some((other, otherIndex) => otherIndex !== index && other.unitId === unit.id)))).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
+              <TextField size="small" select label="Unit" value={item.unitId} onChange={(event) => event.target.value === createUnitOption ? setUnitDialogTarget(index) : updateAdditionalUnit(index, { unitId: event.target.value })} slotProps={{ select: { renderValue: (unitId) => units.find((unit) => unit.id === unitId)?.name || "" } }}>
+                {units.filter((unit) => (unit.isActive !== false || unit.id === item.unitId) && (unit.id === item.unitId || (unit.id !== form.unitId && !additionalUnits.some((other, otherIndex) => otherIndex !== index && other.unitId === unit.id)))).map((unit) => unitOption(unit, setUnitToDelete))}
                 <Divider />
                 <MenuItem value={createUnitOption}>+ Create New Unit</MenuItem>
               </TextField>
@@ -823,6 +858,10 @@ function SharedDialogs({
   unitDialogTarget,
   setUnitDialogTarget,
   createUnit,
+  unitToDelete,
+  setUnitToDelete,
+  deletingUnit,
+  deleteUnit,
 }) {
   return (
     <>
@@ -834,6 +873,14 @@ function SharedDialogs({
         onCreate={createCategory}
       />
       <UnitCreationDialog open={unitDialogTarget !== null} onClose={() => setUnitDialogTarget(null)} onCreate={createUnit} />
+      <Dialog open={Boolean(unitToDelete)} onClose={() => !deletingUnit && setUnitToDelete(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Delete Unit</DialogTitle>
+        <DialogContent>Delete {unitToDelete?.name}? This unused unit will be removed.</DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUnitToDelete(null)} disabled={deletingUnit}>Cancel</Button>
+          <Button color="error" onClick={() => void deleteUnit()} disabled={deletingUnit}>Delete</Button>
+        </DialogActions>
+      </Dialog>
       <BarcodeScannerDialog
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
@@ -954,6 +1001,7 @@ function Field({
   multiline,
   minRows,
   children,
+  selectRenderValue,
   ...props
 }) {
   return (
@@ -975,6 +1023,7 @@ function Field({
         minRows={minRows}
         {...props}
         slotProps={{
+          ...(selectRenderValue ? { select: { renderValue: selectRenderValue } } : {}),
           input: {
             startAdornment: icon ? (
               <InputAdornment

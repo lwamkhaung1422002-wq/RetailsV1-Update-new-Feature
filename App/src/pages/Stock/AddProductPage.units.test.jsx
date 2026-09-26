@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router";
 
 const mocks = vi.hoisted(() => ({ api: {
-  categories: { list: vi.fn() }, units: { list: vi.fn(), create: vi.fn() }, inventory: { list: vi.fn() },
+  categories: { list: vi.fn() }, units: { list: vi.fn(), create: vi.fn(), remove: vi.fn() }, inventory: { list: vi.fn() },
   products: { get: vi.fn(), create: vi.fn(), update: vi.fn() },
 } }));
 vi.mock("../../hooks/useApiResource", () => ({ usePosApi: () => mocks.api }));
@@ -35,6 +35,7 @@ beforeEach(() => {
   mocks.api.categories.list.mockResolvedValue({ categories: [] });
   mocks.api.units.list.mockResolvedValue({ units: [piece, carton] });
   mocks.api.units.create.mockResolvedValue({ unit: carton });
+  mocks.api.units.remove.mockResolvedValue(null);
   mocks.api.inventory.list.mockResolvedValue({ inventory: [] });
   mocks.api.products.create.mockResolvedValue({ product: { id: "product-1" } });
   mocks.api.products.update.mockResolvedValue({ product: { id: "product-1" } });
@@ -173,4 +174,38 @@ describe("Add/Edit Product unit refinement", () => {
     renderPage("/stock/add?edit=product-1");
     await waitFor(() => expect(screen.getAllByRole("combobox")[0].getAttribute("aria-disabled")).not.toBe("true"));
   });
+
+  it("shows delete only for unused units, does not select on close-icon click, and removes the option", async () => {
+    mocks.api.units.list.mockResolvedValue({ units: [{ ...piece, canDelete: false }, { ...carton, canDelete: true }] });
+    renderPage();
+    await waitFor(() => expect(screen.getAllByRole("combobox")[0].textContent).toContain("Piece"));
+    fireEvent.change(screen.getByPlaceholderText("Enter product name"), { target: { value: "Coffee" } });
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
+    expect(screen.queryByRole("button", { name: "Delete Piece unit" })).toBeNull();
+    const remove = screen.getByRole("button", { name: "Delete Carton unit" });
+    fireEvent.mouseDown(remove);
+    fireEvent.click(remove);
+    expect(screen.getAllByRole("combobox", { hidden: true })[0].textContent).toContain("Piece");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(mocks.api.units.remove).toHaveBeenCalledWith("carton"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete Unit" })).toBeNull());
+    fireEvent.mouseDown(screen.getAllByRole("combobox", { hidden: true })[0]);
+    expect(screen.queryByRole("option", { name: "Carton" })).toBeNull();
+    expect(screen.getByPlaceholderText("Enter product name").value).toBe("Coffee");
+  }, 15000);
+
+  it("clears a deleted unsaved base unit without clearing the product form", async () => {
+    mocks.api.units.list.mockResolvedValue({ units: [{ ...piece, canDelete: true }, carton] });
+    renderPage();
+    await waitFor(() => expect(screen.getAllByRole("combobox")[0].textContent).toContain("Piece"));
+    expect(screen.getAllByRole("combobox")[0].querySelector("button")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("Enter product name"), { target: { value: "Coffee" } });
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Piece unit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(mocks.api.units.remove).toHaveBeenCalledWith("piece"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete Unit" })).toBeNull());
+    expect(screen.getAllByRole("combobox", { hidden: true })[0].textContent).not.toContain("Piece");
+    expect(screen.getByPlaceholderText("Enter product name").value).toBe("Coffee");
+  }, 15000);
 });

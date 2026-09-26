@@ -4,8 +4,8 @@ import { resolvePrice } from "./pricing-domain.js";
 
 const decimal = (value: number) => new Prisma.Decimal(value);
 type QuantityBranch = { productUnitId: string | null; minimumQuantity: { lte: Prisma.Decimal } };
-type Tier = { id: string; productUnitId: string | null; variantId: null; priceGroupId: null; minimumQuantity: Prisma.Decimal; unitPrice: number };
-type Promotion = { id: string; productUnitId: string | null; minimumQuantity: Prisma.Decimal; type: string; value: Prisma.Decimal; discountBase: string; priority: number; name: string };
+type Tier = { id: string; productUnitId: string | null; variantId: string | null; priceGroupId: string | null; minimumQuantity: Prisma.Decimal; unitPrice: number };
+type Promotion = { id: string; productUnitId: string | null; minimumQuantity: Prisma.Decimal; type: string; value: Prisma.Decimal; discountBase: string; priority: number; name: string; audienceType?: string };
 
 function fixture(tiers: Tier[] = [], promotions: Promotion[] = []) {
   const units = [
@@ -15,24 +15,25 @@ function fixture(tiers: Tier[] = [], promotions: Promotion[] = []) {
   ];
   const matches = (item: { productUnitId: string | null; minimumQuantity: Prisma.Decimal }, branches: QuantityBranch[]) =>
     branches.some((branch) => item.productUnitId === branch.productUnitId && item.minimumQuantity.lte(branch.minimumQuantity.lte));
-  const tierFind = vi.fn(async ({ where }: { where: { AND: Array<{ OR: QuantityBranch[] }> } }) =>
-    tiers.filter((tier) => matches(tier, where.AND[0]!.OR)));
-  const promotionFind = vi.fn(async ({ where }: { where: { OR: QuantityBranch[] } }) =>
-    promotions.filter((promotion) => matches(promotion, where.OR)).sort((left, right) => right.priority - left.priority));
+  const tierFind = vi.fn(async ({ where }: { where: { AND: [{ OR: QuantityBranch[] }, { priceGroupId: string | null }] } }) =>
+    tiers.filter((tier) => tier.priceGroupId === where.AND[1].priceGroupId && matches(tier, where.AND[0].OR)));
+  const promotionFind = vi.fn(async ({ where }: { where: { OR: QuantityBranch[]; audienceType: { in: string[] } } }) =>
+    promotions.filter((promotion) => where.audienceType.in.includes(promotion.audienceType || "ALL") && matches(promotion, where.OR)).sort((left, right) => right.priority - left.priority));
   const tx = {
     product: { findFirst: vi.fn(async () => ({ id: "product", price: 1000, variants: [], units })) },
     priceEntry: { findFirst: vi.fn(async () => null) },
     priceTier: { findMany: tierFind },
     promotion: { findMany: promotionFind },
+    customerPriceGroup: { findFirst: vi.fn(async () => ({ id: "wholesale", name: "Wholesale" })) },
   } as unknown as PrismaClient;
-  const resolve = (unit: "piece" | "pack" | "carton", quantity: number) => resolvePrice(tx, "shop", {
-    productId: "product", productUnitId: unit, quantity: decimal(quantity), activateDueEntries: false,
+  const resolve = (unit: "piece" | "pack" | "carton", quantity: number, priceGroupId: string | null = null) => resolvePrice(tx, "shop", {
+    productId: "product", productUnitId: unit, priceGroupId, quantity: decimal(quantity), activateDueEntries: false,
   });
   return { resolve, tierFind, promotionFind };
 }
 
-const tier = (id: string, productUnitId: string | null, minimumQuantity: number, unitPrice: number): Tier => ({
-  id, productUnitId, variantId: null, priceGroupId: null, minimumQuantity: decimal(minimumQuantity), unitPrice,
+const tier = (id: string, productUnitId: string | null, minimumQuantity: number, unitPrice: number, priceGroupId: string | null = null): Tier => ({
+  id, productUnitId, variantId: null, priceGroupId, minimumQuantity: decimal(minimumQuantity), unitPrice,
 });
 const promotion = (id: string, productUnitId: string | null, minimumQuantity: number, type: string, value: number, discountBase = "RESOLVED_TIER_PRICE"): Promotion => ({
   id, productUnitId, minimumQuantity: decimal(minimumQuantity), type, value: decimal(value), discountBase, priority: 1, name: id,
@@ -93,5 +94,42 @@ describe("unit-aware pricing quantities", () => {
     const { resolve } = fixture([tier("five-pieces", null, 5, 900)]);
     expect((await resolve("piece", 1)).finalUnitPrice).toBe(1000);
     expect((await resolve("piece", 5)).finalUnitPrice).toBe(900);
+  });
+
+  it("uses selected Carton quantities for the shop Wholesale group only", async () => {
+    const { resolve } = fixture([
+      tier("retail-five", "carton", 5, 21_000),
+      tier("wholesale-one", "carton", 1, 22_000, "wholesale"),
+      tier("wholesale-five", "carton", 5, 20_500, "wholesale"),
+      tier("wholesale-ten", "carton", 10, 19_500, "wholesale"),
+    ]);
+    expect((await resolve("carton", 7, "wholesale")).tierUnitPrice).toBe(20_500);
+    expect((await resolve("carton", 12, "wholesale")).tierUnitPrice).toBe(19_500);
+    expect((await resolve("carton", 5)).tierUnitPrice).toBe(21_000);
+  });
+
+  it("falls back to regular price rather than a Retail tier when Wholesale has no eligible tier", async () => {
+    const { resolve } = fixture([tier("retail-one", "carton", 1, 21_000), tier("wholesale-five", "carton", 5, 20_500, "wholesale")]);
+    const result = await resolve("carton", 2, "wholesale");
+    expect(result.tierUnitPrice).toBeNull();
+    expect(result.finalUnitPrice).toBe(24_000);
+    expect(result.pricingType).toBe("WHOLESALE");
+  });
+
+  it("ignores legacy generic Wholesale tiers without an explicit selling unit", async () => {
+    const { resolve } = fixture([tier("generic-wholesale", null, 1, 700, "wholesale")]);
+    const result = await resolve("carton", 5, "wholesale");
+    expect(result.appliedTierId).toBeNull();
+    expect(result.finalUnitPrice).toBe(24_000);
+  });
+
+  it("filters promotion audience and keeps one winning promotion", async () => {
+    const { resolve } = fixture([], [
+      { ...promotion("all", "carton", 1, "PERCENTAGE", 5), priority: 1, audienceType: "ALL" },
+      { ...promotion("retail", "carton", 1, "PERCENTAGE", 10), priority: 2, audienceType: "RETAIL" },
+      { ...promotion("wholesale", "carton", 1, "PERCENTAGE", 20), priority: 3, audienceType: "WHOLESALE" },
+    ]);
+    expect((await resolve("carton", 1)).promotionId).toBe("retail");
+    expect((await resolve("carton", 1, "wholesale")).promotionId).toBe("wholesale");
   });
 });

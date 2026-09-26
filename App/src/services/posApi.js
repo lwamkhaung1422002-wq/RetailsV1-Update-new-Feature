@@ -84,6 +84,7 @@ export function createPosApi({
     units: {
       list: () => shopRequest("/units"),
       create: (body) => shopRequest("/units", { method: "POST", body }),
+      remove: (id) => shopRequest(`/units/${id}`, { method: "DELETE" }),
     },
     inventory: {
       list: (query) => shopRequest(`/inventory${queryString(query)}`),
@@ -141,6 +142,7 @@ export function createPosApi({
     },
     customers: {
       list: (query) => shopRequest(`/customers${queryString(query)}`),
+      creditReport: (id) => shopRequest(`/customers/${id}/credit-report`),
       create: (body) => shopRequest("/customers", { method: "POST", body }),
       update: (id, body) =>
         shopRequest(`/customers/${id}`, { method: "PATCH", body }),
@@ -211,6 +213,8 @@ export function createPosApi({
         shopRequest(`/pricing/overview${queryString(query)}`),
       resolve: (body) =>
         shopRequest("/pricing/resolve", { method: "POST", body }),
+      wholesalePricing: (productId) => shopRequest(`/wholesale-pricing/${productId}`),
+      saveWholesalePricing: (productId, body) => shopRequest(`/wholesale-pricing/${productId}`, { method: "PUT", body }),
       prices: (query) => shopRequest(`/prices${queryString(query)}`),
       createPrice: (body, approvalToken) => shopRequest("/prices", { method: "POST", body, ...(approvalToken ? { headers: { "x-manager-approval": approvalToken } } : {}) }),
       bulkPrices: (body) =>

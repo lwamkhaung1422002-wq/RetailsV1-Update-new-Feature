@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     pricing: { resolve: vi.fn(), barcodeLookup: vi.fn() },
     orders: { create: vi.fn(), updateStatus: vi.fn() },
   },
+  customers: [],
 }));
 
 const units = [
@@ -19,7 +20,7 @@ const units = [
 vi.mock("../../hooks/useApiResource", () => ({ usePosApi: () => mocks.api }));
 vi.mock("../../hooks/usePosQueries", () => ({
   useProductsQuery: () => ({ data: { products: [{ id: "product-1", name: "Coffee", price: 1000, currentStock: 120, units, barcodes: [] }] }, error: null, refetch: vi.fn() }),
-  useAllCustomersQuery: () => ({ data: { customers: [] } }),
+  useAllCustomersQuery: () => ({ data: { customers: mocks.customers } }),
 }));
 vi.mock("../../context/AuthContext", () => ({ useAuth: () => ({ shop: { id: "shop-1" } }) }));
 vi.mock("../../components/BarcodeScanner/BarcodeScannerDialog", () => ({ default: () => null }));
@@ -29,6 +30,7 @@ import CreateOrderPage from "./CreateOrderPage";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.customers = [];
   window.matchMedia = vi.fn().mockImplementation(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   mocks.api.shop.getSettings.mockResolvedValue({ settings: { paymentMethods: [] } });
   mocks.api.pricing.resolve.mockImplementation(async ({ productUnitId }) => ({ pricing: {
@@ -53,5 +55,28 @@ describe("Create Order manual selling unit", () => {
     fireEvent.change(screen.getByLabelText("Quantity for Coffee"), { target: { value: "5" } });
     fireEvent.blur(screen.getByLabelText("Quantity for Coffee"));
     await waitFor(() => expect(mocks.api.pricing.resolve).toHaveBeenCalledWith(expect.objectContaining({ productUnitId: "carton-product-unit", quantity: 5 })));
+  });
+
+  it("reprices an existing cart when switching Wholesale and Retail customers", async () => {
+    mocks.customers = [
+      { id: "wholesale", name: "ABC Trading", pricingType: "WHOLESALE", priceGroupId: "wholesale-group" },
+      { id: "retail", name: "Retail Buyer", pricingType: "RETAIL", priceGroupId: null },
+    ];
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><MemoryRouter><CreateOrderPage /></MemoryRouter></QueryClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Add Product" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Coffee" }));
+    await waitFor(() => expect(mocks.api.pricing.resolve).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-1", priceGroupId: null })));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    const customerInput = screen.getByPlaceholderText("Search or select customer...");
+    fireEvent.change(customerInput, { target: { value: "ABC" } });
+    fireEvent.click(await screen.findByText("ABC Trading"));
+    await waitFor(() => expect(mocks.api.pricing.resolve).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-1", priceGroupId: "wholesale-group" })));
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    fireEvent.change(screen.getByPlaceholderText("Search or select customer..."), { target: { value: "Retail" } });
+    fireEvent.click(await screen.findByText("Retail Buyer"));
+    await waitFor(() => expect(mocks.api.pricing.resolve.mock.calls.at(-1)?.[0]).toMatchObject({ productId: "product-1", priceGroupId: null }));
   });
 });

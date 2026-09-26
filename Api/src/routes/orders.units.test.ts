@@ -6,14 +6,16 @@ const mocks = vi.hoisted(() => ({
   productFind: vi.fn(), shopUpdate: vi.fn(), orderCreate: vi.fn(), orderFind: vi.fn(), orderFindFirst: vi.fn(), operationalFind: vi.fn(), orderUpdate: vi.fn(),
   batchFind: vi.fn(), batchUpdate: vi.fn(), itemCreate: vi.fn(), paymentCreate: vi.fn(),
   reserve: vi.fn(), movement: vi.fn(), lotFind: vi.fn(), price: vi.fn(), audit: vi.fn(),
+  customerFind: vi.fn(), settingsFind: vi.fn(), creditOrders: vi.fn(), allocatedPayments: vi.fn(), lockCustomer: vi.fn(),
 }));
 
-vi.mock("../lib/prisma.js", () => ({ prisma: { order: { findFirst: mocks.orderFindFirst }, $transaction: async (run: (tx: unknown) => unknown) => run({
+vi.mock("../lib/prisma.js", () => ({ prisma: { order: { findFirst: mocks.orderFindFirst }, customer: { findFirst: mocks.customerFind }, $transaction: async (run: (tx: unknown) => unknown) => run({
   product: { findFirst: mocks.productFind }, shop: { update: mocks.shopUpdate },
-  order: { create: mocks.orderCreate, findUniqueOrThrow: mocks.orderFind, findFirstOrThrow: mocks.operationalFind, update: mocks.orderUpdate },
+  order: { create: mocks.orderCreate, findUniqueOrThrow: mocks.orderFind, findFirstOrThrow: mocks.operationalFind, update: mocks.orderUpdate, findMany: mocks.creditOrders },
+  customer: { findFirst: mocks.customerFind }, shopSetting: { findUnique: mocks.settingsFind }, $queryRaw: mocks.lockCustomer,
   inventoryBatch: { findMany: mocks.batchFind, update: mocks.batchUpdate },
   inventoryLot: { findMany: mocks.lotFind },
-  orderItem: { create: mocks.itemCreate }, payment: { create: mocks.paymentCreate },
+  orderItem: { create: mocks.itemCreate }, payment: { create: mocks.paymentCreate, findMany: mocks.allocatedPayments },
 }) } }));
 vi.mock("../lib/shop-access.js", () => ({ assertUserOwnsShop: vi.fn() }));
 vi.mock("../lib/pricing-domain.js", () => ({ resolvePrice: mocks.price }));
@@ -59,6 +61,11 @@ beforeEach(() => {
     priceResolvedAt: new Date(), currencyCode: "MMK",
   }));
   mocks.audit.mockResolvedValue(undefined);
+  mocks.customerFind.mockResolvedValue({ id: "customer-1", shopId: "shop-1", priceGroupId: null, priceGroup: null, creditLimitOverride: null, paymentTermsDaysOverride: null });
+  mocks.settingsFind.mockResolvedValue({ defaultCreditLimit: 0, defaultPaymentTermsDays: 30 });
+  mocks.creditOrders.mockResolvedValue([]);
+  mocks.allocatedPayments.mockResolvedValue([]);
+  mocks.lockCustomer.mockResolvedValue([{ id: "customer-1" }]);
 });
 
 describe("order unit quantities", () => {
@@ -98,5 +105,44 @@ describe("order unit quantities", () => {
     mocks.productFind.mockResolvedValueOnce({ id: "product-1", name: "Coffee", isActive: true, price: 1000, cost: 750, trackingMode: "NONE", quantityPrecision: 0, units: [piece], variants: [], priceTiers: [], recipe: null });
     await request(app).post("/shop-1/orders").send({ initialPayment: { method: "Cash", amount: 2000 }, items: [{ productId: "product-1", quantity: 2 }] }).expect(201);
     expect(mocks.itemCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ quantity: 2, enteredQuantity: "2", conversionFactor: "1", baseQuantity: "2", unitPrice: 1000 }) }));
+  });
+});
+
+describe("order credit enforcement", () => {
+  const twoPieces = { customerId: "customer-1", items: [{ productId: "product-1", quantity: 2 }] };
+
+  it("allows fully paid sales for a zero-limit customer without due terms", async () => {
+    await request(app).post("/shop-1/orders").send({ ...twoPieces, initialPayment: { method: "Cash", amount: 2_000 } }).expect(201);
+    expect(mocks.lockCustomer).not.toHaveBeenCalled();
+    expect(mocks.orderCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ paymentTracking: false, paymentTermsDaysSnapshot: null, dueAt: null }) }));
+  });
+
+  it("rejects unpaid sales when effective credit limit is zero", async () => {
+    const result = await request(app).post("/shop-1/orders").send(twoPieces).expect(400);
+    expect(result.body.message).toMatch(/credit limit is 0/i);
+    expect(mocks.lockCustomer).toHaveBeenCalled();
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
+  });
+
+  it("locks the customer, includes existing unpaid exposure, and rejects excess", async () => {
+    mocks.settingsFind.mockResolvedValue({ defaultCreditLimit: 2_500, defaultPaymentTermsDays: 30 });
+    mocks.creditOrders.mockResolvedValue([{
+      id: "existing", total: 1_000, subtotal: 1_000, discount: 0, deliveryFee: 0,
+      createdAt: new Date(), paymentTracking: true, dueAt: null, payments: [],
+      items: [{ id: "old-item", quantity: 1, lineTotal: 1_000, returns: [] }],
+    }]);
+    const result = await request(app).post("/shop-1/orders").send(twoPieces).expect(400);
+    expect(result.body.message).toMatch(/Credit limit exceeded by 500/);
+    expect(mocks.lockCustomer.mock.invocationCallOrder[0]!).toBeLessThan(mocks.creditOrders.mock.invocationCallOrder[0]!);
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
+  });
+
+  it("saves payment terms and due date once when unpaid amount fits", async () => {
+    mocks.customerFind.mockResolvedValue({ id: "customer-1", shopId: "shop-1", priceGroupId: null, priceGroup: null, creditLimitOverride: 5_000, paymentTermsDaysOverride: 15 });
+    await request(app).post("/shop-1/orders").send({ ...twoPieces, initialPayment: { method: "Cash", amount: 500 } }).expect(201);
+    const data = mocks.orderCreate.mock.calls[0]![0].data;
+    expect(data.paymentTracking).toBe(true);
+    expect(data.paymentTermsDaysSnapshot).toBe(15);
+    expect(data.dueAt.getTime() - data.createdAt.getTime()).toBe(15 * 86_400_000);
   });
 });

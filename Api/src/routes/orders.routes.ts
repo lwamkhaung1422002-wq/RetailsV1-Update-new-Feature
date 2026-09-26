@@ -9,6 +9,8 @@ import { allocateRefund, effectiveOrderTotal, remainingCancellationSlices, remai
 import { recordInventoryMovement, setInventoryReservation } from "../lib/inventory-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { resolvePrice } from "../lib/pricing-domain.js";
+import { customerPricing } from "../lib/customer-pricing.js";
+import { creditDueAt, effectiveCustomerCredit, loadCustomerCredit } from "../lib/customer-credit.js";
 import { buildReceiptReadModel } from "../lib/receipt-read-model.js";
 import { historicalReturnedValue } from "../lib/sale-exchange.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
@@ -499,6 +501,12 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
         customerId = customer.id;
       }
 
+      const customer = customerId
+        ? await tx.customer.findFirst({ where: { id: customerId, shopId }, include: { priceGroup: true } })
+        : null;
+      if (customerId && !customer) throw notFound("Customer not found.");
+      const pricingCustomer = customer ? customerPricing(customer) : { pricingType: "RETAIL", priceGroupId: null };
+
       for (const item of input.items) {
         const product = await tx.product.findFirst({
           where: { id: item.productId, shopId },
@@ -603,15 +611,12 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
         } else if (item.lotOverrideReason) {
           throw badRequest("A lot override reason cannot be supplied without selecting a lot.");
         }
-        const customer = customerId
-          ? await tx.customer.findFirst({ where: { id: customerId, shopId }, select: { priceGroupId: true } })
-          : null;
         const manualDiscount = item.deductionType === "discount" ? item.discount ?? 0 : 0;
         const pricing = await resolvePrice(tx, shopId, {
           productId: product.id,
           variantId: variant?.id,
           productUnitId: productUnit?.id,
-          priceGroupId: customer?.priceGroupId,
+          priceGroupId: pricingCustomer.priceGroupId,
           quantity: enteredQuantity,
           channel: input.source?.toUpperCase() || "ALL",
           manualDiscount,
@@ -655,6 +660,23 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
       if (initialPaymentAmount < total && !customerId) {
         throw badRequest("Please select a customer for unpaid or partial orders.");
       }
+      const newExposure = total - initialPaymentAmount;
+      let paymentTermsDaysSnapshot: number | null = null;
+      if (newExposure > 0 && customerId) {
+        // Serialize credit checks for this customer within the order transaction.
+        await tx.$queryRaw`SELECT "id" FROM "Customer" WHERE "id" = ${customerId} AND "shopId" = ${shopId} FOR UPDATE`;
+        const lockedCustomer = await tx.customer.findFirst({ where: { id: customerId, shopId } });
+        if (!lockedCustomer) throw notFound("Customer not found.");
+        const settings = await tx.shopSetting.findUnique({ where: { shopId } });
+        const credit = effectiveCustomerCredit(lockedCustomer, settings);
+        if (credit.effectiveCreditLimit <= 0) throw badRequest("Customer credit limit is 0. Use full payment or change the credit limit.");
+        const report = await loadCustomerCredit(tx, shopId, customerId, credit.effectiveCreditLimit);
+        if (report.outstanding + newExposure > credit.effectiveCreditLimit) {
+          const exceeded = report.outstanding + newExposure - credit.effectiveCreditLimit;
+          throw badRequest(`Credit limit exceeded by ${exceeded.toLocaleString()}. Outstanding: ${report.outstanding.toLocaleString()}; new unpaid amount: ${newExposure.toLocaleString()}; limit: ${credit.effectiveCreditLimit.toLocaleString()}.`);
+        }
+        paymentTermsDaysSnapshot = credit.effectivePaymentTermsDays;
+      }
       const paymentStatus = initialPaymentAmount >= total
         ? "paid"
         : initialPaymentAmount > 0
@@ -666,6 +688,7 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
         select: { saleSequence: true },
       });
       const generatedOrderNumber = String(nextSequence.saleSequence).padStart(5, "0");
+      const createdAt = new Date();
 
       const createdOrder = await tx.order.create({
         data: {
@@ -679,6 +702,9 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
           // This is an immutable lifecycle flag: it records whether the order
           // had an outstanding balance when it was created.
           paymentTracking: initialPaymentAmount < total,
+          createdAt,
+          paymentTermsDaysSnapshot,
+          dueAt: paymentTermsDaysSnapshot === null ? null : creditDueAt(createdAt, paymentTermsDaysSnapshot),
           ...(customerId !== undefined ? { customerId } : {}),
           orderNumber: input.orderNumber || generatedOrderNumber,
           ...(input.source !== undefined ? { source: input.source } : {}),

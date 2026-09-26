@@ -40,6 +40,8 @@ const catalogSettingsSchema = z.object({
   receiptFooter: z.string().trim().max(300).optional(),
   notifyLowStock: z.boolean().optional(),
   notifyPayments: z.boolean().optional(),
+  defaultCreditLimit: z.coerce.number().int().min(0).optional(),
+  defaultPaymentTermsDays: z.coerce.number().int().min(0).max(3650).optional(),
 });
 
 // Cash is a system payment method.  Only custom methods are persisted in the
@@ -167,6 +169,8 @@ shopSettingsRouter.patch("/:shopId/settings", async (request, response, next) =>
         ...(input.receiptFooter !== undefined ? { receiptFooter: input.receiptFooter } : {}),
         ...(input.notifyLowStock !== undefined ? { notifyLowStock: input.notifyLowStock } : {}),
         ...(input.notifyPayments !== undefined ? { notifyPayments: input.notifyPayments } : {}),
+        ...(input.defaultCreditLimit !== undefined ? { defaultCreditLimit: input.defaultCreditLimit } : {}),
+        ...(input.defaultPaymentTermsDays !== undefined ? { defaultPaymentTermsDays: input.defaultPaymentTermsDays } : {}),
       },
     });
 
