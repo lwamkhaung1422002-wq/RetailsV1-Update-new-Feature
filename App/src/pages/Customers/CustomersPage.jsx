@@ -28,7 +28,7 @@ export default function CustomersPage() {
   const { shop, hasPermission } = useAuth();
   const canAdd = hasPermission("sale.create");
   const canManageCredit = hasPermission("settings.manage");
-  const canEdit = canAdd || hasPermission("price.edit") || canManageCredit;
+  const canEdit = canAdd || canManageCredit;
   const [search, setSearch] = useState("");
   const [editor, setEditor] = useState(null);
   const [creditDefaultsOpen, setCreditDefaultsOpen] = useState(false);

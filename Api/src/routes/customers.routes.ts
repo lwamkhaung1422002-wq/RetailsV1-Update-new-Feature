@@ -4,7 +4,6 @@ import { z } from "zod";
 import { assertShopAccess, assertShopPermission, assertUserOwnsShop, hasShopPermission } from "../lib/shop-access.js";
 import type { ShopAccess, ShopPermission } from "../lib/shop-access.js";
 import { effectiveOrderTotal } from "../lib/order-return-refund.js";
-import { customerPricing, ensureWholesalePriceGroup } from "../lib/customer-pricing.js";
 import { effectiveCustomerCredit, loadCustomerCredit } from "../lib/customer-credit.js";
 import { prisma } from "../lib/prisma.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -22,17 +21,15 @@ const customerSchema = z.object({
   address: z.string().trim().optional(),
   city: z.string().trim().optional(),
   notes: z.string().trim().optional(),
-  pricingType: z.enum(["RETAIL", "WHOLESALE"]).optional(),
   creditLimitOverride: z.number().int().min(0).nullable().optional(),
   paymentTermsDaysOverride: z.number().int().min(0).max(3650).nullable().optional(),
 });
 
 const updateCustomerSchema = customerSchema.partial();
-const customerView = <T extends { priceGroupId: string | null; priceGroup?: { name: string; isActive: boolean } | null; creditLimitOverride?: number | null; paymentTermsDaysOverride?: number | null; _count?: { orders: number } }>(customer: T, settings: { defaultCreditLimit?: number; defaultPaymentTermsDays?: number } | null) => {
+const customerView = <T extends { creditLimitOverride?: number | null; paymentTermsDaysOverride?: number | null; _count?: { orders: number } }>(customer: T, settings: { defaultCreditLimit?: number; defaultPaymentTermsDays?: number } | null) => {
   const { _count, ...details } = customer;
   return {
     ...details,
-    ...customerPricing(customer),
     ...effectiveCustomerCredit(customer, settings),
     hasHistory: (_count?.orders ?? 0) > 0,
   };
@@ -43,7 +40,6 @@ function requirePermission(access: ShopAccess, permission: ShopPermission) {
 }
 function assertCustomerFields(access: ShopAccess, input: z.infer<typeof updateCustomerSchema>) {
   if (["name", "phone", "email", "address", "city", "notes"].some((field) => field in input)) requirePermission(access, "sale.create");
-  if ("pricingType" in input) requirePermission(access, "price.edit");
   if ("creditLimitOverride" in input || "paymentTermsDaysOverride" in input) requirePermission(access, "settings.manage");
 }
 const listQuerySchema = z.object({
@@ -128,12 +124,10 @@ customersRouter.post("/:shopId/customers", async (request, response, next) => {
     const access = await assertShopPermission(authUser.id, shopId, "sale.create");
     assertCustomerFields(access, input);
 
-    const wholesaleGroup = input.pricingType === "WHOLESALE" ? await ensureWholesalePriceGroup(prisma, shopId) : null;
     const settings = await prisma.shopSetting.findUnique({ where: { shopId } });
     const data = {
       name: input.name,
       shopId,
-      ...(wholesaleGroup ? { priceGroupId: wholesaleGroup.id } : {}),
       ...(input.phone !== undefined ? { phone: input.phone } : {}),
       ...(input.email !== undefined ? { email: input.email } : {}),
       ...(input.address !== undefined ? { address: input.address } : {}),
@@ -175,10 +169,8 @@ customersRouter.patch("/:shopId/customers/:customerId", async (request, response
       throw error;
     }
 
-    const wholesaleGroup = input.pricingType === "WHOLESALE" ? await ensureWholesalePriceGroup(prisma, shopId) : null;
     const settings = await prisma.shopSetting.findUnique({ where: { shopId } });
     const data = {
-      ...(input.pricingType !== undefined ? { priceGroupId: wholesaleGroup?.id ?? null } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.phone !== undefined ? { phone: input.phone } : {}),
       ...(input.email !== undefined ? { email: input.email } : {}),

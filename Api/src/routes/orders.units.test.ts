@@ -7,12 +7,14 @@ const mocks = vi.hoisted(() => ({
   batchFind: vi.fn(), batchUpdate: vi.fn(), itemCreate: vi.fn(), paymentCreate: vi.fn(),
   reserve: vi.fn(), movement: vi.fn(), lotFind: vi.fn(), price: vi.fn(), audit: vi.fn(),
   customerFind: vi.fn(), settingsFind: vi.fn(), creditOrders: vi.fn(), allocatedPayments: vi.fn(), lockCustomer: vi.fn(),
+  groupFind: vi.fn(), groupUpsert: vi.fn(),
 }));
 
 vi.mock("../lib/prisma.js", () => ({ prisma: { order: { findFirst: mocks.orderFindFirst }, customer: { findFirst: mocks.customerFind }, $transaction: async (run: (tx: unknown) => unknown) => run({
   product: { findFirst: mocks.productFind }, shop: { update: mocks.shopUpdate },
   order: { create: mocks.orderCreate, findUniqueOrThrow: mocks.orderFind, findFirstOrThrow: mocks.operationalFind, update: mocks.orderUpdate, findMany: mocks.creditOrders },
   customer: { findFirst: mocks.customerFind }, shopSetting: { findUnique: mocks.settingsFind }, $queryRaw: mocks.lockCustomer,
+  customerPriceGroup: { findUnique: mocks.groupFind, upsert: mocks.groupUpsert },
   inventoryBatch: { findMany: mocks.batchFind, update: mocks.batchUpdate },
   inventoryLot: { findMany: mocks.lotFind },
   orderItem: { create: mocks.itemCreate }, payment: { create: mocks.paymentCreate, findMany: mocks.allocatedPayments },
@@ -62,6 +64,8 @@ beforeEach(() => {
   }));
   mocks.audit.mockResolvedValue(undefined);
   mocks.customerFind.mockResolvedValue({ id: "customer-1", shopId: "shop-1", priceGroupId: null, priceGroup: null, creditLimitOverride: null, paymentTermsDaysOverride: null });
+  mocks.groupFind.mockResolvedValue({ id: "wholesale-group" });
+  mocks.groupUpsert.mockResolvedValue({ id: "wholesale-group" });
   mocks.settingsFind.mockResolvedValue({ defaultCreditLimit: 0, defaultPaymentTermsDays: 30 });
   mocks.creditOrders.mockResolvedValue([]);
   mocks.allocatedPayments.mockResolvedValue([]);
@@ -105,6 +109,24 @@ describe("order unit quantities", () => {
     mocks.productFind.mockResolvedValueOnce({ id: "product-1", name: "Coffee", isActive: true, price: 1000, cost: 750, trackingMode: "NONE", quantityPrecision: 0, units: [piece], variants: [], priceTiers: [], recipe: null });
     await request(app).post("/shop-1/orders").send({ initialPayment: { method: "Cash", amount: 2000 }, items: [{ productId: "product-1", quantity: 2 }] }).expect(201);
     expect(mocks.itemCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ quantity: 2, enteredQuantity: "2", conversionFactor: "1", baseQuantity: "2", unitPrice: 1000 }) }));
+    expect(mocks.price).toHaveBeenCalledWith(expect.anything(), "shop-1", expect.objectContaining({ priceGroupId: null }));
+    expect(mocks.groupFind).not.toHaveBeenCalled();
+  });
+
+  it("uses canonical Wholesale context for a legacy customer and ignores a stale display price", async () => {
+    mocks.price.mockImplementation(async (_tx, _shop, input) => ({
+      regularUnitPrice: 1000, tierUnitPrice: 900, appliedTierId: null, promotionId: null,
+      promotionType: null, promotionValue: null, promotionDiscount: 0, manualDiscount: 0,
+      finalUnitPrice: input.priceGroupId === "wholesale-group" ? 900 : 1000,
+      priceResolvedAt: new Date(), currencyCode: "MMK",
+    }));
+    await request(app).post("/shop-1/orders").send({ customerId: "customer-1", initialPayment: { method: "Cash", amount: 9_000 }, items: [
+      { productId: "product-1", quantity: 10, unitPrice: 1 },
+    ] }).expect(201);
+    expect(mocks.groupFind).toHaveBeenCalledWith({ where: { shopId_name: { shopId: "shop-1", name: "Wholesale" } }, select: { id: true } });
+    expect(mocks.groupUpsert).not.toHaveBeenCalled();
+    expect(mocks.price).toHaveBeenCalledWith(expect.anything(), "shop-1", expect.objectContaining({ priceGroupId: "wholesale-group" }));
+    expect(mocks.itemCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ unitPrice: 900, lineTotal: 9_000 }) }));
   });
 });
 

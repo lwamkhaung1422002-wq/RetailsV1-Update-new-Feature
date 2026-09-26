@@ -116,6 +116,17 @@ describe("unit-aware pricing quantities", () => {
     expect(result.pricingType).toBe("WHOLESALE");
   });
 
+  it("keeps Wholesale quantity thresholds conditional on the selected pricing context", async () => {
+    const { resolve } = fixture([
+      tier("ten", "piece", 10, 900, "wholesale"),
+      tier("twenty", "piece", 20, 800, "wholesale"),
+    ]);
+    expect((await resolve("piece", 25)).finalUnitPrice).toBe(1000);
+    expect((await resolve("piece", 5, "wholesale")).finalUnitPrice).toBe(1000);
+    expect((await resolve("piece", 10, "wholesale")).finalUnitPrice).toBe(900);
+    expect((await resolve("piece", 25, "wholesale")).finalUnitPrice).toBe(800);
+  });
+
   it("ignores legacy generic Wholesale tiers without an explicit selling unit", async () => {
     const { resolve } = fixture([tier("generic-wholesale", null, 1, 700, "wholesale")]);
     const result = await resolve("carton", 5, "wholesale");
@@ -131,5 +142,25 @@ describe("unit-aware pricing quantities", () => {
     ]);
     expect((await resolve("carton", 1)).promotionId).toBe("retail");
     expect((await resolve("carton", 1, "wholesale")).promotionId).toBe("wholesale");
+  });
+
+  it("applies an All Customers promotion to Retail and Wholesale contexts", async () => {
+    const { resolve } = fixture([], [{ ...promotion("all", "piece", 1, "PERCENTAGE", 10), audienceType: "ALL" }]);
+    expect((await resolve("piece", 1)).promotionId).toBe("all");
+    expect((await resolve("piece", 1, "wholesale")).promotionId).toBe("all");
+  });
+
+  it("allows Wholesale-only promotion below any Wholesale tier and excludes the opposite audience", async () => {
+    const { resolve } = fixture([tier("ten", "piece", 10, 900, "wholesale")], [
+      { ...promotion("all", "piece", 1, "PERCENTAGE", 5), priority: 1, audienceType: "ALL" },
+      { ...promotion("retail", "piece", 1, "PERCENTAGE", 10), priority: 2, audienceType: "RETAIL" },
+      { ...promotion("wholesale", "piece", 1, "PERCENTAGE", 20), priority: 3, audienceType: "WHOLESALE" },
+    ]);
+    const walkIn = await resolve("piece", 1);
+    expect(walkIn.promotionId).toBe("retail");
+    const savedCustomer = await resolve("piece", 1, "wholesale");
+    expect(savedCustomer.tierUnitPrice).toBeNull();
+    expect(savedCustomer.promotionId).toBe("wholesale");
+    expect(savedCustomer.finalUnitPrice).toBe(800);
   });
 });

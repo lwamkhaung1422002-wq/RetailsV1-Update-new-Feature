@@ -10,9 +10,10 @@ export async function ensureWholesalePriceGroup(db: DbClient, shopId: string) {
   });
 }
 
-export function customerPricing(customer: { priceGroupId: string | null; priceGroup?: { name: string; isActive: boolean } | null }) {
-  const priceGroupId = customer.priceGroup?.name === "Wholesale" && customer.priceGroup.isActive
-    ? customer.priceGroupId
-    : null;
-  return { pricingType: priceGroupId ? "WHOLESALE" as const : "RETAIL" as const, priceGroupId };
+export async function wholesalePriceGroupId(db: DbClient, shopId: string) {
+  const group = await db.customerPriceGroup.findUnique({
+    where: { shopId_name: { shopId, name: "Wholesale" } },
+    select: { id: true },
+  });
+  return group?.id ?? (await ensureWholesalePriceGroup(db, shopId)).id;
 }

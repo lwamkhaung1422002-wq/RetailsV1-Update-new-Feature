@@ -516,9 +516,9 @@ export default function CreateOrderPage() {
   };
 
   const priceCartItem = useCallback(async (product, quantity) => {
-    const resolved = await api.pricing.resolve({ productId: product.id, quantity, priceGroupId: selectedCustomer?.priceGroupId || null, ...(selectedSellingUnit(product) ? { productUnitId: selectedSellingUnit(product).id } : {}) });
+    const resolved = await api.pricing.resolve({ productId: product.id, quantity, customerId: selectedCustomer?.id || null, ...(selectedSellingUnit(product) ? { productUnitId: selectedSellingUnit(product).id } : {}) });
     return toPricedCartItem(product, quantity, resolved.pricing);
-  }, [api, selectedCustomer?.priceGroupId]);
+  }, [api, selectedCustomer?.id]);
   useEffect(() => {
     for (const item of itemsRef.current) {
       const revision = nextPricingRevision(item.id);
@@ -601,7 +601,7 @@ export default function CreateOrderPage() {
     if (quantity < 1) { setOrderError("Insufficient stock for this unit."); return; }
     const revision = nextPricingRevision(product.id);
     try {
-      if (!existing && quantity === 1 && initialPricing && !selectedCustomer?.priceGroupId) {
+      if (!existing && quantity === 1 && initialPricing && !selectedCustomer?.id) {
         pendingQuantityRef.current.delete(product.id);
         commitItems([...itemsRef.current, toPricedCartItem(selectedProduct, quantity, initialPricing)]);
         setOrderError("");

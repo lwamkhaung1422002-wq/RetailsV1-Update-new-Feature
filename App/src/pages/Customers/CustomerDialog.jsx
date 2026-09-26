@@ -13,7 +13,6 @@ function CustomerDialogForm({ customer, onClose, onSaved }) {
   const api = usePosApi();
   const { shop, hasPermission } = useAuth();
   const canEditBasic = hasPermission("sale.create");
-  const canEditPricing = hasPermission("price.edit");
   const canEditCredit = hasPermission("settings.manage");
   const queryClient = useQueryClient();
   const [form, setForm] = useState(() => ({
@@ -21,7 +20,6 @@ function CustomerDialogForm({ customer, onClose, onSaved }) {
     phone: customer?.phone || "",
     address: customer?.address || "",
     city: customer?.city || "",
-    pricingType: customer?.pricingType || "RETAIL",
     creditMode: customer?.creditLimitOverride == null ? "DEFAULT" : "CUSTOM",
     creditLimit: String(customer?.creditLimitOverride ?? ""),
     termsMode: customer?.paymentTermsDaysOverride == null ? "DEFAULT" : "CUSTOM",
@@ -57,7 +55,6 @@ function CustomerDialogForm({ customer, onClose, onSaved }) {
     try {
       const body = {
         ...(canEditBasic ? { name, phone: form.phone.trim(), address: form.address.trim(), city: form.city.trim() } : {}),
-        ...(canEditPricing ? { pricingType: form.pricingType } : {}),
         ...(canEditCredit ? {
           creditLimitOverride: form.creditMode === "DEFAULT" ? null : creditLimit,
           paymentTermsDaysOverride: form.termsMode === "DEFAULT" ? null : paymentTermsDays,
@@ -82,9 +79,6 @@ function CustomerDialogForm({ customer, onClose, onSaved }) {
       <TextField fullWidth label="Phone" value={form.phone} onChange={change("phone")} disabled={!canEditBasic} />
       <TextField fullWidth label="Address" value={form.address} onChange={change("address")} disabled={!canEditBasic} />
       <TextField fullWidth label="City" value={form.city} onChange={change("city")} disabled={!canEditBasic} />
-      {canEditPricing && <TextField select fullWidth label="Pricing Type" value={form.pricingType} onChange={change("pricingType")}>
-        <MenuItem value="RETAIL">Retail</MenuItem><MenuItem value="WHOLESALE">Wholesale</MenuItem>
-      </TextField>}
       {canEditCredit && <><Divider />
         <TextField select fullWidth label="Credit Limit" value={form.creditMode} onChange={change("creditMode")}>
           <MenuItem value="DEFAULT">Use Shop Default ({Number(defaults.defaultCreditLimit ?? 0).toLocaleString()})</MenuItem>
@@ -98,6 +92,6 @@ function CustomerDialogForm({ customer, onClose, onSaved }) {
         {form.termsMode === "CUSTOM" && <TextField fullWidth label="Custom Payment Terms (days)" type="number" value={form.paymentTermsDays} onChange={change("paymentTermsDays")} slotProps={{ htmlInput: { min: 0, max: 3650, step: 1 } }} />}
       </>}
     </Stack></DialogContent>
-    <DialogActions sx={{ px: 3, py: 1.5 }}><Button onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" variant="contained" disabled={saving || (!canEditBasic && !canEditPricing && !canEditCredit)}>{saving ? "Saving…" : "Save"}</Button></DialogActions>
+    <DialogActions sx={{ px: 3, py: 1.5 }}><Button onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" variant="contained" disabled={saving || (!canEditBasic && !canEditCredit)}>{saving ? "Saving…" : "Save"}</Button></DialogActions>
   </Dialog>;
 }

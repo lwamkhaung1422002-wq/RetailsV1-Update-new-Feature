@@ -111,8 +111,8 @@ describe("customer routes", () => {
     const result = await request(app).get("/shop-1/customers?includeStats=true&pageSize=25").expect(200);
 
     expect(result.body.customers).toEqual([
-      expect.objectContaining({ id: "customer-1", name: "Aye Aye", pricingType: "RETAIL", priceGroupId: null, visitCount: 125, totalAmount: 1_450_000 }),
-      expect.objectContaining({ id: "customer-2", name: "Ko Min", pricingType: "RETAIL", priceGroupId: null, visitCount: 0, totalAmount: 0 }),
+      expect.objectContaining({ id: "customer-1", name: "Aye Aye", visitCount: 125, totalAmount: 1_450_000 }),
+      expect.objectContaining({ id: "customer-2", name: "Ko Min", visitCount: 0, totalAmount: 0 }),
     ]);
     expect(mocks.orderGroupBy).toHaveBeenCalledWith(expect.objectContaining({
       where: { shopId: "shop-1", customerId: { in: ["customer-1", "customer-2"] }, fulfillmentStatus: "completed", cancelledAt: null },
@@ -131,7 +131,8 @@ describe("customer routes", () => {
 
     const result = await request(app).post("/shop-1/customers").send({ name: "Aye Aye", phone: "09123", address: "Main Road", city: "Yangon" }).expect(201);
 
-    expect(result.body.customer).toMatchObject({ ...customer, pricingType: "RETAIL", priceGroupId: null });
+    expect(result.body.customer).toMatchObject(customer);
+    expect(result.body.customer).not.toHaveProperty("pricingType");
     expect(mocks.create).toHaveBeenCalledWith({ data: { shopId: "shop-1", name: "Aye Aye", phone: "09123", address: "Main Road", city: "Yangon" }, include: { priceGroup: true, _count: { select: { orders: true } } } });
   });
 
@@ -145,19 +146,18 @@ describe("customer routes", () => {
     expect(mocks.update).toHaveBeenCalledWith({ where: { id: "customer-1" }, data: { name: "Aye Aye Win", phone: "09456", address: "Main Road", city: "Yangon" }, include: { priceGroup: true, _count: { select: { orders: true } } } });
   });
 
-  it("maps Wholesale to the shop's single system group and Retail back to null", async () => {
-    mocks.create.mockResolvedValue({ id: "customer-1", name: "ABC Trading", priceGroupId: "wholesale-1", priceGroup: { name: "Wholesale", isActive: true } });
+  it("ignores legacy pricingType input without assigning or clearing a customer group", async () => {
+    mocks.create.mockResolvedValue({ id: "customer-1", name: "ABC Trading", priceGroupId: null });
     const created = await request(app).post("/shop-1/customers").send({ name: "ABC Trading", pricingType: "WHOLESALE" }).expect(201);
-    expect(created.body.customer.pricingType).toBe("WHOLESALE");
-    expect(created.body.customer.priceGroupId).toBe("wholesale-1");
-    expect(mocks.upsertGroup).toHaveBeenCalledWith(expect.objectContaining({ where: { shopId_name: { shopId: "shop-1", name: "Wholesale" } } }));
-    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ data: { name: "ABC Trading", shopId: "shop-1", priceGroupId: "wholesale-1" } }));
+    expect(created.body.customer).not.toHaveProperty("pricingType");
+    expect(mocks.upsertGroup).not.toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ data: { name: "ABC Trading", shopId: "shop-1" } }));
 
     mocks.findFirst.mockResolvedValue({ id: "customer-1" });
-    mocks.update.mockResolvedValue({ id: "customer-1", name: "ABC Trading", priceGroupId: null, priceGroup: null });
-    const updated = await request(app).patch("/shop-1/customers/customer-1").send({ pricingType: "RETAIL" }).expect(200);
-    expect(updated.body.customer.pricingType).toBe("RETAIL");
-    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: { priceGroupId: null } }));
+    mocks.update.mockResolvedValue({ id: "customer-1", name: "ABC Trading", priceGroupId: "legacy-group" });
+    const updated = await request(app).patch("/shop-1/customers/customer-1").send({ pricingType: "RETAIL", name: "ABC Trading" }).expect(200);
+    expect(updated.body.customer.priceGroupId).toBe("legacy-group");
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: { name: "ABC Trading" } }));
   });
 
   it("exposes effective credit values and a factual report only when requested", async () => {
@@ -218,12 +218,11 @@ describe("customer routes", () => {
     expect(detail.body.customer.hasHistory).toBe(true);
   });
 
-  it("permits sale.create contact editing but protects pricing and credit fields separately", async () => {
+  it("permits sale.create contact editing but protects credit fields", async () => {
     mocks.findFirst.mockResolvedValue({ id: "customer-1" });
     mocks.update.mockResolvedValue({ id: "customer-1", name: "Updated" });
     mocks.permissions = new Set(["sale.create"]);
     await request(app).patch("/shop-1/customers/customer-1").send({ name: "Updated" }).expect(200);
-    await request(app).patch("/shop-1/customers/customer-1").send({ pricingType: "WHOLESALE" }).expect(400);
     await request(app).patch("/shop-1/customers/customer-1").send({ creditLimitOverride: 9_000_000 }).expect(400);
     await request(app).patch("/shop-1/customers/customer-1").send({ paymentTermsDaysOverride: 365 }).expect(400);
     expect(mocks.update).toHaveBeenCalledTimes(1);
@@ -231,17 +230,15 @@ describe("customer routes", () => {
 
   it("rejects protected fields during customer creation without their permissions", async () => {
     mocks.permissions = new Set(["sale.create"]);
-    await request(app).post("/shop-1/customers").send({ name: "New", pricingType: "WHOLESALE" }).expect(400);
     await request(app).post("/shop-1/customers").send({ name: "New", creditLimitOverride: 1_000 }).expect(400);
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it("allows price.edit pricing and settings.manage credit policy mutations", async () => {
+  it("allows settings.manage credit policy mutations without changing legacy pricing", async () => {
     mocks.findFirst.mockResolvedValue({ id: "customer-1" });
     mocks.update.mockResolvedValue({ id: "customer-1", name: "Aye Aye" });
     mocks.permissions = new Set(["price.edit", "settings.manage"]);
-    await request(app).patch("/shop-1/customers/customer-1").send({ pricingType: "RETAIL" }).expect(200);
     await request(app).patch("/shop-1/customers/customer-1").send({ creditLimitOverride: 500_000, paymentTermsDaysOverride: 15 }).expect(200);
-    expect(mocks.update).toHaveBeenCalledTimes(2);
+    expect(mocks.update).toHaveBeenCalledTimes(1);
   });
 });

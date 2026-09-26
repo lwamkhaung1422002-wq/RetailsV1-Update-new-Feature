@@ -9,7 +9,7 @@ import { allocateRefund, effectiveOrderTotal, remainingCancellationSlices, remai
 import { recordInventoryMovement, setInventoryReservation } from "../lib/inventory-domain.js";
 import { prisma } from "../lib/prisma.js";
 import { resolvePrice } from "../lib/pricing-domain.js";
-import { customerPricing } from "../lib/customer-pricing.js";
+import { wholesalePriceGroupId } from "../lib/customer-pricing.js";
 import { creditDueAt, effectiveCustomerCredit, loadCustomerCredit } from "../lib/customer-credit.js";
 import { buildReceiptReadModel } from "../lib/receipt-read-model.js";
 import { historicalReturnedValue } from "../lib/sale-exchange.js";
@@ -502,10 +502,10 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
       }
 
       const customer = customerId
-        ? await tx.customer.findFirst({ where: { id: customerId, shopId }, include: { priceGroup: true } })
+        ? await tx.customer.findFirst({ where: { id: customerId, shopId } })
         : null;
       if (customerId && !customer) throw notFound("Customer not found.");
-      const pricingCustomer = customer ? customerPricing(customer) : { pricingType: "RETAIL", priceGroupId: null };
+      const priceGroupId = customer ? await wholesalePriceGroupId(tx, shopId) : null;
 
       for (const item of input.items) {
         const product = await tx.product.findFirst({
@@ -616,7 +616,7 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
           productId: product.id,
           variantId: variant?.id,
           productUnitId: productUnit?.id,
-          priceGroupId: pricingCustomer.priceGroupId,
+          priceGroupId,
           quantity: enteredQuantity,
           channel: input.source?.toUpperCase() || "ALL",
           manualDiscount,

@@ -51,7 +51,6 @@ function CustomerDetailsContent({ customer, report, reportError, isMobile }) {
         <InfoRow label="Phone" value={customer.phone || "—"} />
         <InfoRow label="Address" value={customer.address || "—"} />
         <InfoRow label="City" value={customer.city || "—"} />
-        <InfoRow label="Pricing Type" value={customer.pricingType === "WHOLESALE" ? "Wholesale" : "Retail"} />
       </Section>
       <Section title="Commercial Terms">
         <TermRow label="Credit Limit" value={amount(customer.effectiveCreditLimit)} source={customer.creditLimitOverride == null ? "Shop Default" : "Custom"} />
@@ -92,7 +91,7 @@ export default function CustomerDetailsPage({ customerId: selectedCustomerId, on
   const api = usePosApi();
   const queryClient = useQueryClient();
   const { shop, hasPermission } = useAuth();
-  const canEdit = hasPermission("sale.create") || hasPermission("price.edit") || hasPermission("settings.manage");
+  const canEdit = hasPermission("sale.create") || hasPermission("settings.manage");
   const canDelete = hasPermission("settings.manage");
   const [customer, setCustomer] = useState(null);
   const [loadedId, setLoadedId] = useState(null);

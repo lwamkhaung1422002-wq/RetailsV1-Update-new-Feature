@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
-import { ensureWholesalePriceGroup } from "../lib/customer-pricing.js";
+import { ensureWholesalePriceGroup, wholesalePriceGroupId } from "../lib/customer-pricing.js";
 import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import {
   activateDuePriceEntries,
@@ -82,6 +82,7 @@ const promotionUpdateInput = promotionInput.partial().extend({
   state: z.enum(["DRAFT", "SCHEDULED", "PAUSED", "CANCELLED"]).optional(),
 });
 const resolveInput = priceTargetInput.extend({
+  customerId: z.string().min(1).optional().nullable(),
   priceGroupId: z.string().optional().nullable(),
   quantity: z.coerce.number().positive().default(1),
   channel: z.string().trim().min(1).default("ALL"),
@@ -460,7 +461,13 @@ pricingRouter.post("/:shopId/prices/bulk", async (request, response, next) => {
 pricingRouter.post("/:shopId/pricing/resolve", async (request, response, next) => {
   try {
     const auth = getAuthUser(request); const { shopId } = shopParams.parse(request.params); const input = resolveInput.parse(request.body); await assertUserOwnsShop(auth.id, shopId);
-    response.json({ pricing: await resolvePrice(prisma, shopId, { ...input, quantity: new Prisma.Decimal(input.quantity), activateDueEntries: false }) });
+    const { customerId, ...priceInput } = input;
+    let priceGroupId = input.priceGroupId;
+    if (customerId !== undefined) {
+      if (customerId && !await prisma.customer.findFirst({ where: { id: customerId, shopId }, select: { id: true } })) throw notFound("Customer not found.");
+      priceGroupId = customerId ? await wholesalePriceGroupId(prisma, shopId) : null;
+    }
+    response.json({ pricing: await resolvePrice(prisma, shopId, { ...priceInput, priceGroupId, quantity: new Prisma.Decimal(input.quantity), activateDueEntries: false }) });
   } catch (error) { next(error); }
 });
 

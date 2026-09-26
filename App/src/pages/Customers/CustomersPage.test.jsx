@@ -179,6 +179,15 @@ describe("Customers page", () => {
     await waitFor(() => expect(mocks.api.customers.update).toHaveBeenCalledWith("customer-1", { name: "Aye Aye Win", phone: "091111", address: "Main Road", city: "Yangon" }));
   });
 
+  it("omits Pricing Type when adding a customer and sends only existing contact and credit fields", async () => {
+    renderDialog();
+    expect(screen.queryByLabelText("Pricing Type")).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Customer Name/), { target: { value: "Su Su" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.api.customers.create).toHaveBeenCalledWith(expect.objectContaining({ name: "Su Su" })));
+    expect(mocks.api.customers.create.mock.calls[0][0]).not.toHaveProperty("pricingType");
+  });
+
   it("keeps explicit zero overrides in the edit dialog but moves the report out", async () => {
     renderDialog(mocks.customers[0]);
     expect(screen.queryByText("Credit Summary")).toBeNull();
@@ -193,16 +202,25 @@ describe("Customers page", () => {
     await waitFor(() => expect(mocks.api.customers.update).toHaveBeenCalledWith("customer-1", expect.objectContaining({ creditLimitOverride: 0, paymentTermsDaysOverride: 0 })));
   });
 
-  it("lets price.edit change Pricing Type without submitting credit policy", async () => {
+  it("omits Pricing Type when editing and does not send legacy classification", async () => {
     mocks.permissions = new Set(["sale.create", "price.edit"]);
     renderDialog(mocks.customers[0]);
-    expect(screen.getByLabelText("Pricing Type")).toBeTruthy();
+    expect(screen.queryByLabelText("Pricing Type")).toBeNull();
     expect(screen.queryByLabelText("Credit Limit")).toBeNull();
-    fireEvent.mouseDown(screen.getByLabelText("Pricing Type"));
-    fireEvent.click(screen.getByRole("option", { name: "Retail" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.api.customers.update).toHaveBeenCalledWith("customer-1", expect.objectContaining({ pricingType: "RETAIL" })));
+    await waitFor(() => expect(mocks.api.customers.update).toHaveBeenCalledWith("customer-1", expect.any(Object)));
+    expect(mocks.api.customers.update.mock.calls[0][1]).not.toHaveProperty("pricingType");
     expect(mocks.api.customers.update.mock.calls[0][1]).not.toHaveProperty("creditLimitOverride");
+  });
+
+  it("does not show an empty Edit action to a price.edit-only user", async () => {
+    mocks.permissions = new Set(["price.edit"]);
+    renderRoutes();
+    expect(screen.queryByRole("button", { name: "Add Customer" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions for Aye Aye" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View Aye Aye" }));
+    const details = await screen.findByRole("dialog", { name: "Customer Details" });
+    expect(within(details).queryByRole("button", { name: "Edit" })).toBeNull();
   });
 
   it("lets settings.manage change credit policy without submitting contact or pricing fields", async () => {
@@ -229,6 +247,7 @@ describe("Customers page", () => {
     await waitFor(() => expect(screen.getByText("Customer Information")).toBeTruthy());
     await waitFor(() => expect(screen.getByText("No tracked credit payment history yet.")).toBeTruthy());
     expect(screen.getByText("Commercial Terms")).toBeTruthy();
+    expect(screen.queryByText("Pricing Type")).toBeNull();
     expect(screen.getAllByText("Shop Default")).toHaveLength(2);
     expect(screen.queryByText("Limit Source")).toBeNull();
     expect(screen.queryByText("Terms Source")).toBeNull();
@@ -277,10 +296,10 @@ describe("Customers page", () => {
     await waitFor(() => expect(screen.getByText("Customer Information")).toBeTruthy());
     expect(screen.getByLabelText("Back to Customers")).toBeTruthy();
     expect(screen.getByText("Customer Details")).toBeTruthy();
-    expect(screen.getAllByText("Wholesale")).toHaveLength(1);
+    expect(screen.queryByText("Pricing Type")).toBeNull();
     expect(screen.getAllByText("091111")).toHaveLength(1);
     const info = screen.getByText("Customer Information").closest(".MuiCard-root");
-    expect(info.contains(screen.getByText("Wholesale"))).toBe(true);
+    expect(within(info).queryByText("Pricing Type")).toBeNull();
     expect(info.contains(screen.getByText("091111"))).toBe(true);
     expect(screen.getByText("Name")).toBeTruthy();
     expect(screen.queryByText("Limit Source")).toBeNull();
