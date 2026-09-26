@@ -40,14 +40,14 @@ export async function createProductUnits(tx: Tx, shopId: string, productId: stri
   for (const unit of units) {
     await tx.productUnit.create({ data: {
       productId, unitId: unit.unitId, conversionFactor: String(unit.conversionFactor), isBase: unit.isBase ?? false,
-      canSell: unit.canSell ?? true, canPurchase: unit.canPurchase ?? true,
+      canSell: true, canPurchase: true,
       ...(unit.minimumOrderQty !== undefined ? { minimumOrderQty: String(unit.minimumOrderQty) } : {}),
     } });
   }
 }
 
 export async function reconcileProductUnits(tx: Tx, shopId: string, productId: string, units: ProductUnitInput[]): Promise<void> {
-  const existing = await tx.productUnit.findMany({ where: { productId } });
+  const existing = await tx.productUnit.findMany({ where: { productId }, include: { unit: { select: { name: true } } } });
   await validateProductUnits(tx, shopId, units, new Set(existing.map((unit) => unit.unitId)));
   const oldBase = existing.find((unit) => unit.isBase);
   const newBase = units.find((unit) => unit.isBase)!;
@@ -63,12 +63,29 @@ export async function reconcileProductUnits(tx: Tx, shopId: string, productId: s
     if (history.some(Boolean)) throw badRequest("The base unit cannot change after inventory, sale, or purchase activity.");
   }
 
+  for (const previous of existing.filter((unit) => !units.some((next) => next.unitId === unit.unitId))) {
+    if (!previous.isBase && !previous.canSell && !previous.canPurchase) continue;
+    const dependencies = await Promise.all([
+      tx.orderItem.count({ where: { productId, unitId: previous.unitId } }),
+      tx.purchaseItem.count({ where: { productId, unitId: previous.unitId } }),
+      tx.inventoryMovement.count({ where: { shopId, productId, unitId: previous.unitId } }),
+      tx.productBarcode.count({ where: { productUnitId: previous.id, ...(previous.isBase && oldBase?.unitId !== newBase.unitId ? { NOT: { shopId, productId, status: "ACTIVE", isPrimary: true } } : {}) } }),
+      tx.priceTier.count({ where: { productUnitId: previous.id } }),
+      tx.priceEntry.count({ where: { productUnitId: previous.id } }),
+      tx.promotion.count({ where: { productUnitId: previous.id } }),
+    ]);
+    if (dependencies.some(Boolean)) throw badRequest(`${previous.unit.name} has transaction or configuration history and cannot be removed.`);
+  }
+
   let newBaseId: string | null = null;
   for (const unit of units) {
     const previous = existing.find((item) => item.unitId === unit.unitId);
+    if (previous && !previous.isBase && !previous.canSell && !previous.canPurchase) {
+      throw badRequest(`${previous.unit.name} is a historical-only unit and cannot be edited.`);
+    }
     const data = {
       conversionFactor: String(unit.conversionFactor), isBase: unit.isBase ?? false,
-      canSell: unit.canSell ?? true, canPurchase: unit.canPurchase ?? true,
+      canSell: true, canPurchase: true,
       minimumOrderQty: unit.minimumOrderQty === undefined ? null : String(unit.minimumOrderQty),
     };
     const saved = previous
@@ -80,19 +97,7 @@ export async function reconcileProductUnits(tx: Tx, shopId: string, productId: s
     await tx.productBarcode.updateMany({ where: { shopId, productId, status: "ACTIVE", isPrimary: true }, data: { productUnitId: newBaseId } });
   }
   for (const previous of existing.filter((unit) => !units.some((next) => next.unitId === unit.unitId))) {
-    const dependencies = await Promise.all([
-      tx.orderItem.count({ where: { productId, unitId: previous.unitId } }),
-      tx.purchaseItem.count({ where: { productId, unitId: previous.unitId } }),
-      tx.inventoryMovement.count({ where: { shopId, productId, unitId: previous.unitId } }),
-      tx.productBarcode.count({ where: { productUnitId: previous.id } }),
-      tx.priceTier.count({ where: { productUnitId: previous.id } }),
-      tx.priceEntry.count({ where: { productUnitId: previous.id } }),
-      tx.promotion.count({ where: { productUnitId: previous.id } }),
-    ]);
-    if (dependencies.some(Boolean)) {
-      await tx.productUnit.update({ where: { id: previous.id }, data: { isBase: false, canSell: false, canPurchase: false } });
-    } else {
-      await tx.productUnit.delete({ where: { id: previous.id } });
-    }
+    if (!previous.isBase && !previous.canSell && !previous.canPurchase) continue;
+    await tx.productUnit.delete({ where: { id: previous.id } });
   }
 }

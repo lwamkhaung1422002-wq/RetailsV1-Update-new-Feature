@@ -10,11 +10,11 @@ function fixture() {
   type SavedUnit = { id: string; productId: string; unitId: string; conversionFactor: string; isBase: boolean; canSell: boolean; canPurchase: boolean; minimumOrderQty: string | null };
   const units: SavedUnit[] = [];
   const barcodes = [{ productId: "product", productUnitId: "", isPrimary: true, status: "ACTIVE" }];
-  const state = { inventoryHistory: 0, saleHistory: 0, purchaseHistory: 0, inactiveUnitIds: new Set<string>(), usedMovementUnitIds: new Set<string>(), usedSaleUnitIds: new Set<string>(), usedPurchaseUnitIds: new Set<string>(), pricingUnitIds: new Set<string>() };
+  const state = { inventoryHistory: 0, saleHistory: 0, purchaseHistory: 0, inactiveUnitIds: new Set<string>(), usedMovementUnitIds: new Set<string>(), usedSaleUnitIds: new Set<string>(), usedPurchaseUnitIds: new Set<string>(), usedBarcodeUnitIds: new Set<string>(), usedTierUnitIds: new Set<string>(), usedPriceEntryUnitIds: new Set<string>(), usedPromotionUnitIds: new Set<string>() };
   const tx = {
     unitOfMeasure: { findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, precision: 0, isActive: !state.inactiveUnitIds.has(id) })).filter((unit) => ["piece", "pack", "carton"].includes(unit.id)) },
     productUnit: {
-      findMany: async () => units.map((unit) => ({ ...unit })),
+      findMany: async () => units.map((unit) => ({ ...unit, unit: { name: unit.unitId } })),
       create: async ({ data }: { data: Omit<SavedUnit, "id"> }) => {
         const saved = { ...data, minimumOrderQty: data.minimumOrderQty ?? null, id: `unit-${units.length + 1}` };
         units.push(saved);
@@ -31,7 +31,7 @@ function fixture() {
     },
     productBarcode: {
       updateMany: async ({ data }: { data: { productUnitId: string } }) => { barcodes[0]!.productUnitId = data.productUnitId; },
-      count: async ({ where }: { where: { productUnitId: string } }) => barcodes.filter((barcode) => barcode.productUnitId === where.productUnitId).length,
+      count: async ({ where }: { where: { productUnitId: string; NOT?: unknown } }) => Number(state.usedBarcodeUnitIds.has(where.productUnitId)) + barcodes.filter((barcode) => barcode.productUnitId === where.productUnitId && !where.NOT).length,
     },
     inventoryBatch: { count: async () => state.inventoryHistory },
     inventoryMovement: { count: async ({ where }: { where: { unitId?: string } }) => where.unitId ? Number(state.usedMovementUnitIds.has(where.unitId)) : state.inventoryHistory },
@@ -39,9 +39,9 @@ function fixture() {
     inventoryReservation: { count: async () => state.inventoryHistory },
     orderItem: { count: async ({ where }: { where: { unitId?: string } }) => where.unitId ? Number(state.usedSaleUnitIds.has(where.unitId)) : state.saleHistory },
     purchaseItem: { count: async ({ where }: { where: { unitId?: string } }) => where.unitId ? Number(state.usedPurchaseUnitIds.has(where.unitId)) : state.purchaseHistory },
-    priceTier: { count: async ({ where }: { where: { productUnitId: string } }) => Number(state.pricingUnitIds.has(where.productUnitId)) },
-    priceEntry: { count: async ({ where }: { where: { productUnitId: string } }) => Number(state.pricingUnitIds.has(where.productUnitId)) },
-    promotion: { count: async ({ where }: { where: { productUnitId: string } }) => Number(state.pricingUnitIds.has(where.productUnitId)) },
+    priceTier: { count: async ({ where }: { where: { productUnitId: string } }) => Number(state.usedTierUnitIds.has(where.productUnitId)) },
+    priceEntry: { count: async ({ where }: { where: { productUnitId: string } }) => Number(state.usedPriceEntryUnitIds.has(where.productUnitId)) },
+    promotion: { count: async ({ where }: { where: { productUnitId: string } }) => Number(state.usedPromotionUnitIds.has(where.productUnitId)) },
   } as unknown as Prisma.TransactionClient;
   const create = (input: ProductUnitInput[]) => createProductUnits(tx, "shop", "product", input);
   const edit = (input: ProductUnitInput[]) => reconcileProductUnits(tx, "shop", "product", input);
@@ -69,7 +69,7 @@ describe("product unit configuration", () => {
     expect(sample.units).toHaveLength(0);
   });
 
-  it("adds a unit and updates conversion, MOQ and availability without changing old snapshots", async () => {
+  it("keeps active units sellable and purchasable when updating conversion and MOQ", async () => {
     const sample = fixture();
     await sample.create([piece, carton]);
     const historicalSale = { enteredQuantity: "5", conversionFactor: "24", baseQuantity: "120" };
@@ -78,7 +78,7 @@ describe("product unit configuration", () => {
     sample.state.usedPurchaseUnitIds.add("carton");
     await sample.edit([piece, pack, { ...carton, conversionFactor: 30, minimumOrderQty: 4, canSell: false, canPurchase: false }]);
     expect(sample.units.find((unit) => unit.unitId === "pack")?.conversionFactor).toBe("6");
-    expect(sample.units.find((unit) => unit.unitId === "carton")).toMatchObject({ conversionFactor: "30", minimumOrderQty: "4", canSell: false, canPurchase: false });
+    expect(sample.units.find((unit) => unit.unitId === "carton")).toMatchObject({ conversionFactor: "30", minimumOrderQty: "4", canSell: true, canPurchase: true });
     expect(historicalSale).toEqual({ enteredQuantity: "5", conversionFactor: "24", baseQuantity: "120" });
     expect(historicalPurchase).toEqual({ enteredQuantity: "10", conversionFactor: "24", baseQuantity: "240" });
   });
@@ -101,21 +101,38 @@ describe("product unit configuration", () => {
     expect(sample.barcodes[0]!.productUnitId).toBe(sample.units[0]!.id);
   });
 
-  it("preserves a used removed unit as unavailable and deletes an unused removed unit", async () => {
+  it("deletes an unused additional unit", async () => {
     const sample = fixture();
     await sample.create([piece, pack, carton]);
-    sample.state.usedSaleUnitIds.add("carton");
     await sample.edit([piece]);
     expect(sample.units.find((unit) => unit.unitId === "pack")).toBeUndefined();
-    expect(sample.units.find((unit) => unit.unitId === "carton")).toMatchObject({ canSell: false, canPurchase: false, isBase: false });
+    expect(sample.units.find((unit) => unit.unitId === "carton")).toBeUndefined();
   });
 
-  it("preserves a removed unit used by stock-in history", async () => {
+  it.each(["sale", "purchase", "movement", "barcode", "tier", "price entry", "promotion"])("rejects removal with %s dependency without disabling or deleting", async (kind) => {
     const sample = fixture();
     await sample.create([piece, carton]);
-    sample.state.usedMovementUnitIds.add("carton");
-    await sample.edit([piece]);
+    const saved = sample.units.find((unit) => unit.unitId === "carton")!;
+    if (kind === "sale") sample.state.usedSaleUnitIds.add("carton");
+    if (kind === "purchase") sample.state.usedPurchaseUnitIds.add("carton");
+    if (kind === "movement") sample.state.usedMovementUnitIds.add("carton");
+    if (kind === "barcode") sample.state.usedBarcodeUnitIds.add(saved.id);
+    if (kind === "tier") sample.state.usedTierUnitIds.add(saved.id);
+    if (kind === "price entry") sample.state.usedPriceEntryUnitIds.add(saved.id);
+    if (kind === "promotion") sample.state.usedPromotionUnitIds.add(saved.id);
+    await expect(sample.edit([piece])).rejects.toThrow("carton has transaction or configuration history and cannot be removed.");
+    expect(sample.units.find((unit) => unit.unitId === "carton")).toMatchObject({ canSell: true, canPurchase: true, isBase: false });
+  });
+
+  it("leaves legacy false/false historical-only units unchanged when saving active units", async () => {
+    const sample = fixture();
+    await sample.create([piece, carton]);
+    const legacy = sample.units.find((unit) => unit.unitId === "carton")!;
+    legacy.canSell = false;
+    legacy.canPurchase = false;
+    await sample.edit([piece, pack]);
     expect(sample.units.find((unit) => unit.unitId === "carton")).toMatchObject({ canSell: false, canPurchase: false });
+    await expect(sample.edit([piece, carton])).rejects.toThrow("historical-only unit");
   });
 
   it("preserves an already-associated inactive UOM but cannot add a new inactive UOM", async () => {

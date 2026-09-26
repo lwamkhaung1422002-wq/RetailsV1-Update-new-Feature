@@ -378,7 +378,15 @@ productsRouter.get("/:shopId/products/:productId", async (request, response, nex
     });
     if (!product) throw notFound("Product not found.");
     const currentStock = product.balances.reduce((total, balance) => total + Number(balance.onHand ?? 0), 0);
-    response.json({ product: { ...product, currentStock }, activeBarcode: product.barcodes.find((barcode) => barcode.status === "ACTIVE" && barcode.isPrimary) ?? null, hasSaleHistory: product._count.orderItems > 0 });
+    const baseUnitHistory = await Promise.all([
+      prisma.inventoryBatch.count({ where: { shopId, productId } }),
+      prisma.inventoryMovement.count({ where: { shopId, productId } }),
+      prisma.inventoryBalance.count({ where: { shopId, productId } }),
+      prisma.inventoryReservation.count({ where: { shopId, productId } }),
+      prisma.orderItem.count({ where: { productId } }),
+      prisma.purchaseItem.count({ where: { productId } }),
+    ]);
+    response.json({ product: { ...product, currentStock }, activeBarcode: product.barcodes.find((barcode) => barcode.status === "ACTIVE" && barcode.isPrimary) ?? null, hasSaleHistory: product._count.orderItems > 0, baseUnitLocked: baseUnitHistory.some(Boolean) });
   } catch (error) { next(error); }
 });
 
