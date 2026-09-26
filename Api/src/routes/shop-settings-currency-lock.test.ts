@@ -2,10 +2,10 @@ import express from "express";
 import request from "supertest";
 import { expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ assertUserOwnsShop: vi.fn() }));
+const mocks = vi.hoisted(() => ({ assertShopAccess: vi.fn() }));
 
 vi.mock("../lib/prisma.js", () => ({ prisma: {} }));
-vi.mock("../lib/shop-access.js", () => ({ assertUserOwnsShop: mocks.assertUserOwnsShop }));
+vi.mock("../lib/shop-access.js", () => ({ assertShopAccess: mocks.assertShopAccess }));
 vi.mock("../middleware/auth.middleware.js", () => ({
   requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(),
   getAuthUser: () => ({ id: "user-1" }),
@@ -23,6 +23,6 @@ it("rejects attempts to change a shop base currency after creation", async () =>
     .send({ currencyCode: "USD" })
     .expect(409);
 
-  expect(mocks.assertUserOwnsShop).toHaveBeenCalledWith("user-1", "shop-1");
+  expect(mocks.assertShopAccess).toHaveBeenCalledWith("user-1", "shop-1");
   expect(response.body.message).toBe("Shop base currency cannot be changed after the shop is created.");
 });

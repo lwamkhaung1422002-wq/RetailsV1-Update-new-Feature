@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { assertUserOwnsShop } from "../lib/shop-access.js";
+import { assertShopAccess, assertShopPermission, assertUserOwnsShop, hasShopPermission } from "../lib/shop-access.js";
+import type { ShopAccess, ShopPermission } from "../lib/shop-access.js";
 import { effectiveOrderTotal } from "../lib/order-return-refund.js";
 import { customerPricing, ensureWholesalePriceGroup } from "../lib/customer-pricing.js";
 import { effectiveCustomerCredit, loadCustomerCredit } from "../lib/customer-credit.js";
@@ -27,11 +28,24 @@ const customerSchema = z.object({
 });
 
 const updateCustomerSchema = customerSchema.partial();
-const customerView = <T extends { priceGroupId: string | null; priceGroup?: { name: string; isActive: boolean } | null; creditLimitOverride?: number | null; paymentTermsDaysOverride?: number | null }>(customer: T, settings: { defaultCreditLimit?: number; defaultPaymentTermsDays?: number } | null) => ({
-  ...customer,
-  ...customerPricing(customer),
-  ...effectiveCustomerCredit(customer, settings),
-});
+const customerView = <T extends { priceGroupId: string | null; priceGroup?: { name: string; isActive: boolean } | null; creditLimitOverride?: number | null; paymentTermsDaysOverride?: number | null; _count?: { orders: number } }>(customer: T, settings: { defaultCreditLimit?: number; defaultPaymentTermsDays?: number } | null) => {
+  const { _count, ...details } = customer;
+  return {
+    ...details,
+    ...customerPricing(customer),
+    ...effectiveCustomerCredit(customer, settings),
+    hasHistory: (_count?.orders ?? 0) > 0,
+  };
+};
+function requirePermission(access: ShopAccess, permission: ShopPermission) {
+  if (hasShopPermission(access, permission)) return;
+  throw Object.assign(new Error("You do not have permission for this action."), { name: "ForbiddenError" });
+}
+function assertCustomerFields(access: ShopAccess, input: z.infer<typeof updateCustomerSchema>) {
+  if (["name", "phone", "email", "address", "city", "notes"].some((field) => field in input)) requirePermission(access, "sale.create");
+  if ("pricingType" in input) requirePermission(access, "price.edit");
+  if ("creditLimitOverride" in input || "paymentTermsDaysOverride" in input) requirePermission(access, "settings.manage");
+}
 const listQuerySchema = z.object({
   search: z.string().trim().optional(),
   sort: z.enum(["createdAt", "name"]).default("createdAt"),
@@ -57,7 +71,7 @@ customersRouter.get("/:shopId/customers", async (request, response, next) => {
       { email: { contains: query.search, mode: "insensitive" as const } },
     ] } : {}) };
     const [customers, total] = await prisma.$transaction([
-      prisma.customer.findMany({ where, include: { priceGroup: true }, orderBy: { [query.sort]: query.direction }, skip: (query.page - 1) * query.pageSize, take: query.pageSize }),
+      prisma.customer.findMany({ where, include: { priceGroup: true, _count: { select: { orders: true } } }, orderBy: { [query.sort]: query.direction }, skip: (query.page - 1) * query.pageSize, take: query.pageSize }),
       prisma.customer.count({ where }),
     ]);
     const settings = await prisma.shopSetting.findUnique({ where: { shopId } });
@@ -111,7 +125,8 @@ customersRouter.post("/:shopId/customers", async (request, response, next) => {
     const { shopId } = paramsSchema.parse(request.params);
     const input = customerSchema.parse(request.body);
 
-    await assertUserOwnsShop(authUser.id, shopId);
+    const access = await assertShopPermission(authUser.id, shopId, "sale.create");
+    assertCustomerFields(access, input);
 
     const wholesaleGroup = input.pricingType === "WHOLESALE" ? await ensureWholesalePriceGroup(prisma, shopId) : null;
     const settings = await prisma.shopSetting.findUnique({ where: { shopId } });
@@ -130,7 +145,7 @@ customersRouter.post("/:shopId/customers", async (request, response, next) => {
 
     const customer = await prisma.customer.create({
       data,
-      include: { priceGroup: true },
+      include: { priceGroup: true, _count: { select: { orders: true } } },
     });
 
     response.status(201).json({ customer: customerView(customer, settings) });
@@ -146,7 +161,8 @@ customersRouter.patch("/:shopId/customers/:customerId", async (request, response
     const customerId = z.string().min(1).parse(request.params.customerId);
     const input = updateCustomerSchema.parse(request.body);
 
-    await assertUserOwnsShop(authUser.id, shopId);
+    const access = await assertShopAccess(authUser.id, shopId);
+    assertCustomerFields(access, input);
 
     const existingCustomer = await prisma.customer.findFirst({
       where: { id: customerId, shopId },
@@ -176,13 +192,28 @@ customersRouter.patch("/:shopId/customers/:customerId", async (request, response
     const customer = await prisma.customer.update({
       where: { id: customerId },
       data,
-      include: { priceGroup: true },
+      include: { priceGroup: true, _count: { select: { orders: true } } },
     });
 
     response.status(200).json({ customer: customerView(customer, settings) });
   } catch (error) {
     next(error);
   }
+});
+
+customersRouter.get("/:shopId/customers/:customerId", async (request, response, next) => {
+  try {
+    const authUser = getAuthUser(request);
+    const { shopId } = paramsSchema.parse(request.params);
+    const customerId = z.string().min(1).parse(request.params.customerId);
+    await assertUserOwnsShop(authUser.id, shopId);
+    const [customer, settings] = await Promise.all([
+      prisma.customer.findFirst({ where: { id: customerId, shopId }, include: { priceGroup: true, _count: { select: { orders: true } } } }),
+      prisma.shopSetting.findUnique({ where: { shopId } }),
+    ]);
+    if (!customer) throw Object.assign(new Error("Customer not found."), { name: "NotFoundError" });
+    response.status(200).json({ customer: customerView(customer, settings) });
+  } catch (error) { next(error); }
 });
 
 customersRouter.get("/:shopId/customers/:customerId/credit-report", async (request, response, next) => {
@@ -212,7 +243,7 @@ customersRouter.delete("/:shopId/customers/:customerId", async (request, respons
     const { shopId } = paramsSchema.parse(request.params);
     const customerId = z.string().min(1).parse(request.params.customerId);
 
-    await assertUserOwnsShop(authUser.id, shopId);
+    await assertShopPermission(authUser.id, shopId, "settings.manage");
 
     const existingCustomer = await prisma.customer.findFirst({
       where: { id: customerId, shopId },
@@ -227,9 +258,9 @@ customersRouter.delete("/:shopId/customers/:customerId", async (request, respons
 
     await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Customer" WHERE "id" = ${customerId} AND "shopId" = ${shopId} FOR UPDATE`;
-      const report = await loadCustomerCredit(tx, shopId, customerId, 0);
-      if (report.outstanding > 0) {
-        const error = new Error(`Customer has ${report.outstanding.toLocaleString()} outstanding and cannot be deleted.`);
+      const history = await tx.order.findFirst({ where: { shopId, customerId }, select: { id: true } });
+      if (history) {
+        const error = new Error("Customer has transaction history and cannot be deleted.");
         error.name = "ConflictError";
         throw error;
       }
@@ -238,6 +269,8 @@ customersRouter.delete("/:shopId/customers/:customerId", async (request, respons
 
     response.status(204).send();
   } catch (error) {
-    next(error);
+    if ((error as { code?: string }).code === "P2003") {
+      next(Object.assign(new Error("Customer has transaction history and cannot be deleted."), { name: "ConflictError" }));
+    } else next(error);
   }
 });

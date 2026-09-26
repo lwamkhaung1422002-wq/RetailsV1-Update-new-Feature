@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const mocks = vi.hoisted(() => ({ wholesalePricing: vi.fn(), saveWholesalePricing: vi.fn() }));
+const mocks = vi.hoisted(() => ({ wholesalePricing: vi.fn(), saveWholesalePricing: vi.fn(), canEdit: true }));
+vi.mock("../../context/AuthContext", () => ({ useAuth: () => ({ hasPermission: (permission) => permission === "price.edit" && mocks.canEdit }) }));
 vi.mock("../../hooks/useApiResource", () => {
   const api = { pricing: mocks };
   return { usePosApi: () => api };
@@ -15,6 +16,7 @@ const product = { id: "coke", name: "Coke", units: [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.canEdit = true;
   mocks.wholesalePricing.mockResolvedValue({ tiers: [] });
   mocks.saveWholesalePricing.mockResolvedValue({ tiers: [] });
 });
@@ -34,4 +36,13 @@ describe("Wholesale Pricing section", () => {
       productUnitId: "carton-unit", variantId: null, levels: [{ minimumQuantity: 5, unitPrice: 20500 }],
     }));
   }, 20000);
+
+  it("shows tiers read-only without price.edit", async () => {
+    mocks.canEdit = false;
+    mocks.wholesalePricing.mockResolvedValue({ tiers: [{ id: "tier-1", productUnitId: "piece-unit", variantId: null, minimumQuantity: 1, unitPrice: 1_000 }] });
+    render(<WholesalePricingSection product={product} />);
+    expect(await screen.findByLabelText("Minimum Qty")).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Save Wholesale Pricing" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add Price Level/ })).toBeNull();
+  });
 });

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { prisma } from "../lib/prisma.js";
-import { assertUserOwnsShop } from "../lib/shop-access.js";
+import { assertShopAccess, assertUserOwnsShop, hasShopPermission } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
 export const shopSettingsRouter = Router();
@@ -140,12 +140,15 @@ shopSettingsRouter.patch("/:shopId/settings", async (request, response, next) =>
   try {
     const authUser = getAuthUser(request);
     const { shopId } = paramsSchema.parse(request.params);
-    await assertUserOwnsShop(authUser.id, shopId);
+    const access = await assertShopAccess(authUser.id, shopId);
     if (Object.prototype.hasOwnProperty.call(request.body ?? {}, "currencyCode")) {
       response.status(409).json({ message: "Shop base currency cannot be changed after the shop is created." });
       return;
     }
     const input = catalogSettingsSchema.parse(request.body);
+    if ((input.defaultCreditLimit !== undefined || input.defaultPaymentTermsDays !== undefined) && !hasShopPermission(access, "settings.manage")) {
+      throw Object.assign(new Error("You do not have permission for this action."), { name: "ForbiddenError" });
+    }
 
     await ensureShopSetting(shopId);
 

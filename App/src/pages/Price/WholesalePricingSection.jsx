@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, IconButton, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import { useAuth } from "../../context/AuthContext";
 import { usePosApi } from "../../hooks/useApiResource";
 
 const sameTarget = (tier, unitId, variantId) => tier.productUnitId === unitId && (tier.variantId || "") === variantId;
 
 export default function WholesalePricingSection({ product }) {
   const api = usePosApi();
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("price.edit");
   const sellingUnits = useMemo(() => (product.units || []).filter((item) => item.canSell !== false && item.unit?.isActive !== false), [product.units]);
   const [unitId, setUnitId] = useState(() => sellingUnits.find((item) => item.isBase)?.id || sellingUnits[0]?.id || "");
   const [variantId, setVariantId] = useState("");
@@ -74,14 +77,14 @@ export default function WholesalePricingSection({ product }) {
     </Stack>
     <Stack spacing={1.25} sx={{ mt: 2 }}>
       {levels.map((level, index) => <Stack key={level.id || `new-${index}`} direction="row" spacing={1} alignItems="center">
-        <TextField fullWidth size="small" label="Minimum Qty" type="number" value={level.minimumQuantity} onChange={(event) => updateLevel(index, "minimumQuantity", event.target.value)} slotProps={{ htmlInput: { min: 0.001, step: "any" } }} />
-        <TextField fullWidth size="small" label={`Price / ${unitName}`} type="number" value={level.unitPrice} onChange={(event) => updateLevel(index, "unitPrice", event.target.value)} slotProps={{ htmlInput: { min: 0, step: 1 } }} />
-        <IconButton aria-label={`Remove price level ${index + 1}`} onClick={() => updateLevels((current) => current.filter((_, levelIndex) => levelIndex !== index))}><CloseRoundedIcon fontSize="small" /></IconButton>
+        <TextField fullWidth size="small" label="Minimum Qty" type="number" value={level.minimumQuantity} onChange={(event) => updateLevel(index, "minimumQuantity", event.target.value)} slotProps={{ htmlInput: { min: 0.001, step: "any" } }} disabled={!canEdit} />
+        <TextField fullWidth size="small" label={`Price / ${unitName}`} type="number" value={level.unitPrice} onChange={(event) => updateLevel(index, "unitPrice", event.target.value)} slotProps={{ htmlInput: { min: 0, step: 1 } }} disabled={!canEdit} />
+        {canEdit && <IconButton aria-label={`Remove price level ${index + 1}`} onClick={() => updateLevels((current) => current.filter((_, levelIndex) => levelIndex !== index))}><CloseRoundedIcon fontSize="small" /></IconButton>}
       </Stack>)}
     </Stack>
-    <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1, mt: 1.5 }}>
+    {canEdit && <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1, mt: 1.5 }}>
       <Button size="small" onClick={() => updateLevels((current) => [...current, { minimumQuantity: "", unitPrice: "" }])} disabled={loading || saving}>+ Add Price Level</Button>
       <Button variant="contained" onClick={() => void save()} disabled={loading || saving}>Save Wholesale Pricing</Button>
-    </Box>
+    </Box>}
   </Paper>;
 }

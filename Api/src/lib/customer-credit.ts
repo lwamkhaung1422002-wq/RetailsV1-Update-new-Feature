@@ -95,7 +95,7 @@ export async function loadCustomerCredit(db: CreditDb, shopId: string, customerI
     currentlyOverdue: overdue.length,
     averageDaysLate: late.length ? late.reduce((sum, invoice) => sum + invoice.daysLate, 0) / late.length : 0,
     longestDelay: Math.max(0, ...late.map((invoice) => invoice.daysLate), ...overdue.map((invoice) => invoice.daysLate)),
-    lastPayment: invoices.map((invoice) => invoice.lastPaymentAt).filter((value): value is Date => value !== null)
+    lastPayment: invoices.filter((invoice) => invoice.paymentTracking).map((invoice) => invoice.lastPaymentAt).filter((value): value is Date => value !== null)
       .sort((a, b) => b.getTime() - a.getTime())[0] ?? null,
     recentInvoices: invoices.filter((invoice) => invoice.paymentTracking).slice(0, 10).map(({ paymentTracking: _paymentTracking, lastPaymentAt: _lastPaymentAt, ...invoice }) => invoice),
   };

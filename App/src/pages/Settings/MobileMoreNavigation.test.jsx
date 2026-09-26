@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 
 const mocks = vi.hoisted(() => ({
@@ -82,17 +82,14 @@ describe("Mobile More navigation", () => {
     expect(screen.queryByText("Branches")).toBeNull();
   });
 
-  it("lets an authorized owner save shop customer-credit defaults in Settings", async () => {
+  it("keeps Customer Credit off Settings because Credit Defaults is on Customers", () => {
     setAccess({ role: "OWNER", isOwner: true, permissions: ["settings.manage"] });
+    const mobileView = renderAt(<SettingsPage />);
+    expect(screen.queryByText("Customer Credit")).toBeNull();
+    mobileView.unmount();
+    mocks.mobile = false;
     renderAt(<SettingsPage />);
-    fireEvent.click(screen.getByText("Customer Credit"));
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toBeTruthy();
-    await waitFor(() => expect(screen.getByLabelText("Default Credit Limit").disabled).toBe(false));
-    fireEvent.change(screen.getByLabelText("Default Credit Limit"), { target: { value: "2000000" } });
-    fireEvent.change(screen.getByLabelText("Default Payment Terms (days)"), { target: { value: "15" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(mocks.api.shop.updateSettings).toHaveBeenCalledWith({ defaultCreditLimit: 2_000_000, defaultPaymentTermsDays: 15 }));
+    expect(screen.queryByText("Customer Credit")).toBeNull();
   });
 
   it("shows Manager only authorized feature rows while preserving existing Staff access", () => {

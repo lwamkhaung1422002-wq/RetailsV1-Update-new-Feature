@@ -142,10 +142,12 @@ export function createPosApi({
     },
     customers: {
       list: (query) => shopRequest(`/customers${queryString(query)}`),
+      get: (id) => shopRequest(`/customers/${id}`),
       creditReport: (id) => shopRequest(`/customers/${id}/credit-report`),
       create: (body) => shopRequest("/customers", { method: "POST", body }),
       update: (id, body) =>
         shopRequest(`/customers/${id}`, { method: "PATCH", body }),
+      remove: (id) => shopRequest(`/customers/${id}`, { method: "DELETE" }),
     },
     purchases: {
       list: (query) => shopRequest(`/purchases${queryString(query)}`),

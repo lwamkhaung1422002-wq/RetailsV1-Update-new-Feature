@@ -2,9 +2,13 @@ import express from "express";
 import request from "supertest";
 import { beforeEach, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ upsert: vi.fn(), update: vi.fn() }));
+const mocks = vi.hoisted(() => ({ upsert: vi.fn(), update: vi.fn(), permissions: new Set(["settings.manage"]) }));
 vi.mock("../lib/prisma.js", () => ({ prisma: { shopSetting: { upsert: mocks.upsert, update: mocks.update } } }));
-vi.mock("../lib/shop-access.js", () => ({ assertUserOwnsShop: vi.fn() }));
+vi.mock("../lib/shop-access.js", () => ({
+  assertUserOwnsShop: vi.fn(),
+  assertShopAccess: async () => ({ isOwner: false, permissions: [...mocks.permissions] }),
+  hasShopPermission: (access: { permissions: string[] }, permission: string) => access.permissions.includes(permission),
+}));
 vi.mock("../middleware/auth.middleware.js", () => ({
   requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(),
   getAuthUser: () => ({ id: "owner-1" }),
@@ -19,6 +23,7 @@ app.use((error: Error, _request: express.Request, response: express.Response, _n
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.permissions = new Set(["settings.manage"]);
   const settings = { shopId: "shop-1", defaultCreditLimit: 0, defaultPaymentTermsDays: 30, option1Values: "[]", option2Values: "[]", paymentMethods: "[]" };
   mocks.upsert.mockResolvedValue(settings);
   mocks.update.mockImplementation(async ({ data }) => ({ ...settings, ...data }));
@@ -34,4 +39,12 @@ it("rejects negative limits and terms beyond the supported bound", async () => {
   await request(app).patch("/shop-1/settings").send({ defaultCreditLimit: -1 }).expect(400);
   await request(app).patch("/shop-1/settings").send({ defaultPaymentTermsDays: 3651 }).expect(400);
   expect(mocks.update).not.toHaveBeenCalled();
+});
+
+it("rejects Credit Defaults without settings.manage while preserving unrelated setting access", async () => {
+  mocks.permissions = new Set();
+  await request(app).patch("/shop-1/settings").send({ defaultCreditLimit: 5_000_000 }).expect(400);
+  await request(app).patch("/shop-1/settings").send({ defaultPaymentTermsDays: 15 }).expect(400);
+  expect(mocks.update).not.toHaveBeenCalled();
+  await request(app).patch("/shop-1/settings").send({ productLabel: "Item" }).expect(200);
 });

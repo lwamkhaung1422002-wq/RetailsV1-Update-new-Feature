@@ -48,6 +48,18 @@ describe("customer credit", () => {
     expect(result.recentInvoices[0]).toMatchObject({ status: "OVERDUE", finalPaidAt: null, daysLate: 5 });
   });
 
+  it("uses only payments on credit-tracked invoices for Last Credit Payment, including legacy credit", async () => {
+    const result = await loadCustomerCredit(db([
+      order("cash", 100_000, null, [{ id: "cash-payment", amount: 100_000, paidAt: date(20) }], false),
+      order("legacy-credit", 100_000, null, [{ id: "credit-payment", amount: 100_000, paidAt: date(15) }]),
+    ]), "shop-1", "customer-1", 100_000, date(20));
+    expect(result.lastPayment).toEqual(date(15));
+    expect(result.creditInvoices).toBe(0);
+    expect(result.paidOnTime).toBe(0);
+    expect(result.paidLate).toBe(0);
+    expect(result.recentInvoices.map((invoice) => invoice.status)).toEqual(["LEGACY"]);
+  });
+
   it("reduces receivables for returns without double-counting refunds", async () => {
     const returned = order("return", 100_000, date(10), [{ id: "payment", amount: 20_000, paidAt: date(5) }]);
     returned.items[0]!.quantity = 2;

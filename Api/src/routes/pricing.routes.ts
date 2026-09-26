@@ -16,7 +16,7 @@ import {
   resolvePrice,
 } from "../lib/pricing-domain.js";
 import { prisma } from "../lib/prisma.js";
-import { assertUserOwnsShop } from "../lib/shop-access.js";
+import { assertShopPermission, assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 import { barcodeSymbologies, internalBarcodeCandidate, normalizeBarcode, printableBarcodeCandidate, validateBarcode } from "../lib/barcode.js";
 
@@ -484,7 +484,7 @@ pricingRouter.put("/:shopId/wholesale-pricing/:productId", async (request, respo
     const auth = getAuthUser(request);
     const { shopId, productId } = shopParams.extend({ productId: z.string().min(1) }).parse(request.params);
     const input = wholesalePricingInput.parse(request.body);
-    await assertUserOwnsShop(auth.id, shopId);
+    await assertShopPermission(auth.id, shopId, "price.edit");
     const thresholds = input.levels.map((level) => new Prisma.Decimal(level.minimumQuantity));
     const submittedIds = input.levels.map((level) => level.id).filter((id): id is string => Boolean(id));
     if (new Set(submittedIds).size !== submittedIds.length) throw badRequest("Duplicate Wholesale price level ID.");

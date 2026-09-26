@@ -15,7 +15,7 @@ import {
   loadPricePage, loadProductDetailsPage, loadProductReportPage, loadRecordSupplierPaymentPage,
   loadReportPage, loadSalePage, loadSaleRecordPage, loadSalesReportPage, loadSettingsPage,
   loadShopDetailsPage, loadStockHistoryPage, loadStockPage, loadSupplierDetailsPage,
-  loadSupplierHistoryPage, loadSuppliersPage, loadCustomersPage, loadAddSupplierPage, loadStaffAccessPage, loadStaffLinkPage, loadBranchesPage, loadPaymentReportPage, loadOperationsPage,
+  loadSupplierHistoryPage, loadSuppliersPage, loadCustomersPage, loadCustomerDetailsPage, loadAddSupplierPage, loadStaffAccessPage, loadStaffLinkPage, loadBranchesPage, loadPaymentReportPage, loadOperationsPage,
 } from "./routeChunks";
 
 const AuthPage = lazy(loadAuthPage);
@@ -40,6 +40,7 @@ const SalesReport = lazy(loadSalesReportPage);
 const SaleRecord = lazy(loadSaleRecordPage);
 const Suppliers = lazy(loadSuppliersPage);
 const Customers = lazy(loadCustomersPage);
+const CustomerDetails = lazy(loadCustomerDetailsPage);
 const AddSupplier = lazy(loadAddSupplierPage);
 const RecordSupplierPayment = lazy(loadRecordSupplierPaymentPage);
 const SupplierDetails = lazy(loadSupplierDetailsPage);
@@ -91,6 +92,10 @@ const router = createBrowserRouter([
       {
         path: "customers",
         element: <RouteContent><Customers /></RouteContent>,
+      },
+      {
+        path: "customers/:customerId",
+        element: <RouteContent><CustomerDetails /></RouteContent>,
       },
       {
         path: "sale/:orderId",
