@@ -83,6 +83,7 @@ export function createPosApi({
     },
     units: {
       list: () => shopRequest("/units"),
+      create: (body) => shopRequest("/units", { method: "POST", body }),
     },
     inventory: {
       list: (query) => shopRequest(`/inventory${queryString(query)}`),

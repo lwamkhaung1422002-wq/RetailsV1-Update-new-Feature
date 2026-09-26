@@ -612,7 +612,7 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
           variantId: variant?.id,
           productUnitId: productUnit?.id,
           priceGroupId: customer?.priceGroupId,
-          quantity: baseQuantity,
+          quantity: enteredQuantity,
           channel: input.source?.toUpperCase() || "ALL",
           manualDiscount,
         });
@@ -769,6 +769,8 @@ async function createOrderInTransaction(tx: Prisma.TransactionClient, shopId: st
               ...prepared.pricing,
               priceResolvedAt: prepared.pricing.priceResolvedAt.toISOString(),
               productUnitId: prepared.productUnit?.id ?? null,
+              unitName: prepared.productUnit?.unit.name ?? null,
+              unitSymbol: prepared.productUnit?.unit.symbol ?? null,
             },
             regularUnitPrice: prepared.pricing.regularUnitPrice,
             tierUnitPrice: prepared.pricing.tierUnitPrice,

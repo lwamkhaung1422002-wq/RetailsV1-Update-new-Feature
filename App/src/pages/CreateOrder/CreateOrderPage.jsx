@@ -41,7 +41,7 @@ import BarcodeScannerDialog from "../../components/BarcodeScanner/BarcodeScanner
 import { usePosApi } from "../../hooks/useApiResource";
 import { useAllCustomersQuery, useProductsQuery } from "../../hooks/usePosQueries";
 import { queryKeys } from "../../lib/queryKeys";
-import { toPricedCartItem } from "../../lib/cartPricing";
+import { selectedSellingUnit, sellableUnits, toPricedCartItem, unitStockLimit } from "../../lib/cartPricing";
 import { resolveCheckoutPayment } from "../../lib/checkoutPayment";
 import { useAuth } from "../../context/AuthContext";
 import CustomerDialog from "../Customers/CustomerDialog";
@@ -77,7 +77,7 @@ function printReceipt(order, items, totals, method) {
   const rows = items
     .map(
       (item) =>
-        `<tr><td>${escapeHtml(item.name)} × ${item.quantity}</td><td>${formatMoney(item.price * item.quantity)}</td></tr>`,
+        `<tr><td>${escapeHtml(item.name)} × ${item.quantity} ${escapeHtml(selectedSellingUnit(item)?.unit?.symbol || "pcs")}</td><td>${formatMoney(item.price * item.quantity)}</td></tr>`,
     )
     .join("");
   popup.document.write(
@@ -167,7 +167,7 @@ function QuantityInput({ item, onQuantitySet, sx }) {
       return;
     }
     const quantity = Number(draft);
-    if (!Number.isInteger(quantity) || quantity < 0 || quantity > item.stock) {
+    if (!Number.isInteger(quantity) || quantity < 0 || quantity > unitStockLimit(item)) {
       setDraft(null);
       return;
     }
@@ -178,7 +178,7 @@ function QuantityInput({ item, onQuantitySet, sx }) {
   return <Box component="input" type="text" inputMode="numeric" pattern="[0-9]*" aria-label={`Quantity for ${item.name}`} value={value} onChange={(event) => { const nextValue = event.target.value; if (/^\d*$/.test(nextValue)) setDraft(nextValue); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); event.currentTarget.blur(); } }} sx={{ width: "100%", minWidth: 0, height: "100%", p: 0, border: 0, outline: 0, bgcolor: "transparent", color: "text.primary", textAlign: "center", font: "inherit", ...sx }} />;
 }
 
-const ProductCard = memo(function ProductCard({ item, onQuantityChange, onQuantitySet }) {
+const ProductCard = memo(function ProductCard({ item, onQuantityChange, onQuantitySet, onUnitChange }) {
   const lineTotal = item.price * item.quantity;
   const promotionText =
     item.promotion.type === "discount"
@@ -230,6 +230,9 @@ const ProductCard = memo(function ProductCard({ item, onQuantityChange, onQuanti
                 >
                   Stock: {item.stock} pcs
                 </Typography>
+                {sellableUnits(item).length > 1 && <TextField select size="small" label="Unit" value={selectedSellingUnit(item)?.id || ""} onChange={(event) => onUnitChange(item.id, event.target.value)} sx={{ mt: 1, minWidth: 115 }}>
+                  {sellableUnits(item).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.unit.name}</MenuItem>)}
+                </TextField>}
               </Box>
               <Box sx={{ textAlign: "right", flexShrink: 0 }}>
                 <Box
@@ -445,6 +448,12 @@ export default function CreateOrderPage() {
       setOrderError("Add at least one product before creating the order.");
       return;
     }
+    const belowMinimum = items.find((item) => Number(item.quantity) < Number(selectedSellingUnit(item)?.minimumOrderQty || 1));
+    if (belowMinimum) {
+      const unit = selectedSellingUnit(belowMinimum);
+      setOrderError(`Minimum order quantity is ${unit.minimumOrderQty} ${unit.unit.symbol}.`);
+      return;
+    }
     const customerError = checkoutCustomerError(paymentMethod, otherPayment, selectedCustomer?.id);
     if (customerError) {
       setOrderError(customerError);
@@ -468,6 +477,7 @@ export default function CreateOrderPage() {
         items: items.map((item) => ({
           productId: item.id,
           quantity: item.quantity,
+          ...(selectedSellingUnit(item) ? { unitId: selectedSellingUnit(item).unitId } : {}),
           unitPrice: item.price,
         })),
       });
@@ -506,7 +516,7 @@ export default function CreateOrderPage() {
   };
 
   const priceCartItem = useCallback(async (product, quantity) => {
-    const resolved = await api.pricing.resolve({ productId: product.id, quantity });
+    const resolved = await api.pricing.resolve({ productId: product.id, quantity, ...(selectedSellingUnit(product) ? { productUnitId: selectedSellingUnit(product).id } : {}) });
     return toPricedCartItem(product, quantity, resolved.pricing);
   }, [api]);
   const setQuantity = useCallback((id, quantity) => {
@@ -521,7 +531,7 @@ export default function CreateOrderPage() {
       commitItems(nextItems);
       return;
     }
-    if (quantity > item.stock) return;
+    if (quantity > unitStockLimit(item)) return;
 
     const nextItems = itemsRef.current.map((entry) =>
       entry.id === id ? { ...entry, quantity } : entry,
@@ -546,6 +556,22 @@ export default function CreateOrderPage() {
         setOrderError(error.message || "Promotion price could not be refreshed."),
       );
   }, [commitItems, nextPricingRevision, priceCartItem]);
+  const changeUnit = useCallback((id, productUnitId) => {
+    const item = itemsRef.current.find((entry) => entry.id === id);
+    if (!item || !sellableUnits(item).some((unit) => unit.id === productUnitId)) return;
+    const nextItem = { ...item, productUnitId };
+    const maxQuantity = unitStockLimit(nextItem);
+    if (maxQuantity < 1) { setOrderError("Insufficient stock for this unit."); return; }
+    const quantity = Math.min(item.quantity, maxQuantity);
+    const revision = nextPricingRevision(id);
+    pendingQuantityRef.current.delete(id);
+    commitItems(itemsRef.current.map((entry) => entry.id === id ? { ...nextItem, quantity } : entry));
+    void priceCartItem(nextItem, quantity).then((priced) => {
+      if (pricingRevisionRef.current.get(id) !== revision) return;
+      commitItems(itemsRef.current.map((entry) => entry.id === id ? priced : entry));
+      setOrderError("");
+    }).catch((error) => setOrderError(error.message || "Unit price could not be loaded."));
+  }, [commitItems, nextPricingRevision, priceCartItem]);
   const changeQuantity = useCallback((id, change) => {
     const item = itemsRef.current.find((current) => current.id === id);
     if (item) setQuantity(id, item.quantity + change);
@@ -561,21 +587,22 @@ export default function CreateOrderPage() {
     if (product.stock <= 0) return;
     const existing = itemsRef.current.find((item) => item.id === product.id);
     const requestedQuantity = quantityOverride ?? ((pendingQuantityRef.current.get(product.id) ?? existing?.quantity ?? 0) + 1);
-    const quantity = Math.min(product.stock, requestedQuantity);
+    const selectedProduct = existing && !initialPricing ? existing : { ...product, productUnitId: sellableUnits(product).find((unit) => unit.isBase)?.id || sellableUnits(product)[0]?.id };
+    const quantity = Math.min(unitStockLimit(selectedProduct), requestedQuantity);
+    if (quantity < 1) { setOrderError("Insufficient stock for this unit."); return; }
     const revision = nextPricingRevision(product.id);
     try {
       if (!existing && quantity === 1 && initialPricing) {
         pendingQuantityRef.current.delete(product.id);
-        commitItems([...itemsRef.current, toPricedCartItem(product, quantity, initialPricing)]);
+        commitItems([...itemsRef.current, toPricedCartItem(selectedProduct, quantity, initialPricing)]);
         setOrderError("");
         return;
       }
       pendingQuantityRef.current.set(product.id, quantity);
-      const priced = await priceCartItem(product, quantity);
+      const priced = await priceCartItem(selectedProduct, quantity);
       if (pricingRevisionRef.current.get(product.id) !== revision) return;
       const current = itemsRef.current;
       const currentItem = current.find((item) => item.id === product.id);
-      if (currentItem && currentItem.quantity !== quantity) return;
       pendingQuantityRef.current.delete(product.id);
       commitItems(currentItem ? current.map((item) => item.id === product.id ? priced : item) : [...current, priced]);
       setOrderError("");
@@ -645,6 +672,7 @@ export default function CreateOrderPage() {
         totals={totals}
         changeQuantity={changeQuantity}
         setQuantity={setQuantity}
+        changeUnit={changeUnit}
         paymentMethod={paymentMethod}
         setPaymentMethod={setPaymentMethod}
         amountReceived={amountReceived}
@@ -738,6 +766,7 @@ export default function CreateOrderPage() {
               item={item}
               onQuantityChange={changeQuantity}
               onQuantitySet={setQuantity}
+              onUnitChange={changeUnit}
             />
           ))}
         </Stack>
@@ -753,7 +782,7 @@ export default function CreateOrderPage() {
             <Stack spacing={1.1}>
               <SummaryRow
                 label="Total quantity"
-                value={`${totals.quantity} pcs`}
+                value={`${totals.quantity} ${items.some((item) => selectedSellingUnit(item) && !selectedSellingUnit(item).isBase) ? "units" : "pcs"}`}
               />
               <SummaryRow
                 label="Total"
@@ -1216,6 +1245,7 @@ export function DesktopCreateOrder({
   totals,
   changeQuantity,
   setQuantity,
+  changeUnit,
   paymentMethod,
   setPaymentMethod,
   amountReceived,
@@ -1266,10 +1296,7 @@ export function DesktopCreateOrder({
         .some((value) => String(value).toLowerCase().includes(query)),
   );
   const visibleItems = query
-    ? visibleCatalog.map((product) => ({
-        ...product,
-        quantity: items.find((item) => item.id === product.id)?.quantity || 0,
-      }))
+    ? visibleCatalog.map((product) => items.find((item) => item.id === product.id) || { ...product, quantity: 0 })
     : items;
   const updateDesktopQuantity = (id, delta) => {
     const existing = items.find((item) => item.id === id);
@@ -1286,7 +1313,7 @@ export function DesktopCreateOrder({
       return;
     }
     const product = catalog.find((item) => item.id === id);
-    if (product && quantity > 0 && quantity <= product.stock) addProduct(product, undefined, quantity);
+    if (product && quantity > 0 && quantity <= unitStockLimit(product)) addProduct(product, undefined, quantity);
   };
   const panelSx = {
     borderRadius: 2.5,
@@ -1368,6 +1395,7 @@ export function DesktopCreateOrder({
                         item={item}
                         onQuantityChange={updateDesktopQuantity}
                         onQuantitySet={setDesktopQuantity}
+                        onUnitChange={changeUnit}
                       />
                     ))}
               </Stack>
@@ -1383,7 +1411,7 @@ export function DesktopCreateOrder({
               <Stack spacing={1.15}>
                 <DesktopTotal
                   label="Total quantity"
-                  value={`${totals.quantity} pcs`}
+                  value={`${totals.quantity} ${items.some((item) => selectedSellingUnit(item) && !selectedSellingUnit(item).isBase) ? "units" : "pcs"}`}
                 />
                 <Divider />
                 <DesktopTotal
@@ -1518,7 +1546,7 @@ export function DesktopCreateOrder({
   );
 }
 
-export function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
+export function DesktopOrderItem({ item, onQuantityChange, onQuantitySet, onUnitChange }) {
   const subtotal = item.price * item.quantity;
   const promotionText =
     item.promotion.type === "discount"
@@ -1561,6 +1589,9 @@ export function DesktopOrderItem({ item, onQuantityChange, onQuantitySet }) {
         <Typography color="text.secondary" sx={{ fontSize: 14, mt: 0.55 }}>
           Stock: {item.stock} pcs
         </Typography>
+        {sellableUnits(item).length > 1 && <TextField select size="small" label="Unit" value={selectedSellingUnit(item)?.id || ""} onChange={(event) => onUnitChange(item.id, event.target.value)} sx={{ mt: 1, minWidth: 120 }}>
+          {sellableUnits(item).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.unit.name}</MenuItem>)}
+        </TextField>}
       </Box>
       <Box
         sx={{

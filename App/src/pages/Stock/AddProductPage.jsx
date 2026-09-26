@@ -7,12 +7,14 @@ import {
   AppBar,
   Box,
   Button,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
   Fab,
+  FormControlLabel,
   IconButton,
   InputAdornment,
   MenuItem,
@@ -85,6 +87,10 @@ export default function AddProductPage() {
   const [form, setForm] = useState(emptyForm);
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState([]);
+  const [additionalUnits, setAdditionalUnits] = useState([]);
+  const [unitEdited, setUnitEdited] = useState(false);
+  const [hasExistingUnits, setHasExistingUnits] = useState(false);
+  const [unitDialogTarget, setUnitDialogTarget] = useState(null);
   const [inventoryBatches, setInventoryBatches] = useState([]);
   const [activeBarcode, setActiveBarcode] = useState(null);
   const [activeShortCode, setActiveShortCode] = useState(null);
@@ -117,6 +123,14 @@ export default function AddProductPage() {
           const product = productResult.product;
           const baseUnit =
             product.units?.find((unit) => unit.isBase) || product.units?.[0];
+          setHasExistingUnits(Boolean(product.units?.length));
+          setAdditionalUnits((product.units || []).filter((unit) => !unit.isBase).map((unit) => ({
+            unitId: unit.unitId,
+            conversionFactor: String(unit.conversionFactor),
+            minimumOrderQty: unit.minimumOrderQty == null ? "" : String(unit.minimumOrderQty),
+            canSell: unit.canSell,
+            canPurchase: unit.canPurchase,
+          })));
           const shortCodeRecord = product.barcodes?.find(
             (item) =>
               item.status === "ACTIVE" &&
@@ -182,6 +196,20 @@ export default function AddProductPage() {
       setBarcodeDraft("");
       setBarcodeReservationId("");
     }
+    if (name === "unitId") setUnitEdited(true);
+  };
+  const updateAdditionalUnit = (index, patch) => {
+    setAdditionalUnits((current) => current.map((unit, unitIndex) => unitIndex === index ? { ...unit, ...patch } : unit));
+    setUnitEdited(true);
+  };
+  const createUnit = async (input) => {
+    const result = await api.units.create(input);
+    const created = result.unit;
+    setUnits((current) => [...current, created].sort((left, right) => left.name.localeCompare(right.name)));
+    if (unitDialogTarget === "base") setForm((current) => ({ ...current, unitId: created.id }));
+    else if (typeof unitDialogTarget === "number") updateAdditionalUnit(unitDialogTarget, { unitId: created.id });
+    setUnitEdited(true);
+    setUnitDialogTarget(null);
   };
   const selectedCategory = categories.find(
     (item) => item.id === form.categoryId,
@@ -260,6 +288,10 @@ export default function AddProductPage() {
         severity: "error",
         text: "Select a base unit before saving.",
       });
+    if (additionalUnits.some((unit) => !unit.unitId || !Number.isFinite(Number(unit.conversionFactor)) || Number(unit.conversionFactor) <= 0 || (unit.minimumOrderQty && Number(unit.minimumOrderQty) <= 0)) ||
+      new Set([form.unitId, ...additionalUnits.map((unit) => unit.unitId)]).size !== additionalUnits.length + 1) {
+      return setMessage({ severity: "error", text: "Choose distinct units with valid conversion factors and minimum quantities." });
+    }
     if (
       ![form.cost, form.price, ...(isEditMode ? [] : [form.stock])].every(
         (value) => Number.isInteger(Number(value)) && Number(value) >= 0,
@@ -280,8 +312,19 @@ export default function AddProductPage() {
         categoryId: form.categoryId || undefined,
         minimumStock: Number(form.minimum || 0),
       };
+      const unitPayload = [
+        { unitId: form.unitId, conversionFactor: 1, isBase: true, canSell: true, canPurchase: true },
+        ...additionalUnits.map((unit) => ({
+          unitId: unit.unitId,
+          conversionFactor: Number(unit.conversionFactor),
+          isBase: false,
+          canSell: unit.canSell,
+          canPurchase: unit.canPurchase,
+          ...(unit.minimumOrderQty ? { minimumOrderQty: Number(unit.minimumOrderQty) } : {}),
+        })),
+      ];
       if (isEditMode) {
-        await api.products.update(productId, payload);
+        await api.products.update(productId, { ...payload, ...(hasExistingUnits || unitEdited ? { units: unitPayload } : {}) });
         const latestSource = inventoryBatches.find((batch) => batch.productId === productId);
         if (latestSource && (
           String(latestSource.supplierName || "") !== form.supplierName.trim() ||
@@ -315,15 +358,7 @@ export default function AddProductPage() {
           : undefined;
       const result = await api.products.create({
         ...payload,
-        units: [
-          {
-            unitId: form.unitId,
-            conversionFactor: 1,
-            isBase: true,
-            canSell: true,
-            canPurchase: true,
-          },
-        ],
+        units: unitPayload,
         ...(barcode ? { barcode } : {}),
         ...(barcodeReservationId ? { barcodeReservationId } : {}),
         ...(form.shortCode.trim()
@@ -361,6 +396,13 @@ export default function AddProductPage() {
     update,
     categories,
     units,
+    additionalUnits,
+    updateAdditionalUnit,
+    addAdditionalUnit: () => { setAdditionalUnits((current) => [...current, { unitId: "", conversionFactor: "", minimumOrderQty: "", canSell: true, canPurchase: true }]); setUnitEdited(true); },
+    removeAdditionalUnit: (index) => { setAdditionalUnits((current) => current.filter((_, unitIndex) => unitIndex !== index)); setUnitEdited(true); },
+    setUnitDialogTarget,
+    unitDialogTarget,
+    createUnit,
     selectedCategory,
     categoryDialogOpen,
     setCategoryDialogOpen,
@@ -427,6 +469,7 @@ export default function AddProductPage() {
           {!isEditMode && <Field label="Stock Quantity" value={form.stock} onChange={update("stock")} icon={<Inventory2RoundedIcon />} />}
           <UnitField {...props} />
         </Box>
+        <AdditionalUnitsField {...props} />
         <StockSourceFields form={form} update={update} supplierOptions={supplierOptions} />
         <Field
           label="Minimum Stock Alert Level (Optional)"
@@ -602,17 +645,18 @@ function PricingFields({ form, update }) {
     </Box>
   );
 }
-function UnitField({ form, update, units }) {
+function UnitField({ form, update, units, setUnitDialogTarget }) {
   return (
     <Field
       label="Unit"
+      labelAction={<Button size="small" onClick={() => setUnitDialogTarget("base")} sx={{ textTransform: "none" }}>+ New Unit</Button>}
       select
       value={form.unitId}
       onChange={update("unitId")}
       icon={<StraightenRoundedIcon />}
     >
       {units
-        .filter((unit) => unit.isActive !== false)
+        .filter((unit) => unit.isActive !== false || unit.id === form.unitId)
         .map((unit) => (
           <MenuItem key={unit.id} value={unit.id}>
             {unit.name}
@@ -650,6 +694,33 @@ function SupplierField({ value, onChange, options }) {
     </Box>
   );
 }
+function AdditionalUnitsField({ form, units, additionalUnits, updateAdditionalUnit, addAdditionalUnit, removeAdditionalUnit, setUnitDialogTarget }) {
+  return (
+    <Box sx={{ mb: { xs: 2, md: 1.25 }, minWidth: 0 }}>
+      <Typography fontSize={16} fontWeight={700} sx={{ mb: 0.75 }}>Additional Units</Typography>
+      <Stack spacing={1.25}>
+        {additionalUnits.map((item, index) => (
+          <Box key={index} sx={{ p: 1.25, border: "1px solid", borderColor: "divider", borderRadius: 1.5 }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))" }, gap: 1 }}>
+              <TextField size="small" select label="Unit" value={item.unitId} onChange={(event) => updateAdditionalUnit(index, { unitId: event.target.value })}>
+                {units.filter((unit) => (unit.isActive !== false || unit.id === item.unitId) && (unit.id === item.unitId || (unit.id !== form.unitId && !additionalUnits.some((other, otherIndex) => otherIndex !== index && other.unitId === unit.id)))).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
+              </TextField>
+              <TextField size="small" label={`Base ${units.find((unit) => unit.id === form.unitId)?.symbol || "units"} per unit`} type="number" value={item.conversionFactor} onChange={(event) => updateAdditionalUnit(index, { conversionFactor: event.target.value })} slotProps={{ htmlInput: { min: 0.000001, step: "any" } }} />
+              <TextField size="small" label="MOQ" type="number" value={item.minimumOrderQty} onChange={(event) => updateAdditionalUnit(index, { minimumOrderQty: event.target.value })} slotProps={{ htmlInput: { min: 0.001, step: "any" } }} />
+            </Box>
+            <Stack direction="row" alignItems="center" flexWrap="wrap" sx={{ mt: 0.5 }}>
+              <FormControlLabel control={<Checkbox size="small" checked={item.canSell} onChange={(event) => updateAdditionalUnit(index, { canSell: event.target.checked })} />} label="Sell" />
+              <FormControlLabel control={<Checkbox size="small" checked={item.canPurchase} onChange={(event) => updateAdditionalUnit(index, { canPurchase: event.target.checked })} />} label="Purchase" />
+              <Button size="small" onClick={() => setUnitDialogTarget(index)} sx={{ textTransform: "none" }}>+ New Unit</Button>
+              <Button size="small" color="error" onClick={() => removeAdditionalUnit(index)} sx={{ textTransform: "none", ml: "auto" }}>Remove</Button>
+            </Stack>
+          </Box>
+        ))}
+      </Stack>
+      <Button size="small" onClick={addAdditionalUnit} sx={{ mt: 0.75, textTransform: "none" }}>+ Add Unit</Button>
+    </Box>
+  );
+}
 function StockSourceFields({ form, update, supplierOptions }) {
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
@@ -669,7 +740,6 @@ function DesktopAddProduct(props) {
     saving,
     loading,
     isEditMode,
-    units,
     supplierOptions,
   } = props;
   return (
@@ -688,7 +758,8 @@ function DesktopAddProduct(props) {
           /></Box>
           <Box sx={{ gridColumn: "1 / -1" }}><PricingFields form={form} update={update} /></Box>
           {!isEditMode && <Field label="Stock Quantity" value={form.stock} onChange={update("stock")} icon={<Inventory2RoundedIcon />} />}
-          <UnitField form={form} update={update} units={units} />
+          <UnitField {...props} />
+          <Box sx={{ gridColumn: "1 / -1" }}><AdditionalUnitsField {...props} /></Box>
           <SupplierField value={form.supplierName} onChange={update("supplierName")} options={supplierOptions} />
           <Field label="Invoice / Reference No. (Optional)" value={form.invoiceReference} onChange={update("invoiceReference")} />
           <Box sx={{ gridColumn: "1 / -1" }}><Field
@@ -736,6 +807,9 @@ function SharedDialogs({
   handleBarcodeChanged,
   handleShortCodeChanged,
   setMessage,
+  unitDialogTarget,
+  setUnitDialogTarget,
+  createUnit,
 }) {
   return (
     <>
@@ -746,6 +820,7 @@ function SharedDialogs({
         onSelect={selectCategory}
         onCreate={createCategory}
       />
+      <UnitCreationDialog open={unitDialogTarget !== null} onClose={() => setUnitDialogTarget(null)} onCreate={createUnit} />
       <BarcodeScannerDialog
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
@@ -772,6 +847,26 @@ function SharedDialogs({
       />
     </>
   );
+}
+function UnitCreationDialog({ open, onClose, onCreate }) {
+  const [name, setName] = useState("");
+  const [symbol, setSymbol] = useState("");
+  const [precision, setPrecision] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const close = () => { setName(""); setSymbol(""); setPrecision(0); setError(""); onClose(); };
+  const save = async () => {
+    setSaving(true); setError("");
+    try { await onCreate({ name: name.trim(), symbol: symbol.trim(), precision: Number(precision) }); close(); }
+    catch (requestError) { setError(requestError.message || "Unable to create unit."); }
+    finally { setSaving(false); }
+  };
+  return <Dialog open={open} onClose={close} fullWidth maxWidth="xs"><DialogTitle>Add New Unit</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}>
+    {error && <Alert severity="error">{error}</Alert>}
+    <TextField label="Name" value={name} onChange={(event) => setName(event.target.value)} autoFocus fullWidth />
+    <TextField label="Symbol" value={symbol} onChange={(event) => setSymbol(event.target.value)} fullWidth />
+    <TextField label="Decimal Places" type="number" value={precision} onChange={(event) => setPrecision(event.target.value)} slotProps={{ htmlInput: { min: 0, max: 3, step: 1 } }} fullWidth />
+  </Stack></DialogContent><DialogActions><Button onClick={close}>Cancel</Button><Button variant="contained" disabled={saving || !name.trim() || !symbol.trim() || !Number.isInteger(Number(precision)) || Number(precision) < 0 || Number(precision) > 3} onClick={save}>{saving ? "Adding…" : "Add Unit"}</Button></DialogActions></Dialog>;
 }
 function CategorySelector({ value, onClick }) {
   return (

@@ -22,6 +22,7 @@ import { useTheme } from "@mui/material/styles";
 import { usePosApi } from "../../hooks/useApiResource";
 import { useOrderQuery } from "../../hooks/usePosQueries";
 import { buildExchangeReceiptHtml, buildInvoiceReceiptHtml } from "../../lib/receipt";
+import { formatEnteredUnit } from "../../lib/orderUnitDisplay";
 import PaymentCancellationDialog from "../../components/PaymentCancellationDialog";
 import ReturnRefundDialog from "../../components/ReturnRefundDialog";
 import { refundableSalePayments } from "../../lib/refundablePayments";
@@ -103,7 +104,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
       subtotal: Number(record.subtotal || record.total || 0),
       discount: Number(record.discount || 0),
       quantity: (record.items || []).reduce(
-        (total, item) => total + Number(item.quantity || 0),
+        (total, item) => total + Number(item.enteredQuantity ?? item.quantity ?? 0),
         0,
       ),
       date: createdAt.toLocaleDateString(),
@@ -188,7 +189,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
     const rows = (record.items || [])
       .map(
         (item) =>
-          `<tr><td>${escapeHtml(item.productName || item.product?.name || "Item")}<br><small>${Number(item.quantity)} × ${formatKyat(Number(item.unitPrice || 0))}</small></td><td>${formatKyat(Number(item.lineTotal || 0))}</td></tr>`,
+          `<tr><td>${escapeHtml(item.productName || item.product?.name || "Item")}<br><small>${escapeHtml(formatEnteredUnit(item))} × ${formatKyat(Number(item.unitPrice || 0))}</small></td><td>${formatKyat(Number(item.lineTotal || 0))}</td></tr>`,
       )
       .join("");
     popup.document.write(
@@ -232,7 +233,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
         18,
         y,
       );
-      invoice.text(String(Number(item.quantity)), 120, y, { align: "right" });
+      invoice.text(formatEnteredUnit(item), 120, y, { align: "right" });
       invoice.text(formatKyat(Number(item.lineTotal || 0)), pageWidth - 18, y, {
         align: "right",
       });
@@ -389,7 +390,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
       invoice.text(name, margin + 12, y);
       invoice.setFont("helvetica", "normal");
       invoice.text(
-        String(Number(item.quantity || 0)),
+        formatEnteredUnit(item),
         pageWidth - margin - 45,
         y,
         { align: "right" },
@@ -683,7 +684,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                         {item.productName || item.product?.name}
                       </Typography>
                       <Typography sx={{ color: colors.muted, mt: 0.6 }}>
-                        {Number(item.quantity)} ×{" "}
+                        {formatEnteredUnit(item)} ×{" "}
                         {formatKyat(item.sellUnitPrice)}
                       </Typography>
                     </Box>
@@ -693,7 +694,7 @@ export default function OrderDetailsPage({ embeddedOrderId, embeddedOnClose, for
                           {item.productName || item.product?.name}
                         </Typography>
                         <Typography sx={{ color: colors.muted, whiteSpace: "nowrap" }}>
-                          {Number(item.quantity)} × {formatKyat(item.sellUnitPrice)}
+                          {formatEnteredUnit(item)} × {formatKyat(item.sellUnitPrice)}
                         </Typography>
                       </>
                     )}

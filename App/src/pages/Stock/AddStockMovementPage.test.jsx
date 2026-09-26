@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router";
 
 const mocks = vi.hoisted(() => ({
   mobile: true,
+  multiUnit: false,
   api: {
     inventory: { create: vi.fn(), adjust: vi.fn(), adjustByCost: vi.fn() },
     pricing: { barcodeLookup: vi.fn() },
@@ -18,7 +19,10 @@ vi.mock("../../context/approval-context", () => ({ useManagerApproval: () => ({ 
 vi.mock("../../hooks/useApiResource", () => ({ usePosApi: () => mocks.api }));
 vi.mock("../../hooks/usePosQueries", () => ({
   useAllActiveProductsQuery: () => ({
-    data: { products: [{ id: "product-1", name: "Coffee", sku: "COF-1", currentStock: 4, cost: 500, barcodes: [] }] },
+    data: { products: [{ id: "product-1", name: "Coffee", sku: "COF-1", currentStock: 4, cost: 500, barcodes: [], units: mocks.multiUnit ? [
+      { id: "piece-product-unit", unitId: "piece", isBase: true, canPurchase: true, conversionFactor: 1, unit: { name: "Piece" } },
+      { id: "carton-product-unit", unitId: "carton", canPurchase: true, conversionFactor: 24, unit: { name: "Carton" } },
+    ] : [] }] },
     isLoading: false,
     error: null,
   }),
@@ -50,6 +54,7 @@ function selectProductAndQuantity() {
 }
 
 beforeEach(() => {
+  mocks.multiUnit = false;
   window.matchMedia = vi.fn().mockImplementation(() => ({
     matches: mocks.mobile,
     media: "(max-width:768px)",
@@ -78,6 +83,21 @@ describe("Add Stock movement polish", () => {
 
     await waitFor(() => expect(mocks.api.inventory.create).toHaveBeenCalledWith(expect.not.objectContaining({ note: expect.anything() })));
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/stock"));
+  });
+
+  it("selects cartons for Stock In and submits entered quantity and carton cost", async () => {
+    mocks.mobile = true;
+    mocks.multiUnit = true;
+    renderPage();
+    selectProductAndQuantity();
+    fireEvent.mouseDown(screen.getByLabelText("Purchase Unit"));
+    fireEvent.click(screen.getByRole("option", { name: "Carton" }));
+    fireEvent.change(screen.getByLabelText("Quantity *"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Cost Price *"), { target: { value: "18000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Stock In" }));
+    await waitFor(() => expect(mocks.api.inventory.create).toHaveBeenCalledWith(expect.objectContaining({
+      unitId: "carton", quantity: 10, unitCost: 18_000,
+    })));
   });
 
   it("keeps a Reason required for Stock Adjustment", () => {

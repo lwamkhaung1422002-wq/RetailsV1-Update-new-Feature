@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { initialStockReceiptPayload, stockInReceiptPayload, supplierNameOptions } from "./stockReceiptSource";
+import { initialStockReceiptPayload, purchaseUnits, stockInReceiptPayload, supplierNameOptions } from "./stockReceiptSource";
 
 describe("stock receipt source payloads", () => {
   it("attaches source metadata to a positive initial stock receipt", () => {
@@ -61,6 +61,13 @@ describe("stock receipt source payloads", () => {
       supplierName: "Golden Supply",
       invoiceReference: "INV-002",
     })).toMatchObject({ supplierName: "Golden Supply", invoiceReference: "INV-002" });
+  });
+
+  it("includes the selected purchase unit and entered carton quantity", () => {
+    expect(stockInReceiptPayload({ productId: "product-1", unitId: "carton", quantity: "10", cost: "18000" })).toMatchObject({
+      productId: "product-1", unitId: "carton", quantity: 10, unitCost: 18_000,
+    });
+    expect(purchaseUnits({ units: [{ canPurchase: true, unit: { name: "Piece" } }, { canPurchase: false, unit: { name: "Pack" } }] })).toHaveLength(1);
   });
 
   it.each([

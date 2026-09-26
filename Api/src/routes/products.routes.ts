@@ -9,6 +9,7 @@ import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 import { internalBarcodeCandidate, normalizeBarcode, validateBarcode } from "../lib/barcode.js";
 import { recordInventoryMovement } from "../lib/inventory-domain.js";
+import { createProductUnits, reconcileProductUnits } from "../lib/product-units.js";
 
 export const productsRouter = Router();
 
@@ -295,6 +296,7 @@ productsRouter.get("/:shopId/products", async (request, response, next) => {
             description: true,
             sku: true,
             price: true,
+            units: { include: { unit: true } },
             barcodes: {
               where: { status: "ACTIVE" },
               orderBy: { createdAt: "desc" },
@@ -391,7 +393,7 @@ productsRouter.get("/:shopId/products/:productId/cost-history", async (request, 
     const [movements, costEdits] = await Promise.all([
       prisma.inventoryMovement.findMany({
         where: { shopId, productId, unitCost: { not: null }, OR: [{ direction: "IN" }, { type: "ADJUSTMENT_OUT" }] },
-        select: { id: true, type: true, direction: true, enteredQuantity: true, unitCost: true, averageCostAfter: true, sourceType: true, occurredAt: true },
+        select: { id: true, type: true, direction: true, baseQuantity: true, unitCost: true, averageCostAfter: true, sourceType: true, occurredAt: true },
         orderBy: { occurredAt: "desc" },
       }),
       prisma.auditLog.findMany({
@@ -403,7 +405,7 @@ productsRouter.get("/:shopId/products/:productId/cost-history", async (request, 
     const movementHistory = movements.map((movement) => ({
       id: movement.id,
       date: movement.occurredAt,
-      stockIn: movement.enteredQuantity,
+      stockIn: movement.baseQuantity,
       direction: movement.direction,
       unitCost: movement.unitCost,
       averageCost: movement.averageCostAfter,
@@ -518,20 +520,7 @@ productsRouter.post("/:shopId/products", async (request, response, next) => {
           units: { include: { unit: true } },
         },
       });
-      if (input.units?.length) {
-        if (input.units.filter((unit) => unit.isBase).length !== 1) throw badRequest("Exactly one base unit is required.");
-        for (const unit of input.units) {
-          const ownedUnit = await tx.unitOfMeasure.findFirst({ where: { id: unit.unitId, shopId, isActive: true } });
-          if (!ownedUnit) throw notFound("Unit not found.");
-          if (ownedUnit.precision === 0 && !Number.isInteger(unit.conversionFactor)) throw badRequest("Indivisible units require an integer conversion factor.");
-          await tx.productUnit.create({ data: {
-            productId: createdProduct.id, unitId: unit.unitId,
-            conversionFactor: String(unit.conversionFactor), isBase: unit.isBase ?? false,
-            canSell: unit.canSell ?? true, canPurchase: unit.canPurchase ?? true,
-            ...(unit.minimumOrderQty !== undefined ? { minimumOrderQty: String(unit.minimumOrderQty) } : {}),
-          } });
-        }
-      }
+      await createProductUnits(tx, shopId, createdProduct.id, input.units ?? []);
       if (input.barcode) {
         let value = input.barcode.kind === "INTERNAL" ? (input.barcode.value || internalBarcodeCandidate(input.name)) : input.barcode.value;
         if (input.barcode.kind === "INTERNAL" && !/^[A-Z]{2}\d{4}$/.test(value || "")) throw badRequest("Internal barcode must use the CK4821 format.");
@@ -636,6 +625,8 @@ productsRouter.patch("/:shopId/products/:productId", async (request, response, n
         },
       });
 
+      if (input.units !== undefined) await reconcileProductUnits(tx, shopId, productId, input.units);
+
       if (input.optionTree !== undefined) {
         for (const variant of updatedProduct.variants) {
           const nextPath = relabelVariantPath(updatedProduct.optionTree, variant.optionPath);
@@ -658,6 +649,7 @@ productsRouter.patch("/:shopId/products/:productId", async (request, response, n
         include: {
           category: true,
           variants: true,
+          units: { include: { unit: true } },
         },
       });
       await writeAuditLog(tx, {

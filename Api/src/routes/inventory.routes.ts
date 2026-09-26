@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import type { Prisma } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
 import { writeAuditLog } from "../lib/audit-log.js";
 import { approvalAccessToken, approvalAuditMetadata, authorizeSensitiveAction, consumeManagerApproval } from "../lib/manager-approval.js";
 import { recordInventoryMovement } from "../lib/inventory-domain.js";
@@ -22,8 +22,9 @@ const INVENTORY_MUTATION_TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 20_00
 
 const createInventoryBatchSchema = z.object({
   productId: z.string().trim().min(1, "Product is required."),
+  unitId: z.string().trim().min(1).optional(),
   variantId: z.string().trim().optional(),
-  quantity: z.coerce.number().int().positive("Quantity must be greater than 0."),
+  quantity: z.coerce.number().positive("Quantity must be greater than 0."),
   unitCost: moneySchema,
   deliveryCost: moneySchema.optional(),
   deliveryMethod: z.string().trim().optional(),
@@ -140,6 +141,7 @@ inventoryRouter.get("/:shopId/inventory-movements", async (request, response, ne
       include: {
         product: { include: { barcodes: { where: { status: "ACTIVE" } } } },
         variant: true,
+        unit: true,
         inventoryBatch: { select: { supplierName: true, invoiceReference: true } },
       },
       orderBy: { occurredAt: "desc" },
@@ -189,19 +191,36 @@ inventoryRouter.post("/:shopId/inventory", async (request, response, next) => {
     await assertProductBelongsToShop(input.productId, shopId);
     await assertVariantBelongsToProduct(input.variantId, input.productId);
 
-    const data: Prisma.InventoryBatchUncheckedCreateInput = {
-      shopId,
-      productId: input.productId,
-      quantity: input.quantity,
-      unitCost: input.unitCost,
-      ...(input.variantId !== undefined ? { variantId: input.variantId } : {}),
-      ...(input.receivedAt !== undefined ? { receivedAt: input.receivedAt } : {}),
-      ...(input.supplierName ? { supplierName: input.supplierName } : {}),
-      ...(input.invoiceReference ? { invoiceReference: input.invoiceReference } : {}),
-      ...(input.note !== undefined ? { note: input.note } : {}),
-    };
-
     const inventoryBatch = await prisma.$transaction(async (tx) => {
+      const productUnit = await tx.productUnit.findFirst({
+        where: { productId: input.productId, ...(input.unitId ? { unitId: input.unitId } : { isBase: true }) },
+        include: { unit: true },
+      });
+      if ((input.unitId && !productUnit) || (productUnit && (productUnit.canPurchase === false || productUnit.unit.shopId !== shopId || !productUnit.unit.isActive))) {
+        throw badRequest("Purchase unit is not enabled for this product.");
+      }
+      const enteredQuantity = new Prisma.Decimal(input.quantity);
+      if (enteredQuantity.decimalPlaces() > (productUnit?.unit.precision ?? 0)) {
+        throw badRequest("The selected purchase unit does not allow that quantity precision.");
+      }
+      const conversionFactor = new Prisma.Decimal(productUnit?.conversionFactor ?? 1);
+      const baseQuantity = enteredQuantity.mul(conversionFactor);
+      if (!baseQuantity.isInteger() || baseQuantity.lessThanOrEqualTo(0)) {
+        throw badRequest("Stock quantity must convert to a whole positive base-unit quantity.");
+      }
+      const baseUnitCost = Math.round(input.unitCost / conversionFactor.toNumber());
+      if (baseUnitCost <= 0) throw badRequest("Base-unit cost must be greater than 0.");
+      const data: Prisma.InventoryBatchUncheckedCreateInput = {
+        shopId,
+        productId: input.productId,
+        quantity: baseQuantity.toNumber(),
+        unitCost: baseUnitCost,
+        ...(input.variantId !== undefined ? { variantId: input.variantId } : {}),
+        ...(input.receivedAt !== undefined ? { receivedAt: input.receivedAt } : {}),
+        ...(input.supplierName ? { supplierName: input.supplierName } : {}),
+        ...(input.invoiceReference ? { invoiceReference: input.invoiceReference } : {}),
+        ...(input.note !== undefined ? { note: input.note } : {}),
+      };
       const createdBatch = await tx.inventoryBatch.create({
         data,
         include: {
@@ -235,6 +254,10 @@ inventoryRouter.post("/:shopId/inventory", async (request, response, next) => {
           variantId: input.variantId ?? null,
           quantity: input.quantity,
           unitCost: input.unitCost,
+          baseQuantity: baseQuantity.toString(),
+          baseUnitCost,
+          unitId: productUnit?.unitId ?? null,
+          conversionFactor: conversionFactor.toString(),
           supplierName: input.supplierName || null,
           invoiceReference: input.invoiceReference || null,
           deliveryCost: input.deliveryCost ?? 0,
@@ -244,6 +267,7 @@ inventoryRouter.post("/:shopId/inventory", async (request, response, next) => {
         shopId, productId: createdBatch.productId, variantId: createdBatch.variantId,
         inventoryBatchId: createdBatch.id, type: "OPENING", direction: "IN",
         quantity: createdBatch.quantity, unitCost: createdBatch.unitCost,
+        ...(productUnit ? { unitId: productUnit.unitId, enteredQuantity: input.quantity, conversionFactor: conversionFactor.toString() } : {}),
         sourceType: "InventoryBatch", sourceId: createdBatch.id,
         idempotencyKey: String(request.header("Idempotency-Key") || `inventory.create:${createdBatch.id}`),
         ...(input.note ? { reason: input.note } : {}),

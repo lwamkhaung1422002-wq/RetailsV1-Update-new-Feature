@@ -35,7 +35,7 @@ import BarcodeScannerDialog from "../../components/BarcodeScanner/BarcodeScanner
 import { queryKeys } from "../../lib/queryKeys";
 import { useAuth } from "../../context/AuthContext";
 import { useManagerApproval } from "../../context/approval-context";
-import { stockInReceiptPayload, supplierNameOptions } from "./stockReceiptSource";
+import { purchaseUnits, stockInReceiptPayload, supplierNameOptions } from "./stockReceiptSource";
 
 const money = (amount) => `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2 }).format(amount)} ကျပ်`;
 const fieldSx = {
@@ -58,6 +58,7 @@ export default function AddStockMovementPage() {
   const [adjustmentType, setAdjustmentType] = useState("increase");
   const [query, setQuery] = useState("");
   const [product, setProduct] = useState(null);
+  const [purchaseUnitId, setPurchaseUnitId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [cost, setCost] = useState("");
   const [supplierName, setSupplierName] = useState("");
@@ -94,10 +95,18 @@ export default function AddStockMovementPage() {
     return [...grouped.entries()].map(([unitCost, available]) => ({ unitCost, available })).sort((a, b) => a.unitCost - b.unitCost);
   }, [batches, product]);
   const selectProduct = (nextProduct) => {
+    const baseUnit = purchaseUnits(nextProduct).find((unit) => unit.isBase) || purchaseUnits(nextProduct)[0];
     setProduct(nextProduct);
+    setPurchaseUnitId(baseUnit?.unitId || "");
     setQuery(nextProduct?.name ?? "");
-    setCost(nextProduct ? String(nextProduct.cost) : "");
+    setCost(nextProduct ? String(Math.round(Number(nextProduct.cost || 0) * Number(baseUnit?.conversionFactor || 1))) : "");
     setErrors((current) => ({ ...current, product: false, cost: false }));
+  };
+  const selectPurchaseUnit = (unitId) => {
+    const selected = purchaseUnits(product).find((unit) => unit.unitId === unitId);
+    if (!selected) return;
+    setPurchaseUnitId(unitId);
+    setCost(String(Math.round(Number(product.cost || 0) * Number(selected.conversionFactor))));
   };
   const findProduct = (value) => {
     const normalizedValue = String(value || "").trim().toLowerCase();
@@ -154,7 +163,7 @@ export default function AddStockMovementPage() {
     };
     setErrors(nextErrors);
     if (Object.values(nextErrors).some(Boolean)) return;
-    try { if (movementType === "in") await api.inventory.create(stockInReceiptPayload({ productId: product.id, quantity, cost, notes, supplierName, invoiceReference })); else if (adjustmentType === "decrease") { const body = { productId: product.id, unitCost: Number(adjustmentCost), quantity: Number(quantity), reason: notes.trim() }; await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: product.id, targetLabel: product.name, payload: { mode: "by-cost", ...body, action: "SUB" }, initialReason: body.reason }, (approvalToken) => api.inventory.adjustByCost(body, approvalToken)); } else { const batch = batches.find((item) => item.productId === product.id); if (!batch) throw new Error("Add stock before recording an adjustment."); const body = { action: "ADD", quantity: Number(quantity), reason: notes.trim() }; await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: product.id, targetLabel: product.name, payload: { mode: "batch", productId: product.id, inventoryBatchId: batch.id, ...body }, initialReason: body.reason }, (approvalToken) => api.inventory.adjust(batch.id, body, approvalToken)); }
+    try { if (movementType === "in") await api.inventory.create(stockInReceiptPayload({ productId: product.id, unitId: purchaseUnitId, quantity, cost, notes, supplierName, invoiceReference })); else if (adjustmentType === "decrease") { const body = { productId: product.id, unitCost: Number(adjustmentCost), quantity: Number(quantity), reason: notes.trim() }; await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: product.id, targetLabel: product.name, payload: { mode: "by-cost", ...body, action: "SUB" }, initialReason: body.reason }, (approvalToken) => api.inventory.adjustByCost(body, approvalToken)); } else { const batch = batches.find((item) => item.productId === product.id); if (!batch) throw new Error("Add stock before recording an adjustment."); const body = { action: "ADD", quantity: Number(quantity), reason: notes.trim() }; await runWithApproval({ permission: "stock.adjust", action: "stock.adjust", actionLabel: "Stock adjustment", targetId: product.id, targetLabel: product.name, payload: { mode: "batch", productId: product.id, inventoryBatchId: batch.id, ...body }, initialReason: body.reason }, (approvalToken) => api.inventory.adjust(batch.id, body, approvalToken)); }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.movements(shop?.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.products(shop?.id) }),
@@ -169,7 +178,7 @@ export default function AddStockMovementPage() {
     } catch (error) { if (!error.approvalCancelled) setErrors((current) => ({ ...current, submit: error.message || "Unable to save stock movement." })); }
   };
 
-  if (!isMobile) return <><DesktopAddStockMovement movementType={movementType} setMovementType={setMovementType} adjustmentType={adjustmentType} setAdjustmentType={setAdjustmentType} query={query} filteredProducts={filteredProducts} activeProductCount={products.length} product={product} selectProduct={selectProduct} findProduct={findProduct} onProductInputChange={handleProductInputChange} onSearchKeyDown={handleSearchKeyDown} productsLoading={productsLoading} productsError={productsError} quantity={quantity} setQuantity={setQuantity} cost={cost} setCost={setCost} supplierName={supplierName} setSupplierName={setSupplierName} supplierOptions={supplierOptions} invoiceReference={invoiceReference} setInvoiceReference={setInvoiceReference} adjustmentCost={adjustmentCost} setAdjustmentCost={setAdjustmentCost} availableCostBuckets={availableCostBuckets} notes={notes} setNotes={setNotes} errors={errors} onClose={() => navigate("/stock")} onSave={saveMovement} /><BarcodeScannerDialog open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={handleScan} /></>;
+  if (!isMobile) return <><DesktopAddStockMovement movementType={movementType} setMovementType={setMovementType} adjustmentType={adjustmentType} setAdjustmentType={setAdjustmentType} query={query} filteredProducts={filteredProducts} activeProductCount={products.length} product={product} selectProduct={selectProduct} findProduct={findProduct} onProductInputChange={handleProductInputChange} onSearchKeyDown={handleSearchKeyDown} productsLoading={productsLoading} productsError={productsError} quantity={quantity} setQuantity={setQuantity} purchaseUnitId={purchaseUnitId} selectPurchaseUnit={selectPurchaseUnit} cost={cost} setCost={setCost} supplierName={supplierName} setSupplierName={setSupplierName} supplierOptions={supplierOptions} invoiceReference={invoiceReference} setInvoiceReference={setInvoiceReference} adjustmentCost={adjustmentCost} setAdjustmentCost={setAdjustmentCost} availableCostBuckets={availableCostBuckets} notes={notes} setNotes={setNotes} errors={errors} onClose={() => navigate("/stock")} onSave={saveMovement} /><BarcodeScannerDialog open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={handleScan} /></>;
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default", pb: "128px", fontFamily: "Inter, Roboto, Noto Sans Myanmar, sans-serif" }}>
@@ -208,7 +217,7 @@ export default function AddStockMovementPage() {
         </Box>
 
         {movementType === "in" ? (
-          <StockInForm quantity={quantity} setQuantity={setQuantity} cost={cost} setCost={setCost} supplierName={supplierName} setSupplierName={setSupplierName} supplierOptions={supplierOptions} invoiceReference={invoiceReference} setInvoiceReference={setInvoiceReference} notes={notes} setNotes={setNotes} errors={errors} />
+          <StockInForm product={product} purchaseUnitId={purchaseUnitId} selectPurchaseUnit={selectPurchaseUnit} quantity={quantity} setQuantity={setQuantity} cost={cost} setCost={setCost} supplierName={supplierName} setSupplierName={setSupplierName} supplierOptions={supplierOptions} invoiceReference={invoiceReference} setInvoiceReference={setInvoiceReference} notes={notes} setNotes={setNotes} errors={errors} />
         ) : (
           <AdjustmentForm adjustmentType={adjustmentType} setAdjustmentType={setAdjustmentType} quantity={quantity} setQuantity={setQuantity} adjustmentCost={adjustmentCost} setAdjustmentCost={setAdjustmentCost} availableCostBuckets={availableCostBuckets} notes={notes} setNotes={setNotes} errors={errors} />
         )}
@@ -222,7 +231,7 @@ export default function AddStockMovementPage() {
   );
 }
 
-function DesktopAddStockMovement({ movementType, setMovementType, adjustmentType, setAdjustmentType, query, filteredProducts, activeProductCount, product, selectProduct, findProduct, onProductInputChange, onSearchKeyDown, productsLoading, productsError, quantity, setQuantity, cost, setCost, supplierName, setSupplierName, supplierOptions, invoiceReference, setInvoiceReference, adjustmentCost, setAdjustmentCost, availableCostBuckets, notes, setNotes, errors, onClose, onSave }) {
+function DesktopAddStockMovement({ movementType, setMovementType, adjustmentType, setAdjustmentType, query, filteredProducts, activeProductCount, product, selectProduct, findProduct, onProductInputChange, onSearchKeyDown, productsLoading, productsError, quantity, setQuantity, purchaseUnitId, selectPurchaseUnit, cost, setCost, supplierName, setSupplierName, supplierOptions, invoiceReference, setInvoiceReference, adjustmentCost, setAdjustmentCost, availableCostBuckets, notes, setNotes, errors, onClose, onSave }) {
   return <Dialog open fullWidth maxWidth="md" onClose={onClose} slotProps={{ paper: { sx: { maxWidth: 920, borderRadius: 3, maxHeight: "88vh" } } }}>
     <DialogTitle sx={{ px: 3, py: 2.25, borderBottom: "1px solid", borderColor: "divider" }}><Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography sx={{ fontSize: 22, fontWeight: 800 }}>Add Stock Movement</Typography><IconButton aria-label="Close stock movement" onClick={onClose}><CloseRoundedIcon /></IconButton></Box></DialogTitle>
     <DialogContent dividers sx={{ p: 3 }}><Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 3 }}>
@@ -230,7 +239,7 @@ function DesktopAddStockMovement({ movementType, setMovementType, adjustmentType
         {product && <SelectedProduct product={product} onClear={() => selectProduct(null)} />}
         <Typography sx={{ ...sectionLabelSx, mt: 3 }}>MOVEMENT DETAILS</Typography><Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.25, mb: 2 }}><MovementButton active={movementType === "in"} onClick={() => setMovementType("in")} icon={<AddCircleOutlineRoundedIcon />} label="Stock IN" tone="success" /><MovementButton active={movementType === "adjustment"} onClick={() => setMovementType("adjustment")} icon={<Inventory2RoundedIcon />} label="Adjustment" tone="primary" /></Box>
       </Box>
-      <Box>{movementType === "in" ? <StockInForm quantity={quantity} setQuantity={setQuantity} cost={cost} setCost={setCost} supplierName={supplierName} setSupplierName={setSupplierName} supplierOptions={supplierOptions} invoiceReference={invoiceReference} setInvoiceReference={setInvoiceReference} notes={notes} setNotes={setNotes} errors={errors} /> : <AdjustmentForm adjustmentType={adjustmentType} setAdjustmentType={setAdjustmentType} quantity={quantity} setQuantity={setQuantity} adjustmentCost={adjustmentCost} setAdjustmentCost={setAdjustmentCost} availableCostBuckets={availableCostBuckets} notes={notes} setNotes={setNotes} errors={errors} />}</Box>
+      <Box>{movementType === "in" ? <StockInForm product={product} purchaseUnitId={purchaseUnitId} selectPurchaseUnit={selectPurchaseUnit} quantity={quantity} setQuantity={setQuantity} cost={cost} setCost={setCost} supplierName={supplierName} setSupplierName={setSupplierName} supplierOptions={supplierOptions} invoiceReference={invoiceReference} setInvoiceReference={setInvoiceReference} notes={notes} setNotes={setNotes} errors={errors} /> : <AdjustmentForm adjustmentType={adjustmentType} setAdjustmentType={setAdjustmentType} quantity={quantity} setQuantity={setQuantity} adjustmentCost={adjustmentCost} setAdjustmentCost={setAdjustmentCost} availableCostBuckets={availableCostBuckets} notes={notes} setNotes={setNotes} errors={errors} />}</Box>
     </Box></DialogContent>
     <DialogActions sx={{ px: 3, py: 2, borderTop: "1px solid", borderColor: "divider" }}><Button onClick={onClose} sx={{ textTransform: "none" }}>Cancel</Button><Button variant="contained" onClick={onSave} sx={{ minHeight: 42, textTransform: "none", fontWeight: 700 }}>{movementType === "in" ? "Save Stock In" : "Save Adjustment"}</Button></DialogActions>
   </Dialog>;
@@ -245,8 +254,8 @@ function MovementButton({ active, onClick, icon, label, tone, compact = false })
   return <Button onClick={onClick} startIcon={icon} sx={{ minHeight: compact ? 54 : 58, px: 1, borderRadius: 1.5, border: "1px solid", borderColor: active ? activeColor : "divider", color: active ? "common.white" : "text.secondary", bgcolor: active ? activeColor : "background.paper", fontSize: 16, fontWeight: 600, textTransform: "none", whiteSpace: "nowrap", "& .MuiButton-startIcon": { mr: 0.75, "& .MuiSvgIcon-root": { fontSize: 20 } }, "&:hover": { bgcolor: active ? activeColor : "action.hover", borderColor: active ? activeColor : "divider" } }}>{label}</Button>;
 }
 
-function StockInForm({ quantity, setQuantity, cost, setCost, supplierName, setSupplierName, supplierOptions, invoiceReference, setInvoiceReference, notes, setNotes, errors }) {
-  return <><InputField label="Quantity *" value={quantity} onChange={(event) => setQuantity(event.target.value)} icon={<Inventory2RoundedIcon />} inputMode="numeric" type="number" error={errors.quantity} helperText="Enter a valid quantity" /><InputField label="Cost Price *" value={cost} onChange={(event) => setCost(event.target.value)} icon={<CurrencyExchangeRoundedIcon />} inputMode="decimal" type="number" error={errors.cost} helperText="Enter a cost price greater than 0" endAdornment="ကျပ်" /><Autocomplete freeSolo autoHighlight options={supplierOptions} value={supplierName} onInputChange={(_, value) => setSupplierName(value)} renderInput={(params) => <TextField {...params} label="Supplier (Optional)" sx={fieldSx} />} /><InputField label="Invoice / Reference No. (Optional)" value={invoiceReference} onChange={(event) => setInvoiceReference(event.target.value)} /><InputField label="Notes (Optional)" value={notes} onChange={(event) => setNotes(event.target.value)} icon={<NotesRoundedIcon />} multiline minRows={4} /></>;
+function StockInForm({ product, purchaseUnitId, selectPurchaseUnit, quantity, setQuantity, cost, setCost, supplierName, setSupplierName, supplierOptions, invoiceReference, setInvoiceReference, notes, setNotes, errors }) {
+  return <>{purchaseUnits(product).length > 1 && <TextField select fullWidth label="Purchase Unit" value={purchaseUnitId} onChange={(event) => selectPurchaseUnit(event.target.value)} sx={fieldSx}>{purchaseUnits(product).map((unit) => <MenuItem key={unit.id} value={unit.unitId}>{unit.unit.name}</MenuItem>)}</TextField>}<InputField label="Quantity *" value={quantity} onChange={(event) => setQuantity(event.target.value)} icon={<Inventory2RoundedIcon />} inputMode={purchaseUnits(product).find((unit) => unit.unitId === purchaseUnitId)?.unit.precision > 0 ? "decimal" : "numeric"} type="number" error={errors.quantity} helperText="Enter a valid quantity" /><InputField label="Cost Price *" value={cost} onChange={(event) => setCost(event.target.value)} icon={<CurrencyExchangeRoundedIcon />} inputMode="decimal" type="number" error={errors.cost} helperText="Enter a cost price greater than 0" endAdornment="ကျပ်" /><Autocomplete freeSolo autoHighlight options={supplierOptions} value={supplierName} onInputChange={(_, value) => setSupplierName(value)} renderInput={(params) => <TextField {...params} label="Supplier (Optional)" sx={fieldSx} />} /><InputField label="Invoice / Reference No. (Optional)" value={invoiceReference} onChange={(event) => setInvoiceReference(event.target.value)} /><InputField label="Notes (Optional)" value={notes} onChange={(event) => setNotes(event.target.value)} icon={<NotesRoundedIcon />} multiline minRows={4} /></>;
 }
 
 function AdjustmentForm({ adjustmentType, setAdjustmentType, quantity, setQuantity, adjustmentCost, setAdjustmentCost, availableCostBuckets, notes, setNotes, errors }) {

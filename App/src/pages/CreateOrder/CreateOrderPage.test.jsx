@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DesktopOrderItem } from "./CreateOrderPage";
 import { calculateOrderTotals, checkoutCustomerError, checkoutOrderFields, filterCustomerOptions } from "./checkoutCustomer";
@@ -26,6 +26,20 @@ describe("desktop create-order item pricing row", () => {
     render(<DesktopOrderItem item={{ ...item, promotion: { type: "discount", text: "Weekend promo", value: 1_000 } }} onQuantityChange={vi.fn()} onQuantitySet={vi.fn()} />);
     expect(screen.getByText(/Weekend promo/)).toBeTruthy();
     expect(screen.getByText(/Discount/)).toBeTruthy();
+  });
+
+  it("shows a unit selector only for a multi-unit item", () => {
+    const units = [
+      { id: "piece-product-unit", unitId: "piece", isBase: true, canSell: true, conversionFactor: 1, unit: { name: "Piece" } },
+      { id: "carton-product-unit", unitId: "carton", canSell: true, conversionFactor: 24, unit: { name: "Carton" } },
+    ];
+    const onUnitChange = vi.fn();
+    const { rerender } = render(<DesktopOrderItem item={{ ...item, units, promotion: { type: "regular", text: "Regular price" } }} onQuantityChange={vi.fn()} onQuantitySet={vi.fn()} onUnitChange={onUnitChange} />);
+    fireEvent.mouseDown(screen.getByLabelText("Unit"));
+    fireEvent.click(screen.getByRole("option", { name: "Carton" }));
+    expect(onUnitChange).toHaveBeenCalledWith("product-1", "carton-product-unit");
+    rerender(<DesktopOrderItem item={{ ...item, units: units.slice(0, 1), promotion: { type: "regular", text: "Regular price" } }} onQuantityChange={vi.fn()} onQuantitySet={vi.fn()} onUnitChange={onUnitChange} />);
+    expect(screen.queryByLabelText("Unit")).toBeNull();
   });
 });
 

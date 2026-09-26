@@ -44,6 +44,13 @@ describe("receipt read model", () => {
     });
   });
 
+  it("renders saved carton quantity and conversion after the product's current unit changes", () => {
+    const order = baseOrder();
+    order.items[0] = { ...order.items[0], quantity: 120, enteredQuantity: "5", baseQuantity: "120", conversionFactor: "24", unitId: "carton", pricingSnapshot: { unitSymbol: "ctn", unitName: "Carton" } };
+    const receipt = receiptFor(order);
+    expect(receipt.items[0]).toMatchObject({ quantity: 5, baseQuantity: 120, conversionFactor: 24, unitSymbol: "ctn" });
+  });
+
   it("exposes persisted return and refund references", () => {
     const order = baseOrder();
     order.payments[0].amount = 90_000;

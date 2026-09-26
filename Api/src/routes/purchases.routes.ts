@@ -747,6 +747,7 @@ purchasesRouter.post("/:shopId/purchases/:purchaseId/receive", async (request, r
           inventoryBatchId: batch.id, type: "PURCHASE_RECEIPT", direction: "IN",
           locationId,
           quantity: quantity.toString(), unitCost: baseUnitCost, sourceType: "PurchaseReceipt", sourceId: receipt.id,
+          ...(line.unitId ? { unitId: line.unitId, enteredQuantity: receiptLine.quantity, conversionFactor: conversionFactor.toString() } : {}),
           idempotencyKey: idempotencyKey ? `${idempotencyKey}:${line.id}` : `purchase.receive:${receipt.id}`,
           ...(input.note ? { reason: input.note } : {}),
           ...(input.receivedAt ? { occurredAt: input.receivedAt } : {}),

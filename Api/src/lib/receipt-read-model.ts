@@ -18,6 +18,9 @@ type ReceiptItem = {
   productName: string;
   variantName?: string | null;
   quantity: number;
+  enteredQuantity?: unknown;
+  baseQuantity?: unknown;
+  conversionFactor?: unknown;
   unitPrice: number;
   lineTotal: number;
   discount?: number;
@@ -118,7 +121,10 @@ function exchangeReference(exchange: ReceiptExchange, actors: Map<string, Receip
       id: item.id,
       name: item.productName,
       variantName: item.variantName ?? null,
-      quantity: item.quantity,
+      quantity: item.enteredQuantity == null ? item.quantity : Number(item.enteredQuantity),
+      baseQuantity: item.baseQuantity == null ? item.quantity : Number(item.baseQuantity),
+      conversionFactor: item.conversionFactor == null ? 1 : Number(item.conversionFactor),
+      unitSymbol: (item.pricingSnapshot as { unitSymbol?: string | null } | null)?.unitSymbol ?? null,
       unitPrice: item.unitPrice,
       lineTotal: item.lineTotal,
     })),
@@ -157,7 +163,10 @@ export function buildReceiptReadModel(
       id: item.id,
       name: item.productName,
       variantName: item.variantName ?? null,
-      quantity: item.quantity,
+      quantity: item.enteredQuantity == null ? item.quantity : Number(item.enteredQuantity),
+      baseQuantity: item.baseQuantity == null ? item.quantity : Number(item.baseQuantity),
+      conversionFactor: item.conversionFactor == null ? 1 : Number(item.conversionFactor),
+      unitSymbol: (item.pricingSnapshot as { unitSymbol?: string | null } | null)?.unitSymbol ?? null,
       unitPrice: item.unitPrice,
       regularUnitPrice: item.regularUnitPrice ?? null,
       lineTotal: item.lineTotal,

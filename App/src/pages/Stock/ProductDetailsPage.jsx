@@ -124,7 +124,7 @@ export default function ProductDetailsPage({ embeddedProductId, embeddedOnClose,
           movement: latestMovement
             ? {
                 type: isOut ? "OUT" : "IN",
-                quantity: `${isOut ? "-" : "+"}${Number(latestMovement.enteredQuantity || 0)}`,
+                quantity: `${isOut ? "-" : "+"}${Number(latestMovement.enteredQuantity || 0)} ${latestMovement.unit?.symbol || "pcs"}`,
                 reason: latestMovement.reason || latestMovement.type,
                 date: formatDate(latestMovement.occurredAt),
               }

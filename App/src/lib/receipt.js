@@ -22,7 +22,7 @@ export function buildInvoiceReceiptHtml(receipt, { reprint = true } = {}) {
       Number(item.manualDiscount) > 0 ? `Manual discount: -${money(item.manualDiscount)}` : "",
       Number(item.itemDiscount) > 0 ? `Item discount: -${money(item.itemDiscount)}` : "",
     ].filter(Boolean).join("<br>");
-    return `<tr><td><strong>${escapeHtml(item.name)}</strong>${item.variantName ? ` / ${escapeHtml(item.variantName)}` : ""}<br><span>${escapeHtml(item.quantity)} x ${money(item.unitPrice)}</span>${adjustments ? `<br><small>${adjustments}</small>` : ""}</td><td>${money(item.lineTotal)}</td></tr>`;
+    return `<tr><td><strong>${escapeHtml(item.name)}</strong>${item.variantName ? ` / ${escapeHtml(item.variantName)}` : ""}<br><span>${escapeHtml(item.quantity)}${item.unitSymbol ? ` ${escapeHtml(item.unitSymbol)}` : ""} x ${money(item.unitPrice)}</span>${adjustments ? `<br><small>${adjustments}</small>` : ""}</td><td>${money(item.lineTotal)}</td></tr>`;
   }).join("");
   const paymentRows = receipt.payments.length
     ? receipt.payments.map((payment) => `<div><span>${escapeHtml(payment.method)}</span><span>${payment.amount < 0 ? "-" : ""}${money(Math.abs(payment.amount))}</span></div>`).join("")

@@ -15,6 +15,9 @@ export type MovementInput = {
   type: string;
   direction: "IN" | "OUT";
   quantity: number | string;
+  unitId?: string;
+  enteredQuantity?: number | string;
+  conversionFactor?: number | string;
   unitCost?: number | null;
   sourceType: string;
   sourceId: string;
@@ -102,12 +105,12 @@ export async function recordInventoryMovement(tx: Tx, input: MovementInput) {
     data: {
       shopId: input.shopId, productId: input.productId,
       ...(input.variantId ? { variantId: input.variantId } : {}),
-      locationId: location.id, unitId: unit.id,
+      locationId: location.id, unitId: input.unitId ?? unit.id,
       ...(input.inventoryBatchId ? { inventoryBatchId: input.inventoryBatchId } : {}),
       ...(input.lotId ? { lotId: input.lotId } : {}),
       ...(input.serialId ? { serialId: input.serialId } : {}),
       type: input.type, direction: input.direction,
-      baseQuantity: quantity, enteredQuantity: quantity, conversionFactor: 1,
+      baseQuantity: quantity, enteredQuantity: input.enteredQuantity ?? quantity, conversionFactor: input.conversionFactor ?? 1,
       ...(input.unitCost !== undefined ? { unitCost: input.unitCost } : {}),
       sourceType: input.sourceType, sourceId: input.sourceId,
       idempotencyKey: input.idempotencyKey,

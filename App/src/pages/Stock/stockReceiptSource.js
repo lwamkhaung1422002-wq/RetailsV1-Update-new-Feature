@@ -18,10 +18,15 @@ export function initialStockReceiptPayload({ productId, stock, cost, supplierNam
   };
 }
 
-export function stockInReceiptPayload({ productId, quantity, cost, notes, supplierName, invoiceReference }) {
+export function purchaseUnits(product) {
+  return (product?.units || []).filter((unit) => unit.canPurchase && unit.unit?.isActive !== false);
+}
+
+export function stockInReceiptPayload({ productId, unitId, quantity, cost, notes, supplierName, invoiceReference }) {
   const note = String(notes || "").trim();
   return {
     productId,
+    ...(unitId ? { unitId } : {}),
     quantity: Number(quantity),
     unitCost: Number(cost),
     ...(note ? { note } : {}),

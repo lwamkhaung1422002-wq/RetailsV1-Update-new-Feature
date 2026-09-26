@@ -134,6 +134,9 @@ export async function resolvePrice(
     await activateDuePriceEntries(tx, shopId, input.at ?? new Date());
   }
   const { product, variant, productUnit } = await assertPricingTarget(tx, shopId, input);
+  const enteredQuantity = input.quantity;
+  const conversionFactor = productUnit?.conversionFactor ?? new Prisma.Decimal(1);
+  const baseQuantity = enteredQuantity.mul(conversionFactor).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
   const at = input.at ?? new Date();
   const targetKeys = [
     priceTargetKey(product.id, variant?.id, productUnit?.id),
@@ -164,9 +167,11 @@ export async function resolvePrice(
       productId: product.id,
       OR: [{ variantId: variant?.id ?? null }, { variantId: null }],
       AND: [
-        { OR: [{ productUnitId: productUnit?.id ?? null }, { productUnitId: null }] },
+        { OR: [
+          { productUnitId: productUnit?.id ?? null, minimumQuantity: { lte: enteredQuantity } },
+          { productUnitId: null, minimumQuantity: { lte: baseQuantity } },
+        ] },
         { OR: [{ priceGroupId: input.priceGroupId ?? null }, { priceGroupId: null }] },
-        { minimumQuantity: { lte: input.quantity } },
       ],
     },
   });
@@ -177,7 +182,10 @@ export async function resolvePrice(
       startsAt: { lte: at },
       endsAt: { gt: at },
       state: { in: ["SCHEDULED", "RUNNING"] },
-      minimumQuantity: { lte: input.quantity },
+      OR: [
+        { productUnitId: productUnit?.id ?? null, minimumQuantity: { lte: enteredQuantity } },
+        { productUnitId: null, minimumQuantity: { lte: baseQuantity } },
+      ],
     },
     orderBy: [{ priority: "desc" }, { startsAt: "desc" }],
   });
@@ -187,7 +195,6 @@ export async function resolvePrice(
   const [entry, tiers, promotions] = "$transaction" in tx
     ? [await entryQuery, await tiersQuery, await promotionsQuery]
     : await Promise.all([entryQuery, tiersQuery, promotionsQuery]);
-  const conversionFactor = productUnit?.conversionFactor ?? new Prisma.Decimal(1);
   const entryIsUnitSpecific = Boolean(entry?.productUnitId);
   const baseRegularPrice = entry?.unitPrice ?? variant?.price ?? product.price;
   const regularUnitPrice = entryIsUnitSpecific || !productUnit
@@ -199,7 +206,9 @@ export async function resolvePrice(
     if (specificityA !== specificityB) return specificityB - specificityA;
     return Number(b.minimumQuantity.minus(a.minimumQuantity).toString());
   })[0] ?? null;
-  const tierUnitPrice = tier?.unitPrice ?? null;
+  const tierUnitPrice = tier
+    ? tier.productUnitId || !productUnit ? tier.unitPrice : roundMoney(new Prisma.Decimal(tier.unitPrice).mul(conversionFactor))
+    : null;
   const promotionBaseDefault = tierUnitPrice ?? regularUnitPrice;
   const promotion = promotions[0] ?? null;
   const promotionBase = promotion?.discountBase === "REGULAR_PRICE" ? regularUnitPrice : promotionBaseDefault;

@@ -113,7 +113,7 @@ pricingRouter.get("/:shopId/barcode-lookup/:value", async (request, response, ne
     const normalizedValue = normalizeBarcode(z.string().min(1).parse(request.params.value));
     const barcode = await prisma.productBarcode.findFirst({
       where: { shopId, normalizedValue, status: "ACTIVE", product: { isActive: true } },
-      include: { product: true, variant: true, productUnit: { include: { unit: true } } },
+      include: { product: { include: { units: { include: { unit: true } } } }, variant: true, productUnit: { include: { unit: true } } },
     });
     if (!barcode) {
       const inactiveBarcode = await prisma.productBarcode.findFirst({
@@ -123,11 +123,12 @@ pricingRouter.get("/:shopId/barcode-lookup/:value", async (request, response, ne
       response.json({ known: false, normalizedValue, inactive: Boolean(inactiveBarcode?.product && !inactiveBarcode.product.isActive) });
       return;
     }
+    const baseUnit = barcode.product.units.find((unit) => unit.isBase && unit.canSell);
     const pricing = await resolvePrice(prisma, shopId, {
-      productId: barcode.productId, variantId: barcode.variantId, productUnitId: barcode.productUnitId,
-      quantity: new Prisma.Decimal(barcode.packageQuantity ?? 1), channel: String(request.query.channel ?? "ALL"), activateDueEntries: false,
+      productId: barcode.productId, variantId: barcode.variantId, productUnitId: baseUnit?.id,
+      quantity: new Prisma.Decimal(1), channel: String(request.query.channel ?? "ALL"), activateDueEntries: false,
     });
-    response.json({ known: true, normalizedValue, barcode, product: barcode.product, variant: barcode.variant, productUnit: barcode.productUnit, packageQuantity: barcode.packageQuantity, pricing });
+    response.json({ known: true, normalizedValue, barcode, product: barcode.product, variant: barcode.variant, productUnit: baseUnit ?? null, packageQuantity: 1, pricing });
   } catch (error) { next(error); }
 });
 
