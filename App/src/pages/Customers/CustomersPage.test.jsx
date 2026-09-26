@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   permissions: new Set(["sale.create", "price.edit", "settings.manage"]),
   customerQuery: vi.fn(),
   api: {
-    customers: { create: vi.fn(), update: vi.fn(), remove: vi.fn(), get: vi.fn(), creditReport: vi.fn() },
+    customers: { create: vi.fn(), update: vi.fn(), remove: vi.fn(), get: vi.fn(), creditReport: vi.fn(), transactionReport: vi.fn() },
     shop: { getSettings: vi.fn(), updateSettings: vi.fn() },
   },
 }));
@@ -22,7 +22,7 @@ import CustomersPage from "./CustomersPage";
 import CustomerDetailsPage from "./CustomerDetailsPage";
 import CustomerDialog from "./CustomerDialog";
 
-function LocationProbe() { const location = useLocation(); return <span data-testid="location">{location.pathname}</span>; }
+function LocationProbe() { const location = useLocation(); return <><span data-testid="location">{location.pathname}</span><span data-testid="location-search">{location.search}</span></>; }
 function renderRoutes(path = "/customers") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[path]}><Routes>
@@ -50,12 +50,65 @@ beforeEach(() => {
   mocks.api.customers.remove.mockResolvedValue(undefined);
   mocks.api.customers.get.mockImplementation(async (id) => ({ customer: mocks.customers.find((item) => item.id === id) }));
   mocks.api.customers.creditReport.mockResolvedValue({ report: { effectiveCreditLimit: 500_000, outstanding: 0, availableCredit: 500_000, overdueAmount: 0, creditInvoices: 0, paidOnTime: 0, paidLate: 0, currentlyOverdue: 0, averageDaysLate: 0, longestDelay: 0, lastPayment: null, recentInvoices: [] } });
+  mocks.api.customers.transactionReport.mockResolvedValue({ customer: { id: "customer-1", name: "Aye Aye" }, summary: { totalPurchases: 1000, totalPaid: 600, outstanding: 400, invoiceCount: 1 }, invoices: [{ orderId: "order-1", orderNumber: "INV-1", date: "2026-09-26T00:00:00.000Z", effectiveAmount: 1000, paidAmount: 600, remainingAmount: 400, dueAt: null, paymentStatus: "Partial", paymentCount: 3 }] });
   mocks.api.shop.getSettings.mockResolvedValue({ settings: { defaultCreditLimit: 500_000, defaultPaymentTermsDays: 30 } });
   mocks.api.shop.updateSettings.mockResolvedValue({ settings: { defaultCreditLimit: 2_000_000, defaultPaymentTermsDays: 15 } });
 });
 afterEach(() => { cleanup(); });
 
 describe("Customers page", () => {
+  it("adds a read-only desktop Report without replacing Customer Details and opens existing invoice navigation", async () => {
+    renderRoutes();
+    fireEvent.click(screen.getByRole("button", { name: "View Aye Aye" }));
+    const details = await screen.findByRole("dialog", { name: "Customer Details" });
+    expect(within(details).getByText("Customer Information")).toBeTruthy();
+    expect(within(details).getByText("Commercial Terms")).toBeTruthy();
+    fireEvent.click(within(details).getByRole("button", { name: "Report" }));
+    const report = await screen.findByRole("dialog", { name: "Customer Transaction Report" });
+    expect(within(details).getByText("Customer Information")).toBeTruthy();
+    expect(within(report).getByText("Total Purchases")).toBeTruthy();
+    expect(await within(report).findByText("3 Payments")).toBeTruthy();
+    expect(within(report).queryByRole("button", { name: "Pay" })).toBeNull();
+    fireEvent.click(within(report).getByRole("button", { name: "#INV-1" }));
+    expect(screen.getByTestId("location").textContent).toBe("/sale/order-1");
+  });
+
+  it("navigates a report payment to the exact existing Payment order context", async () => {
+    renderRoutes();
+    fireEvent.click(screen.getByRole("button", { name: "View Aye Aye" }));
+    const details = await screen.findByRole("dialog", { name: "Customer Details" });
+    fireEvent.click(within(details).getByRole("button", { name: "Report" }));
+    const report = await screen.findByRole("dialog", { name: "Customer Transaction Report" });
+    fireEvent.click(await within(report).findByRole("button", { name: "3 Payments" }));
+    expect(screen.getByTestId("location").textContent).toBe("/payment");
+    expect(screen.getByTestId("location-search").textContent).toBe("?orderId=order-1");
+  });
+
+  it("passes invoice search and custom Yangon dates to the transaction endpoint", async () => {
+    renderRoutes();
+    fireEvent.click(screen.getByRole("button", { name: "View Aye Aye" }));
+    const details = await screen.findByRole("dialog", { name: "Customer Details" });
+    fireEvent.click(within(details).getByRole("button", { name: "Report" }));
+    const report = await screen.findByRole("dialog", { name: "Customer Transaction Report" });
+    fireEvent.change(within(report).getByPlaceholderText("Search invoice number..."), { target: { value: "INV-1" } });
+    fireEvent.click(within(report).getByRole("button", { name: "Custom" }));
+    fireEvent.change(within(report).getByLabelText("From"), { target: { value: "2026-09-01" } });
+    fireEvent.change(within(report).getByLabelText("To"), { target: { value: "2026-09-30" } });
+    await waitFor(() => expect(mocks.api.customers.transactionReport).toHaveBeenCalledWith("customer-1", { search: "INV-1", from: "2026-09-01", to: "2026-09-30" }));
+  });
+
+  it("keeps the mobile details header and exposes Report through Customer actions", async () => {
+    mocks.mobile = true;
+    window.matchMedia = vi.fn().mockImplementation(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderRoutes("/customers/customer-1");
+    expect(await screen.findByText("Customer Details")).toBeTruthy();
+    expect(screen.getByLabelText("Back to Customers")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Customer actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report" }));
+    const report = await screen.findByRole("dialog", { name: "Customer Transaction Report" });
+    expect(await within(report).findByText("#INV-1")).toBeTruthy();
+    expect(screen.getByText("Customer Information")).toBeTruthy();
+  });
   it("keeps desktop search, secondary Credit Defaults, then primary Add Customer and opens details in a modal", async () => {
     renderRoutes();
     expect(mocks.customerQuery).toHaveBeenCalledWith({ includeStats: true });

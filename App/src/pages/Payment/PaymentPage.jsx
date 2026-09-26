@@ -1,5 +1,5 @@
-import { memo, useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import {
   Alert,
   Box,
@@ -44,6 +44,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useManagerApproval } from "../../context/approval-context";
 import { queryKeys } from "../../lib/queryKeys";
 import { refundableSalePayments } from "../../lib/refundablePayments";
+import { creditDueState, customerCreditSummary, filterCustomerCredit, isActiveCustomerCredit, yangonDateKey } from "../../lib/customerCreditWorklist";
 
 const payments = [
   {
@@ -292,6 +293,7 @@ const paymentRefreshKeys = {
 export default function PaymentPage() {
   const isMobile = useMediaQuery("(max-width:768px)");
   const navigate = useNavigate();
+  const location = useLocation();
   const api = usePosApi();
   const queryClient = useQueryClient();
   const { shop } = useAuth();
@@ -309,6 +311,7 @@ export default function PaymentPage() {
   const [menuPayment, setMenuPayment] = useState(null);
   const [mobileDialog, setMobileDialog] = useState(null);
   const [detailPayment, setDetailPayment] = useState(null);
+  const [mode, setMode] = useState("Payments");
   const [paymentError, setPaymentError] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
   const paymentMethods = useMemo(() => {
@@ -354,11 +357,25 @@ export default function PaymentPage() {
     setMenuPayment(payment);
   }, []);
 
+  useEffect(() => {
+    const orderId = new URLSearchParams(location.search).get("orderId");
+    if (orderId && isMobile) navigate(`/sale/${encodeURIComponent(orderId)}`, { replace: true, state: { from: "/payment" } });
+  }, [isMobile, location.search, navigate]);
+
+  const focusedOrderId = new URLSearchParams(location.search).get("orderId");
+  const activeDetailPayment = detailPayment || (!isMobile && focusedOrderId ? { kind: "sale", apiId: focusedOrderId } : null);
+
+  const closeDetailPayment = () => {
+    setDetailPayment(null);
+    if (new URLSearchParams(location.search).has("orderId")) navigate("/payment", { replace: true });
+  };
+
   const visiblePayments = useMemo(() => {
     const query = search.trim().toLowerCase();
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Yangon", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).replace(/\//g, "-");
     return paymentRecords.filter(
       (payment) =>
+        !isActiveCustomerCredit(payment) &&
         (status === "All" ||
           (status === "Unpaid"
             ? ["Unpaid", "Partial", "Credit"].includes(payment.status)
@@ -405,13 +422,17 @@ export default function PaymentPage() {
         fontFamily: "Inter, Roboto, 'Noto Sans Myanmar', sans-serif",
       }}
     >
-      {!isMobile ? (
+      {!isMobile ? <>
+        <PaymentModeTabs mode={mode} onChange={setMode} />
+        {mode === "Payments" ? (
         <DesktopPaymentsPage
+          records={paymentRecords}
           onAddPayment={() => setMobileDialog({ mode: "entry" })}
           onDetails={openMobilePayment}
           onMenu={openMobilePaymentMenu}
         />
-      ) : <>
+        ) : <CustomerCreditView records={paymentRecords} isMobile={false} onDetails={openMobilePayment} onMenu={openMobilePaymentMenu} />}
+      </> : <>
       <Box sx={topBarSx}>
         <IconButton
           aria-label="Back to settings"
@@ -425,14 +446,16 @@ export default function PaymentPage() {
         </Typography>
         <IconButton
           aria-label="Filter payments"
-          onClick={() => setFilterOpen(true)}
+          onClick={() => mode === "Payments" ? setFilterOpen(true) : document.getElementById("customer-credit-filters")?.scrollIntoView()}
           sx={topIconSx}
         >
           <FilterAltOutlinedIcon sx={{ fontSize: 30 }} />
         </IconButton>
       </Box>
 
-      <Box sx={{ px: 2.5, pt: 2 }}>
+      <PaymentModeTabs mode={mode} onChange={setMode} />
+
+      {mode === "Payments" ? <Box sx={{ px: 2.5, pt: 2 }}>
         <TextField
           fullWidth
           value={search}
@@ -517,7 +540,7 @@ export default function PaymentPage() {
             </Typography>
           )}
         </Stack>
-      </Box>
+      </Box> : <CustomerCreditView records={paymentRecords} isMobile onDetails={openMobilePayment} onMenu={openMobilePaymentMenu} />}
 
       <Paper
         elevation={5}
@@ -537,18 +560,18 @@ export default function PaymentPage() {
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: "1.65fr 0.9fr",
+            gridTemplateColumns: mode === "Payments" ? "1.65fr 0.9fr" : "1fr",
             gap: 1.5,
           }}
         >
-          <Button
+          {mode === "Payments" && <Button
             variant="contained"
             startIcon={<AddRoundedIcon />}
             onClick={() => setMobileDialog({ mode: "entry" })}
             sx={footerPrimarySx}
           >
             Add Payment
-          </Button>
+          </Button>}
           <Button
             variant="outlined"
             startIcon={<HistoryRoundedIcon />}
@@ -792,10 +815,10 @@ export default function PaymentPage() {
             </MenuItem>
           )}
       </Menu>
-      {!isMobile && detailPayment && <Dialog open onClose={() => setDetailPayment(null)} fullWidth maxWidth="sm">
-        <Box sx={{ display: "flex", justifyContent: "flex-end" }}><IconButton aria-label="Close details" onClick={() => setDetailPayment(null)}><CloseRoundedIcon /></IconButton></Box>
+      {!isMobile && activeDetailPayment && <Dialog open onClose={closeDetailPayment} fullWidth maxWidth="sm">
+        <Box sx={{ display: "flex", justifyContent: "flex-end" }}><IconButton aria-label="Close details" onClick={closeDetailPayment}><CloseRoundedIcon /></IconButton></Box>
         <DialogContent sx={{ p: 0 }}>
-          {detailPayment.kind === "sale" ? <OrderDetailsPage embeddedOrderId={detailPayment.apiId} embeddedOnClose={() => setDetailPayment(null)} forceMobileLayout hideBackButton /> : <SupplierDetailsPage embeddedSupplierId={detailPayment.supplierId} embeddedRecordId={detailPayment.kind === "supplier-delivery" ? detailPayment.apiId : undefined} hideBackButton />}
+          {activeDetailPayment.kind === "sale" ? <OrderDetailsPage embeddedOrderId={activeDetailPayment.apiId} embeddedOnClose={closeDetailPayment} forceMobileLayout hideBackButton /> : <SupplierDetailsPage embeddedSupplierId={activeDetailPayment.supplierId} embeddedRecordId={activeDetailPayment.kind === "supplier-delivery" ? activeDetailPayment.apiId : undefined} hideBackButton />}
         </DialogContent>
       </Dialog>}
       {mobileDialog?.mode === "supplier-pay" && (
@@ -948,11 +971,45 @@ export default function PaymentPage() {
   );
 }
 
-function DesktopPaymentsPage({ onAddPayment, onDetails, onMenu }) {
+function PaymentModeTabs({ mode, onChange }) {
+  return <Stack direction="row" spacing={1} sx={{ px: { xs: 2.5, md: 0 }, mb: { xs: 0, md: 2 } }} aria-label="Payment mode">
+    {["Payments", "Customer Credit"].map((value) => <Button key={value} variant={mode === value ? "contained" : "outlined"} onClick={() => onChange(value)} sx={{ textTransform: "none", fontWeight: 700, borderRadius: 1.25 }}>{value}</Button>)}
+  </Stack>;
+}
+
+function CustomerCreditView({ records, isMobile, onDetails, onMenu }) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("All");
+  const today = yangonDateKey();
+  const summary = useMemo(() => customerCreditSummary(records, today), [records, today]);
+  const visible = useMemo(() => filterCustomerCredit(records, { search, filter, today }), [records, search, filter, today]);
+  return <Box component={isMobile ? "div" : Paper} sx={isMobile ? { px: 2.5, pt: 2 } : desktopPaymentPageSx}>
+    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: 1.25 }}>
+      {[["Outstanding", money(summary.outstanding)], ["Overdue", money(summary.overdue)], ["Due Soon", money(summary.dueSoon)], ["Customers", summary.customers]].map(([label, value]) => <Paper key={label} variant="outlined" sx={{ p: 1.5, borderRadius: 1.5 }}>
+        <Typography color="text.secondary" sx={{ fontSize: 13 }}>{label}</Typography>
+        <Typography sx={{ fontSize: 17, fontWeight: 700 }}>{value}</Typography>
+      </Paper>)}
+    </Box>
+    <TextField fullWidth value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search customer or invoice..." inputProps={{ "aria-label": "Search customer or invoice" }} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon /></InputAdornment> } }} sx={{ mt: 2, maxWidth: { md: 520 }, ...desktopPaymentSearchSx }} />
+    <Stack id="customer-credit-filters" direction="row" spacing={1} sx={{ mt: 1.5, overflowX: "auto" }}>
+      {["All", "Overdue", "Due Soon", "Open"].map((value) => isMobile
+        ? <StatusButton key={value} label={value} active={filter === value} onClick={() => setFilter(value)} />
+        : <DesktopPaymentFilter key={value} label={value} active={filter === value} onClick={() => setFilter(value)} />)}
+    </Stack>
+    <Typography sx={{ mt: 2, mb: 1, fontWeight: 700 }}>{visible.length} Customer Credit</Typography>
+    <Box sx={isMobile ? { display: "grid", gap: 1.75, pb: 2 } : desktopPaymentGridSx}>
+      {visible.map((record) => isMobile
+        ? <PaymentCard key={record.recordKey || record.id} payment={record} credit onClick={onDetails} onMenu={onMenu} />
+        : <DesktopPaymentCard key={record.recordKey || record.id} payment={record} credit onClick={onDetails} onMenu={onMenu} />)}
+    </Box>
+    {!visible.length && <Typography align="center" color="text.secondary" sx={{ py: 6 }}>No customer credit found.</Typography>}
+  </Box>;
+}
+
+function DesktopPaymentsPage({ records, onAddPayment, onDetails, onMenu }) {
   const api = usePosApi();
   const queryClient = useQueryClient();
   const { shop } = useAuth();
-  const { data: records = [] } = usePaymentWorklistQuery();
   const [status, setStatus] = useState("All");
   const [search, setSearch] = useState("");
   const [dateMode, setDateMode] = useState("all");
@@ -961,6 +1018,7 @@ function DesktopPaymentsPage({ onAddPayment, onDetails, onMenu }) {
   const [dialog, setDialog] = useState(null);
   const [menu, setMenu] = useState(null);
   const visible = useMemo(() => records.filter((record) => {
+    if (isActiveCustomerCredit(record)) return false;
     const date = record.date;
     return (
       (status === "All" ||
@@ -1800,7 +1858,7 @@ function StatusButton({ label, active, onClick, icon, color }) {
   );
 }
 
-const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
+const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu, credit = false }) {
   const cancelled = ["Cancel", "Cancelled"].includes(payment.status);
   const paid = payment.status === "Paid";
   const showRemaining =
@@ -1813,9 +1871,10 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
       : payment.kind === "income"
         ? "Income"
         : payment.id;
-  const dateLabel = payment.status === "Credit" && ["supplier", "supplier-delivery"].includes(payment.kind)
+  const dateLabel = credit ? "Due" : payment.status === "Credit" && ["supplier", "supplier-delivery"].includes(payment.kind)
     ? "Due"
     : "Date";
+  const displayDate = credit ? (payment.dueAt ? yangonDateKey(payment.dueAt).split("-").reverse().join("/") : "Not recorded") : payment.date.split("-").reverse().join("/");
   const tone =
     cancelled
       ? "#d14343"
@@ -1841,6 +1900,7 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
         fontFamily: "Inter, Roboto, Noto Sans Myanmar, sans-serif",
       }}
     >
+      <Box sx={{ gridColumn: 1, gridRow: 1, display: "flex", gap: 0.75, alignItems: "center" }}>
       <Chip
         label={cancelled ? "Cancel" : payment.status}
         size="small"
@@ -1864,6 +1924,8 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
           borderRadius: 1,
         }}
       />
+      {credit && <Chip label={creditDueState(payment)} size="small" color={creditDueState(payment) === "Overdue" ? "error" : "default"} sx={{ height: 28 }} />}
+      </Box>
       <Typography
         noWrap
         sx={{
@@ -1876,7 +1938,7 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
           color: "text.primary",
         }}
       >
-        {payment.name}
+        {credit ? payment.customerName || payment.name : payment.name}
       </Typography>
       <Stack
         direction="row"
@@ -1955,7 +2017,7 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
             color: "inherit",
           }}
         >
-          {payment.date.split("-").reverse().join("/")}
+          {displayDate}
         </Typography>
       </Box>
       <Stack
@@ -1978,7 +2040,7 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
           </Typography>
         )}
         <IconButton
-          aria-label={`More actions for ${payment.name}`}
+          aria-label={`More actions for ${credit ? payment.customerName || payment.name : payment.name}`}
           onClick={(event) => onMenu(event, payment)}
           disabled={cancelled}
           size="small"
@@ -1991,7 +2053,7 @@ const PaymentCard = memo(function PaymentCard({ payment, onClick, onMenu }) {
   );
 });
 
-const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onClick, onMenu }) {
+const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onClick, onMenu, credit = false }) {
   const cancelled = ["Cancel", "Cancelled"].includes(payment.status);
   const paid = payment.status === "Paid";
   const showRemaining = !cancelled && Number(payment.remainingAmount || 0) > 0;
@@ -2001,11 +2063,12 @@ const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onClick, 
       : payment.kind === "income"
         ? "Income"
         : payment.id;
-  const dateLabel =
+  const dateLabel = credit ? "Due" :
     cancelled ||
     (payment.kind === "sale" && ["Unpaid", "Partial"].includes(payment.status))
       ? "Date"
       : payment.dateLabel;
+  const displayDate = credit ? (payment.dueAt ? yangonDateKey(payment.dueAt).split("-").reverse().join("/") : "Not recorded") : payment.date.split("-").reverse().join("/");
   const tone =
     cancelled
       ? "#d14343"
@@ -2035,6 +2098,7 @@ const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onClick, 
         "& > *": { minWidth: 0 },
       }}
     >
+      <Box sx={{ gridColumn: 1, gridRow: 1, display: "flex", gap: 0.75, alignItems: "center", minWidth: 0 }}>
       <Chip
         label={cancelled ? "Cancel" : payment.status}
         size="small"
@@ -2058,6 +2122,8 @@ const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onClick, 
           borderRadius: 1,
         }}
       />
+      {credit && <Chip label={creditDueState(payment)} size="small" color={creditDueState(payment) === "Overdue" ? "error" : "default"} sx={{ height: 28 }} />}
+      </Box>
       <Typography
         noWrap
         sx={{
@@ -2070,7 +2136,7 @@ const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onClick, 
           color: "text.primary",
         }}
       >
-        {payment.name}
+        {credit ? payment.customerName || payment.name : payment.name}
       </Typography>
       <Typography
         noWrap
@@ -2151,12 +2217,12 @@ const DesktopPaymentCard = memo(function DesktopPaymentCard({ payment, onClick, 
             component="span"
             sx={{ color: "inherit", fontSize: 13, fontWeight: 500 }}
           >
-            {payment.date.split("-").reverse().join("/")}
+            {displayDate}
           </Box>
         </Typography>
       </Box>
       <IconButton
-        aria-label={`More actions for ${payment.name}`}
+        aria-label={`More actions for ${credit ? payment.customerName || payment.name : payment.name}`}
         onClick={(event) => onMenu(event, payment)}
         disabled={cancelled}
         size="small"
@@ -2494,8 +2560,17 @@ function OrderPaymentForm({ record, paymentMethods, saving, onOrderPay }) {
         </Typography>
       </Paper>
       <Typography color="text.secondary" sx={{ fontSize: 13 }}>
-        The full remaining balance will be settled automatically.
+        Enter an amount up to the remaining balance.
       </Typography>
+      <TextField
+        label="Amount"
+        type="number"
+        value={orderPayment.amount}
+        onChange={(event) => setOrderPayment((current) => ({ ...current, amount: event.target.value }))}
+        slotProps={{ htmlInput: { min: 0.01, max: record.remainingAmount ?? record.amount, step: "any" } }}
+        error={Boolean(orderPayment.amount) && Number(orderPayment.amount) > Number(record.remainingAmount ?? record.amount)}
+        fullWidth
+      />
       <TextField
         select
         label="Payment method"
@@ -2536,7 +2611,7 @@ function OrderPaymentForm({ record, paymentMethods, saving, onOrderPay }) {
       />
       <Button
         variant="contained"
-        disabled={saving || !Number(orderPayment.amount)}
+        disabled={saving || !Number.isFinite(Number(orderPayment.amount)) || Number(orderPayment.amount) <= 0 || Number(orderPayment.amount) > Number(record.remainingAmount ?? record.amount)}
         onClick={() =>
           onOrderPay(record, {
             amount: Number(orderPayment.amount),

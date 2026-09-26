@@ -22,6 +22,7 @@ vi.mock("../../hooks/usePosQueries", () => ({
 vi.mock("../../context/AuthContext", () => ({ useAuth: () => ({ shop: { id: "shop-1" } }) }));
 vi.mock("../../context/approval-context", () => ({ useManagerApproval: () => ({ runWithApproval: vi.fn() }) }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: mocks.invalidateQueries }) }));
+vi.mock("../Sale/OrderDetailsPage", () => ({ default: ({ embeddedOrderId }) => <div>Order detail {embeddedOrderId}</div> }));
 
 import PaymentPage from "./PaymentPage";
 
@@ -59,6 +60,7 @@ beforeEach(() => {
   mocks.api.shop.getSettings.mockResolvedValue({ settings: { paymentMethods: [] } });
   mocks.api.suppliers.deliveryRecord.mockResolvedValue({ record: { id: "delivery-1", supplierName: "Golden", amount: 100, remaining: 100, payments: [] } });
   mocks.invalidateQueries.mockResolvedValue(undefined);
+  mocks.api.payments.addToOrder.mockResolvedValue({ payment: { id: "payment-1" } });
 });
 
 afterEach(() => {
@@ -80,5 +82,65 @@ describe("Payment Page local workflows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Payment" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByTestId("location").textContent).toBe("/payment");
+  });
+
+  it("defaults to Payments and places only active customer sales in Customer Credit", () => {
+    mocks.records.push({ recordKey: "sale:order-1", id: "INV-1", apiId: "order-1", kind: "sale", name: "Sale", customerId: "customer-1", customerName: "ABC Store", paymentTracking: true, amount: 1000, remainingAmount: 300, status: "Partial", method: "Cash", dueAt: null, date: "2026-09-20", isoDate: "2026-09-20" });
+    mocks.records.push({ recordKey: "sale:order-2", id: "INV-2", apiId: "order-2", kind: "sale", name: "Sale", customerId: "customer-2", customerName: "Settled Shop", paymentTracking: true, amount: 1000, remainingAmount: 0, status: "Paid", date: "2026-09-20", isoDate: "2026-09-20" });
+    render(<MemoryRouter initialEntries={["/payment"]}><PaymentPage /></MemoryRouter>);
+    expect(screen.getByRole("button", { name: "Add Payment" })).toBeTruthy();
+    expect(screen.queryByText("ABC Store")).toBeNull();
+    expect(screen.getByText("Golden")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Customer Credit" }));
+    expect(screen.getByText("ABC Store")).toBeTruthy();
+    expect(screen.getByText("Partial")).toBeTruthy();
+    expect(screen.getByText("Not recorded")).toBeTruthy();
+    expect(screen.getByText("300 ကျပ်")).toBeTruthy();
+    expect(screen.queryByText("Golden")).toBeNull();
+    expect(screen.queryByText("Settled Shop")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add Payment" })).toBeNull();
+  });
+
+  it("collects a partial customer payment through the existing OrderPaymentForm", async () => {
+    mocks.records.push({ recordKey: "sale:order-1", id: "INV-1", apiId: "order-1", kind: "sale", name: "Sale", customerId: "customer-1", customerName: "ABC Store", paymentTracking: true, amount: 1000, remainingAmount: 300, status: "Partial", method: "Cash", dueAt: null, date: "2026-09-20", isoDate: "2026-09-20" });
+    render(<MemoryRouter initialEntries={["/payment"]}><PaymentPage /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Customer Credit" }));
+    fireEvent.click(screen.getByLabelText("More actions for ABC Store"));
+    fireEvent.click(screen.getByText("Pay"));
+    expect(screen.getByText("Record Sale Payment")).toBeTruthy();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record Payment" }));
+    await screen.findByText("ABC Store");
+    expect(mocks.api.payments.addToOrder).toHaveBeenCalledWith("order-1", expect.objectContaining({ amount: 100, method: "Cash" }));
+  });
+
+  it("removes a fully settled invoice from active Customer Credit while keeping History available", () => {
+    mocks.records.push({ recordKey: "sale:order-1", id: "INV-1", apiId: "order-1", kind: "sale", name: "Sale", customerId: "customer-1", customerName: "ABC Store", paymentTracking: true, amount: 1000, remainingAmount: 300, status: "Partial", dueAt: null, date: "2026-09-20", isoDate: "2026-09-20" });
+    const result = render(<MemoryRouter initialEntries={["/payment"]}><PaymentPage /><LocationProbe /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Customer Credit" }));
+    expect(screen.getByText("ABC Store")).toBeTruthy();
+    mocks.records = mocks.records.map((record) => record.apiId === "order-1" ? { ...record, remainingAmount: 0, status: "Paid" } : record);
+    result.rerender(<MemoryRouter initialEntries={["/payment"]}><PaymentPage /><LocationProbe /></MemoryRouter>);
+    expect(screen.queryByText("ABC Store")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getByTestId("location").textContent).toBe("/payment/history");
+  });
+
+  it("opens a report-linked payment in existing desktop order details", () => {
+    window.matchMedia = vi.fn().mockImplementation(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    render(<MemoryRouter initialEntries={["/payment?orderId=order-1"]}><PaymentPage /></MemoryRouter>);
+    expect(screen.getByText("Order detail order-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+    expect(screen.queryByText("Order detail order-1")).toBeNull();
+  });
+
+  it("reuses the existing desktop sale card detail interaction in Customer Credit", () => {
+    window.matchMedia = vi.fn().mockImplementation(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    mocks.records.push({ recordKey: "sale:order-1", id: "INV-1", apiId: "order-1", kind: "sale", name: "Sale", customerId: "customer-1", customerName: "ABC Store", paymentTracking: true, amount: 1000, remainingAmount: 300, status: "Partial", dueAt: null, date: "2026-09-20", isoDate: "2026-09-20" });
+    render(<MemoryRouter initialEntries={["/payment"]}><PaymentPage /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Customer Credit" }));
+    expect(screen.getByText("ABC Store")).toBeTruthy();
+    fireEvent.click(screen.getByText("ABC Store"));
+    expect(screen.getByText("Order detail order-1")).toBeTruthy();
   });
 });

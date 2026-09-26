@@ -174,6 +174,64 @@ describe("customer routes", () => {
     expect(created.body.customer).toMatchObject({ effectiveCreditLimit: 0, effectivePaymentTermsDays: 30 });
   });
 
+  it("reports paid, partial, unpaid, returned and cancelled customer invoices with allocated payments", async () => {
+    mocks.findFirst.mockResolvedValue({ id: "customer-1", name: "Aye Aye" });
+    const order = (id: string, total: number, payments: Array<{ id: string; amount: number }> = [], changes = {}) => ({
+      id, orderNumber: id, createdAt: new Date("2026-09-26T00:00:00.000Z"), dueAt: null,
+      paymentStatus: "unpaid", fulfillmentStatus: "completed", cancelledAt: null,
+      total, subtotal: total, discount: 0, deliveryFee: 0,
+      items: [{ id: `${id}-item`, quantity: 1, baseQuantity: 1, lineTotal: total, returns: [] }],
+      payments, ...changes,
+    });
+    mocks.orderFindMany.mockResolvedValue([
+      order("PAID", 100, [{ id: "p1", amount: 100 }]),
+      order("PARTIAL", 200, [{ id: "p2", amount: 50 }]),
+      order("UNPAID", 300),
+      order("RETURNED", 100, [{ id: "p3", amount: 80 }, { id: "r1", amount: -30 }], { items: [{ id: "returned-item", quantity: 2, baseQuantity: 2, lineTotal: 100, returns: [{ quantity: 1 }] }] }),
+      order("CANCELLED", 500, [], { cancelledAt: new Date("2026-09-27T00:00:00.000Z"), fulfillmentStatus: "cancelled" }),
+    ]);
+    mocks.paymentFindMany.mockResolvedValue([{ id: "scoped-1", amount: 50, type: "payment", scope: "COD", allocations: JSON.stringify([{ orderId: "PARTIAL", amount: 50 }]) }]);
+
+    const response = await request(app).get("/shop-1/customers/customer-1/transaction-report").expect(200);
+    expect(response.body.invoices).toHaveLength(5);
+    expect(response.body.invoices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ orderId: "PAID", effectiveAmount: 100, paidAmount: 100, remainingAmount: 0, paymentStatus: "Paid", paymentCount: 1 }),
+      expect.objectContaining({ orderId: "PARTIAL", effectiveAmount: 200, paidAmount: 100, remainingAmount: 100, paymentStatus: "Partial", paymentCount: 2 }),
+      expect.objectContaining({ orderId: "UNPAID", effectiveAmount: 300, paidAmount: 0, remainingAmount: 300, paymentStatus: "Unpaid", paymentCount: 0 }),
+      expect.objectContaining({ orderId: "RETURNED", effectiveAmount: 50, paidAmount: 50, remainingAmount: 0, paymentStatus: "Paid", paymentCount: 2 }),
+      expect.objectContaining({ orderId: "CANCELLED", paymentStatus: "Cancelled" }),
+    ]));
+    expect(response.body.summary).toEqual({ totalPurchases: 650, totalPaid: 250, outstanding: 400, invoiceCount: 5 });
+    expect(mocks.findFirst).toHaveBeenCalledWith({ where: { id: "customer-1", shopId: "shop-1" }, select: { id: true, name: true } });
+  });
+
+  it("filters transaction report by invoice and Yangon date without changing credit-report", async () => {
+    mocks.findFirst.mockResolvedValue({ id: "customer-1", name: "Aye Aye" });
+    mocks.orderFindMany.mockResolvedValue([]);
+    await request(app).get("/shop-1/customers/customer-1/transaction-report?search=INV-10&from=2026-09-01&to=2026-09-26").expect(200);
+    expect(mocks.orderFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      shopId: "shop-1", customerId: "customer-1",
+      OR: [{ orderNumber: { contains: "INV-10", mode: "insensitive" } }, { id: { contains: "INV-10", mode: "insensitive" } }],
+      createdAt: { gte: new Date("2026-08-31T17:30:00.000Z"), lt: new Date("2026-09-26T17:30:00.000Z") },
+    }) }));
+    await request(app).get("/shop-1/customers/customer-1/transaction-report?from=2026-09-27&to=2026-09-26").expect(400);
+    expect(mocks.orderFindMany).toHaveBeenCalledOnce();
+  });
+
+  it("never reports a negative remaining balance for an overpaid historical invoice", async () => {
+    mocks.findFirst.mockResolvedValue({ id: "customer-1", name: "Aye Aye" });
+    mocks.orderFindMany.mockResolvedValue([{
+      id: "overpaid", orderNumber: "OVERPAID", createdAt: new Date("2026-09-26T00:00:00.000Z"), dueAt: null,
+      paymentStatus: "paid", fulfillmentStatus: "completed", cancelledAt: null,
+      total: 100, subtotal: 100, discount: 0, deliveryFee: 0,
+      items: [{ id: "item-1", quantity: 1, baseQuantity: 1, lineTotal: 100, returns: [] }],
+      payments: [{ id: "payment-1", amount: 150 }],
+    }]);
+    const response = await request(app).get("/shop-1/customers/customer-1/transaction-report").expect(200);
+    expect(response.body.invoices[0]).toMatchObject({ paidAmount: 150, remainingAmount: 0, paymentStatus: "Paid" });
+    expect(response.body.summary.outstanding).toBe(0);
+  });
+
   it.each(["fully paid", "unpaid", "cancelled"])("refuses to delete a customer with %s order history", async (historyType) => {
     mocks.findFirst.mockResolvedValue({ id: "customer-1" });
     mocks.orderFindFirst.mockResolvedValue({ id: "order-1", paymentStatus: historyType === "fully paid" ? "paid" : "unpaid", cancelledAt: historyType === "cancelled" ? new Date() : null });

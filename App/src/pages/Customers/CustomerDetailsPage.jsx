@@ -5,11 +5,13 @@ import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import MoreVertRoundedIcon from "@mui/icons-material/MoreVertRounded";
+import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
 import { useAuth } from "../../context/AuthContext";
 import { usePosApi } from "../../hooks/useApiResource";
 import CustomerDialog from "./CustomerDialog";
+import CustomerTransactionReport from "./CustomerTransactionReport";
 
 const amount = (value) => Number(value ?? 0).toLocaleString("en-US");
 const date = (value) => value ? new Date(value).toLocaleDateString() : "—";
@@ -102,6 +104,7 @@ export default function CustomerDetailsPage({ customerId: selectedCustomerId, on
   const visibleReportError = reportError?.customerId === customerId ? reportError.message : "";
   const [reloadKey, setReloadKey] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [transactionOpen, setTransactionOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -144,7 +147,7 @@ export default function CustomerDetailsPage({ customerId: selectedCustomerId, on
         <Toolbar sx={{ minHeight: 64, display: "grid", gridTemplateColumns: "48px minmax(0, 1fr) 48px", px: 1 }}>
           <IconButton aria-label="Back to Customers" onClick={closeDetails} sx={{ color: "inherit" }}><ArrowBackRoundedIcon /></IconButton>
           <Typography noWrap sx={{ textAlign: "center", fontSize: 18.5, fontWeight: 700 }}>Customer Details</Typography>
-          <IconButton aria-label="Customer actions" disabled={!visibleCustomer || (!canEdit && !canDelete)} onClick={(event) => setMenuAnchor(event.currentTarget)} sx={{ color: "inherit" }}><MoreVertRoundedIcon /></IconButton>
+          <IconButton aria-label="Customer actions" disabled={!visibleCustomer} onClick={(event) => setMenuAnchor(event.currentTarget)} sx={{ color: "inherit" }}><MoreVertRoundedIcon /></IconButton>
         </Toolbar>
       </AppBar>
       <Box sx={{ px: 2, pt: 2 }}>{content}</Box>
@@ -152,6 +155,7 @@ export default function CustomerDetailsPage({ customerId: selectedCustomerId, on
       <DialogTitle id="customer-details-title" sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, py: 1.25, pl: 2.5, pr: 1.5 }}>
         <Typography component="span" sx={{ fontSize: 19, fontWeight: 700 }}>Customer Details</Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          {visibleCustomer && <Button startIcon={<AssessmentOutlinedIcon />} onClick={() => setTransactionOpen(true)} sx={{ textTransform: "none", fontSize: 14 }}>Report</Button>}
           {visibleCustomer && canEdit && <Button onClick={() => setEditorOpen(true)} sx={{ textTransform: "none", fontSize: 14 }}>Edit</Button>}
           {visibleCustomer && canDelete && <Button color="error" disabled={visibleCustomer.hasHistory} title={visibleCustomer.hasHistory ? "Customer has transaction history and cannot be deleted." : undefined} onClick={() => { setDeleteError(""); setDeleteOpen(true); }} sx={{ textTransform: "none", fontSize: 14 }}>Delete</Button>}
           <IconButton aria-label="Close Customer Details" onClick={closeDetails}><CloseRoundedIcon /></IconButton>
@@ -160,7 +164,9 @@ export default function CustomerDetailsPage({ customerId: selectedCustomerId, on
       <DialogContent dividers sx={{ p: 2.5, minWidth: 0, overflowY: "auto" }}>{content}</DialogContent>
     </Dialog>}
     {visibleCustomer && <CustomerDialog open={editorOpen} customer={visibleCustomer} onClose={() => setEditorOpen(false)} onSaved={(saved) => { setCustomer(saved); setReportState(null); setReloadKey((key) => key + 1); }} />}
+    {visibleCustomer && <CustomerTransactionReport open={transactionOpen} customerId={visibleCustomer.id} onClose={() => setTransactionOpen(false)} onInvoice={(orderId) => navigate(`/sale/${orderId}`, { state: { from: `/customers/${customerId}` } })} onPayment={(orderId) => navigate(`/payment?orderId=${encodeURIComponent(orderId)}`)} />}
     <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
+      {visibleCustomer && <MenuItem onClick={() => { setMenuAnchor(null); setTransactionOpen(true); }}><AssessmentOutlinedIcon sx={{ mr: 1.5 }} />Report</MenuItem>}
       {visibleCustomer && canEdit && <MenuItem onClick={() => { setMenuAnchor(null); setEditorOpen(true); }}><EditOutlinedIcon sx={{ mr: 1.5 }} />Edit</MenuItem>}
       {visibleCustomer && canDelete && <MenuItem disabled={Boolean(visibleCustomer.hasHistory)} title={visibleCustomer.hasHistory ? "Customer has transaction history and cannot be deleted." : undefined} onClick={() => { setMenuAnchor(null); setDeleteError(""); setDeleteOpen(true); }}><DeleteOutlineRoundedIcon sx={{ mr: 1.5 }} />Delete</MenuItem>}
     </Menu>

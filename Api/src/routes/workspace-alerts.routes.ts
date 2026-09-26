@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { expenseHistoryRecords, expenseWorklistRecord } from "../lib/expense-payment.js";
 import { currentSalePaymentState } from "../lib/sale-payment-state.js";
+import { orderPaidAmount } from "../lib/order-payment-balance.js";
 import { assertUserOwnsShop } from "../lib/shop-access.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
 
@@ -62,12 +63,10 @@ workspaceAlertsRouter.get("/:shopId/payment-history", async (request, response, 
     response.json({ records }); return;
   }
   const [orders, deliveries, expenses] = await Promise.all([
-    // The worklist only serializes these fields. Avoid materializing order item,
-    // customer, and payment columns that never leave this endpoint.
     prisma.order.findMany({
       where: { shopId, paymentTracking: true },
       select: {
-        id: true, orderNumber: true, fulfillmentStatus: true, total: true, createdAt: true,
+        id: true, orderNumber: true, customerId: true, dueAt: true, paymentTracking: true, cancelledAt: true, fulfillmentStatus: true, total: true, createdAt: true,
         customer: { select: { name: true } },
         subtotal: true, discount: true, deliveryFee: true,
         items: { select: { id: true, quantity: true, baseQuantity: true, lineTotal: true, returns: { select: { quantity: true } } } },
@@ -92,8 +91,12 @@ workspaceAlertsRouter.get("/:shopId/payment-history", async (request, response, 
       select: { id: true, title: true, category: true, amount: true, method: true, spentAt: true, createdAt: true, cancelledAt: true },
     }),
   ]);
+  const scopedPayments = orders.length ? await prisma.payment.findMany({
+    where: { shopId, orderIds: { not: null }, OR: orders.map((order) => ({ orderIds: { contains: order.id } })) },
+    select: { amount: true, type: true, scope: true, allocations: true },
+  }) : [];
   const latest = <T extends { paidAt?: Date; createdAt?: Date }>(items: T[]) => [...items].sort((a, b) => Number(new Date(b.paidAt ?? b.createdAt ?? 0)) - Number(new Date(a.paidAt ?? a.createdAt ?? 0)))[0];
-  const sales = orders.map((order) => { const state = currentSalePaymentState(order); const customerName = (order.customer as { name?: string | null } | null)?.name; const returnedQty = order.items.reduce((sum, item) => sum + item.returns.reduce((returnSum, entry) => returnSum + Number(entry.quantity), 0), 0); return { id: order.orderNumber || order.id, apiId: order.id, kind: "sale", name: "Sale", status: state.status, amount: state.payableTotal, remainingAmount: state.remainingAmount, method: state.currentMethod, occurredAt: state.occurredAt || order.createdAt, buyer: customerName || "Sale", qty: order.items.reduce((sum, item) => sum + Number(item.baseQuantity ?? item.quantity), 0) - returnedQty, hasPaymentRecord: state.refundablePayments.length > 0, activePaymentRecordCount: state.refundablePayments.length, paymentOptions: state.refundablePayments.map((payment) => ({ id: payment.id, amount: payment.refundableAmount, method: payment.method || "Cash", paidAt: payment.paidAt || payment.createdAt })) }; });
+  const sales = orders.map((order) => { const state = currentSalePaymentState(order); const paid = orderPaidAmount(order.id, order.payments, scopedPayments); const remainingAmount = Math.max(0, state.payableTotal - paid); const customerName = order.customer?.name; const returnedQty = order.items.reduce((sum, item) => sum + item.returns.reduce((returnSum, entry) => returnSum + Number(entry.quantity), 0), 0); return { id: order.orderNumber || order.id, apiId: order.id, kind: "sale", name: "Sale", status: order.fulfillmentStatus === "cancelled" || order.cancelledAt ? "Cancel" : paid >= state.payableTotal && state.payableTotal > 0 ? "Paid" : paid > 0 ? "Partial" : "Unpaid", amount: state.payableTotal, remainingAmount, customerId: order.customerId, customerName: customerName || null, paymentTracking: order.paymentTracking, dueAt: order.dueAt, method: state.currentMethod, occurredAt: state.occurredAt || order.createdAt, buyer: customerName || "Sale", qty: order.items.reduce((sum, item) => sum + Number(item.baseQuantity ?? item.quantity), 0) - returnedQty, hasPaymentRecord: state.refundablePayments.length > 0, activePaymentRecordCount: state.refundablePayments.length, paymentOptions: state.refundablePayments.map((payment) => ({ id: payment.id, amount: payment.refundableAmount, method: payment.method || "Cash", paidAt: payment.paidAt || payment.createdAt })) }; });
   const deliveryEntries = deliveries.map((record) => { const payments = record.payments.filter((payment) => !payment.reversedAt && !payment.reversal); const activePaid = payments.reduce((sum, payment) => sum + payment.amount, 0); const remainingAmount = Math.max(0, record.amount - activePaid); const last = latest(payments); const status = record.status === "cancelled" ? "Cancelled" : remainingAmount === 0 ? "Paid" : "Credit"; const activePaymentRecordCount = payments.length; return { id: record.invoiceNumber, apiId: record.id, supplierId: record.supplierId, kind: "supplier-delivery", name: record.supplierName, status, amount: record.amount, activePaid, remainingAmount, activePaymentRecordCount, paymentOptions: payments.map((payment) => ({ id: payment.id, amount: payment.amount, method: payment.method, paidAt: payment.paidAt })), method: last?.method || "", occurredAt: last?.paidAt || record.receivedAt, receivedAt: record.receivedAt, deliveryOnly: true, cancelReason: record.cancelReason, cancelledAt: record.cancelledAt, allowedActions: { pay: status === "Credit" && remainingAmount > 0, edit: status === "Credit" && activePaymentRecordCount === 0, cancelInvoice: status === "Credit" && activePaymentRecordCount === 0, cancelPayment: status !== "Cancelled" && activePaymentRecordCount > 0 } }; });
   const expenseEntries = expenses.map(expenseWorklistRecord);
   response.json({ records: [...sales, ...deliveryEntries, ...expenseEntries].sort((a, b) => Number(new Date(b.occurredAt)) - Number(new Date(a.occurredAt))) });

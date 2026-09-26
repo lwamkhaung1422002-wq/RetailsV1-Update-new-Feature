@@ -4,6 +4,7 @@ import { z } from "zod";
 import { assertShopAccess, assertShopPermission, assertUserOwnsShop, hasShopPermission } from "../lib/shop-access.js";
 import type { ShopAccess, ShopPermission } from "../lib/shop-access.js";
 import { effectiveOrderTotal } from "../lib/order-return-refund.js";
+import { orderPaymentEntries } from "../lib/order-payment-balance.js";
 import { effectiveCustomerCredit, loadCustomerCredit } from "../lib/customer-credit.js";
 import { prisma } from "../lib/prisma.js";
 import { getAuthUser, requireAuth } from "../middleware/auth.middleware.js";
@@ -192,6 +193,12 @@ customersRouter.patch("/:shopId/customers/:customerId", async (request, response
     next(error);
   }
 });
+const transactionReportQuerySchema = z.object({
+  search: z.string().trim().optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+});
+const dayStart = (value: string) => new Date(`${value}T00:00:00+06:30`);
 
 customersRouter.get("/:shopId/customers/:customerId", async (request, response, next) => {
   try {
@@ -227,6 +234,63 @@ customersRouter.get("/:shopId/customers/:customerId/credit-report", async (reque
   } catch (error) {
     next(error);
   }
+});
+
+customersRouter.get("/:shopId/customers/:customerId/transaction-report", async (request, response, next) => {
+  try {
+    const authUser = getAuthUser(request);
+    const { shopId } = paramsSchema.parse(request.params);
+    const customerId = z.string().min(1).parse(request.params.customerId);
+    const query = transactionReportQuerySchema.parse(request.query);
+    if (query.from && query.to && query.from > query.to) throw Object.assign(new Error("From date must be on or before To date."), { name: "BadRequestError" });
+    await assertUserOwnsShop(authUser.id, shopId);
+    const customer = await prisma.customer.findFirst({ where: { id: customerId, shopId }, select: { id: true, name: true } });
+    if (!customer) throw Object.assign(new Error("Customer not found."), { name: "NotFoundError" });
+    const toExclusive = query.to ? new Date(dayStart(query.to).getTime() + 86_400_000) : undefined;
+    const orders = await prisma.order.findMany({
+      where: {
+        shopId, customerId,
+        ...(query.search ? { OR: [{ orderNumber: { contains: query.search, mode: "insensitive" } }, { id: { contains: query.search, mode: "insensitive" } }] } : {}),
+        ...(query.from || query.to ? { createdAt: { ...(query.from ? { gte: dayStart(query.from) } : {}), ...(toExclusive ? { lt: toExclusive } : {}) } } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true, orderNumber: true, createdAt: true, dueAt: true, paymentStatus: true, fulfillmentStatus: true, cancelledAt: true,
+        total: true, subtotal: true, discount: true, deliveryFee: true,
+        items: { select: { id: true, quantity: true, baseQuantity: true, lineTotal: true, returns: { select: { quantity: true } } } },
+        payments: { select: { id: true, amount: true, type: true, scope: true, paidAt: true } },
+      },
+    });
+    const allocatedPayments = orders.length ? await prisma.payment.findMany({
+      where: { shopId, orderIds: { not: null }, OR: orders.map((order) => ({ orderIds: { contains: order.id } })) },
+      select: { id: true, amount: true, type: true, scope: true, allocations: true, paidAt: true },
+    }) : [];
+    const invoices = orders.map((order) => {
+      const effectiveAmount = effectiveOrderTotal(order);
+      const entries = orderPaymentEntries(order.id, order.payments, allocatedPayments);
+      const paidAmount = entries.reduce((sum, payment) => sum + payment.amount, 0);
+      const cancelled = Boolean(order.cancelledAt) || order.fulfillmentStatus === "cancelled";
+      return {
+        orderId: order.id, orderNumber: order.orderNumber, date: order.createdAt,
+        effectiveAmount, paidAmount, remainingAmount: Math.max(0, effectiveAmount - paidAmount),
+        dueAt: order.dueAt,
+        paymentStatus: cancelled ? "Cancelled" : paidAmount <= 0 ? "Unpaid" : paidAmount >= effectiveAmount ? "Paid" : "Partial",
+        fulfillmentStatus: order.fulfillmentStatus, cancelledAt: order.cancelledAt,
+        paymentCount: entries.length,
+      };
+    });
+    const active = invoices.filter((invoice) => !invoice.cancelledAt && invoice.fulfillmentStatus !== "cancelled");
+    response.json({
+      customer,
+      summary: {
+        totalPurchases: active.reduce((sum, invoice) => sum + invoice.effectiveAmount, 0),
+        totalPaid: active.reduce((sum, invoice) => sum + invoice.paidAmount, 0),
+        outstanding: active.reduce((sum, invoice) => sum + invoice.remainingAmount, 0),
+        invoiceCount: invoices.length,
+      },
+      invoices,
+    });
+  } catch (error) { next(error); }
 });
 
 customersRouter.delete("/:shopId/customers/:customerId", async (request, response, next) => {
