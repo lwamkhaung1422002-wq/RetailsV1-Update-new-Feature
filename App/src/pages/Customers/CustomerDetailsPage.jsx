@@ -78,7 +78,7 @@ export default function CustomerDetailsPage() {
 
   const headerActions = <>
     {!isMobile && canEdit && <Button startIcon={<EditOutlinedIcon />} onClick={() => setEditorOpen(true)} sx={{ textTransform: "none" }}>Edit</Button>}
-    {canDelete && <IconButton aria-label="Customer actions" onClick={(event) => setMenuAnchor(event.currentTarget)} color={isMobile ? "inherit" : "default"}><MoreVertRoundedIcon /></IconButton>}
+    {(canDelete || (isMobile && canEdit)) && <IconButton aria-label="Customer actions" onClick={(event) => setMenuAnchor(event.currentTarget)} color={isMobile ? "inherit" : "default"}><MoreVertRoundedIcon /></IconButton>}
   </>;
   const hasLegacy = report?.recentInvoices?.some((invoice) => invoice.status === "LEGACY");
   const recentInvoices = report?.recentInvoices || [];

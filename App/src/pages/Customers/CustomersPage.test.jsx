@@ -239,6 +239,17 @@ describe("Customers page", () => {
     expect(screen.getByRole("menuitem", { name: "Delete" }).getAttribute("aria-disabled")).toBe("true");
   });
 
+  it("keeps mobile Edit available to sale.create cashiers without offering Delete", async () => {
+    mocks.permissions = new Set(["sale.create"]);
+    mocks.mobile = true;
+    window.matchMedia = vi.fn().mockImplementation(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderRoutes("/customers/customer-1");
+    await waitFor(() => expect(screen.getByText("Customer Information")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Customer actions"));
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+  });
+
   it("renders recent credit invoices as compact mobile cards", async () => {
     mocks.mobile = true;
     window.matchMedia = vi.fn().mockImplementation(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
