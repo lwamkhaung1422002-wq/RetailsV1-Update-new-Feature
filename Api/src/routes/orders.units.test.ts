@@ -137,6 +137,38 @@ describe("order credit enforcement", () => {
     expect(mocks.orderCreate).not.toHaveBeenCalled();
   });
 
+  it("serializes simultaneous credit checks so only one cashier can consume the available limit", async () => {
+    mocks.settingsFind.mockResolvedValue({ defaultCreditLimit: 2_500, defaultPaymentTermsDays: 30 });
+    const outstandingOrders: unknown[] = [];
+    let releaseSecondLock!: () => void;
+    const secondLock = new Promise<void>((resolve) => { releaseSecondLock = resolve; });
+    let lockCount = 0;
+    mocks.lockCustomer.mockImplementation(async () => {
+      lockCount += 1;
+      if (lockCount === 2) await secondLock;
+      return [{ id: "customer-1" }];
+    });
+    mocks.creditOrders.mockImplementation(async () => [...outstandingOrders]);
+    mocks.orderCreate.mockImplementation(async () => {
+      outstandingOrders.push({
+        id: "first-order", total: 2_000, subtotal: 2_000, discount: 0, deliveryFee: 0,
+        createdAt: new Date(), paymentTracking: true, dueAt: null, payments: [],
+        items: [{ id: "first-item", quantity: 2, lineTotal: 2_000, returns: [] }],
+      });
+      releaseSecondLock();
+      return { id: "first-order" };
+    });
+
+    const [first, second] = await Promise.all([
+      request(app).post("/shop-1/orders").send(twoPieces),
+      request(app).post("/shop-1/orders").send(twoPieces),
+    ]);
+    expect([first.status, second.status].sort()).toEqual([201, 400]);
+    expect([first.body.message, second.body.message].filter(Boolean).join(" ")).toMatch(/Credit limit exceeded by 1,500/);
+    expect(mocks.lockCustomer).toHaveBeenCalledTimes(2);
+    expect(mocks.orderCreate).toHaveBeenCalledTimes(1);
+  });
+
   it("saves payment terms and due date once when unpaid amount fits", async () => {
     mocks.customerFind.mockResolvedValue({ id: "customer-1", shopId: "shop-1", priceGroupId: null, priceGroup: null, creditLimitOverride: 5_000, paymentTermsDaysOverride: 15 });
     await request(app).post("/shop-1/orders").send({ ...twoPieces, initialPayment: { method: "Cash", amount: 500 } }).expect(201);
