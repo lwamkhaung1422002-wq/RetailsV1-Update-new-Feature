@@ -56,7 +56,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); });
 
 describe("Customers page", () => {
-  it("keeps desktop search, secondary Credit Defaults, then primary Add Customer and opens details by row click", async () => {
+  it("keeps desktop search, secondary Credit Defaults, then primary Add Customer and opens details in a modal", async () => {
     renderRoutes();
     expect(mocks.customerQuery).toHaveBeenCalledWith({ includeStats: true });
     const search = screen.getByPlaceholderText("Search by name or phone");
@@ -67,15 +67,41 @@ describe("Customers page", () => {
     expect(defaults.className).toContain("MuiButton-outlined");
     expect(add.className).toContain("MuiButton-contained");
     expect(screen.getByText("1,250,000 ကျပ်")).toBeTruthy();
+    expect(mocks.api.customers.creditReport).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "View Aye Aye" }));
-    expect(screen.getByTestId("location").textContent).toBe("/customers/customer-1");
-    await waitFor(() => expect(screen.getByText("Customer Information")).toBeTruthy());
+    expect(screen.getByTestId("location").textContent).toBe("/customers");
+    const details = await screen.findByRole("dialog", { name: "Customer Details" });
+    expect(getComputedStyle(details).width).toBe("810px");
+    expect(getComputedStyle(details).maxHeight).toBe("86vh");
+    expect(within(details).getByText("Customer Information")).toBeTruthy();
+    expect(mocks.api.customers.get).toHaveBeenCalledWith("customer-1");
+    expect(mocks.api.customers.creditReport).toHaveBeenCalledWith("customer-1");
+    expect(within(details).getByRole("button", { name: "Edit" }).querySelector("svg")).toBeNull();
+    const deleteButton = within(details).getByRole("button", { name: "Delete" });
+    expect(deleteButton.querySelector("svg")).toBeNull();
+    expect(deleteButton.disabled).toBe(true);
+    expect(within(details).queryByLabelText("Customer actions")).toBeNull();
+  });
+
+  it("closes desktop details without losing the Customer list search", async () => {
+    renderRoutes();
+    fireEvent.change(screen.getByPlaceholderText("Search by name or phone"), { target: { value: "Ko Min" } });
+    expect(screen.queryByRole("button", { name: "View Aye Aye" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View Ko Min" }));
+    const details = await screen.findByRole("dialog", { name: "Customer Details" });
+    expect(within(details).getByRole("button", { name: "Delete" }).disabled).toBe(false);
+    fireEvent.click(within(details).getByRole("button", { name: "Close Customer Details" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Customer Details" })).toBeNull());
+    expect(screen.getByPlaceholderText("Search by name or phone").value).toBe("Ko Min");
+    expect(screen.getByRole("button", { name: "View Ko Min" })).toBeTruthy();
+    expect(screen.getByTestId("location").textContent).toBe("/customers");
   });
 
   it("keeps kebab actions from navigating and disables Delete for any history", async () => {
     renderRoutes();
     fireEvent.click(screen.getByRole("button", { name: "Actions for Aye Aye" }));
     expect(screen.getByTestId("location").textContent).toBe("/customers");
+    expect(screen.queryByRole("dialog", { name: "Customer Details" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Delete" }).getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByRole("menuitem", { name: "Delete" }).title).toMatch(/transaction history/);
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
@@ -199,10 +225,15 @@ describe("Customers page", () => {
       recentInvoices: [{ orderId: "order-1", orderNumber: "00003", effectiveAmount: 60_000, outstanding: 50_000, dueAt: null, finalPaidAt: null, status: "LEGACY", daysLate: 0 }],
     } });
     renderRoutes("/customers/customer-1");
+    expect(screen.getByRole("dialog", { name: "Customer Details" })).toBeTruthy();
     await waitFor(() => expect(screen.getByText("Customer Information")).toBeTruthy());
     await waitFor(() => expect(screen.getByText("No tracked credit payment history yet.")).toBeTruthy());
     expect(screen.getByText("Commercial Terms")).toBeTruthy();
     expect(screen.getAllByText("Shop Default")).toHaveLength(2);
+    expect(screen.queryByText("Limit Source")).toBeNull();
+    expect(screen.queryByText("Terms Source")).toBeNull();
+    expect(screen.getByText("Name")).toBeTruthy();
+    expect(screen.getByText("Aye Aye")).toBeTruthy();
     expect(screen.getByText("Credit Summary")).toBeTruthy();
     expect(screen.getAllByText("Outstanding")).toHaveLength(2);
     expect(screen.getByText("Available Credit")).toBeTruthy();
@@ -212,6 +243,18 @@ describe("Customers page", () => {
     expect(screen.queryByText("LEGACY")).toBeNull();
     expect(screen.getByText("Last Credit Payment")).toBeTruthy();
     expect(screen.queryByText("Credit Invoices")).toBeNull();
+  });
+
+  it("attaches Custom captions to each commercial value without separate source rows", async () => {
+    mocks.customers[0] = { ...mocks.customers[0], creditLimitOverride: 50_000, paymentTermsDaysOverride: 4, effectiveCreditLimit: 50_000, effectivePaymentTermsDays: 4 };
+    renderRoutes("/customers/customer-1");
+    await waitFor(() => expect(screen.getByText("Commercial Terms")).toBeTruthy());
+    const terms = screen.getByText("Commercial Terms").closest(".MuiCard-root");
+    expect(within(terms).getAllByText("Custom")).toHaveLength(2);
+    expect(within(terms).getByText("Credit Limit").parentElement.textContent).toContain("50,000Custom");
+    expect(within(terms).getByText("Payment Terms").parentElement.textContent).toContain("4 daysCustom");
+    expect(within(terms).queryByText("Limit Source")).toBeNull();
+    expect(within(terms).queryByText("Terms Source")).toBeNull();
   });
 
   it("shows tracked payment statistics and recent invoices on Customer Details", async () => {
@@ -233,10 +276,20 @@ describe("Customers page", () => {
     renderRoutes("/customers/customer-1");
     await waitFor(() => expect(screen.getByText("Customer Information")).toBeTruthy());
     expect(screen.getByLabelText("Back to Customers")).toBeTruthy();
-    expect(screen.getAllByText("Wholesale")).toHaveLength(2);
+    expect(screen.getByText("Customer Details")).toBeTruthy();
+    expect(screen.getAllByText("Wholesale")).toHaveLength(1);
+    expect(screen.getAllByText("091111")).toHaveLength(1);
+    const info = screen.getByText("Customer Information").closest(".MuiCard-root");
+    expect(info.contains(screen.getByText("Wholesale"))).toBe(true);
+    expect(info.contains(screen.getByText("091111"))).toBe(true);
+    expect(screen.getByText("Name")).toBeTruthy();
+    expect(screen.queryByText("Limit Source")).toBeNull();
+    expect(screen.queryByText("Terms Source")).toBeNull();
     fireEvent.click(screen.getByLabelText("Customer actions"));
     expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Delete" }).getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(screen.getByLabelText("Back to Customers"));
+    expect(screen.getByTestId("location").textContent).toBe("/customers");
   });
 
   it("keeps mobile Edit available to sale.create cashiers without offering Delete", async () => {

@@ -14,6 +14,7 @@ import { usePosApi } from "../../hooks/useApiResource";
 import { useAllCustomersQuery } from "../../hooks/usePosQueries";
 import CreditDefaultsDialog from "./CreditDefaultsDialog";
 import CustomerDialog from "./CustomerDialog";
+import CustomerDetailsPage from "./CustomerDetailsPage";
 
 const valueOrDash = (value) => value || "—";
 const formatKyat = (amount) => `${new Intl.NumberFormat("en-US").format(amount ?? 0)} \u1000\u103b\u1015\u103a`;
@@ -34,6 +35,7 @@ export default function CustomersPage() {
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuCustomer, setMenuCustomer] = useState(null);
   const [deletingCustomer, setDeletingCustomer] = useState(null);
+  const [detailsCustomerId, setDetailsCustomerId] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
   const { data, error, isLoading } = useAllCustomersQuery({ includeStats: true });
@@ -65,6 +67,7 @@ export default function CustomersPage() {
   const searchField = <TextField value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name or phone" slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon /></InputAdornment> } }} sx={isMobile ? { mb: 2, width: "100%", "& .MuiOutlinedInput-root": { bgcolor: "#fff", borderRadius: 2 } } : { width: 420, maxWidth: "100%", flex: "1 1 420px" }} />;
   const dialogs = <>
     <CustomerDialog open={editor !== null} customer={editor?.id ? editor : null} onClose={() => setEditor(null)} />
+    {!isMobile && detailsCustomerId && <CustomerDetailsPage customerId={detailsCustomerId} onClose={() => setDetailsCustomerId(null)} />}
     {creditDefaultsOpen && <CreditDefaultsDialog open onClose={() => setCreditDefaultsOpen(false)} />}
     <Dialog open={Boolean(deletingCustomer)} onClose={deleteBusy ? undefined : () => setDeletingCustomer(null)} fullWidth maxWidth="xs">
       <DialogTitle>Delete "{deletingCustomer?.name}"?</DialogTitle>
@@ -89,7 +92,7 @@ export default function CustomersPage() {
       <Box sx={{ overflowX: "auto" }}><Box sx={{ minWidth: 1000 }}>
         <Box sx={{ ...desktopGrid, py: 1.5 }}>{["NO.", "CUSTOMER", "PHONE", "ADDRESS", "CITY", "VISITS", "AMOUNT", "ACTIONS"].map((label) => <Typography key={label} color="text.secondary" sx={{ fontSize: 12, fontWeight: 700 }}>{label}</Typography>)}</Box>
         <Divider />
-        {customers.map((customer, index) => <Box key={customer.id} role="button" tabIndex={0} aria-label={`View ${customer.name}`} onClick={() => navigate(`/customers/${customer.id}`)} onKeyDown={(event) => { if (event.key === "Enter") navigate(`/customers/${customer.id}`); }} sx={{ ...desktopGrid, py: 1.5, minHeight: 64, borderBottom: "1px solid", borderColor: "divider", cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>
+        {customers.map((customer, index) => <Box key={customer.id} role="button" tabIndex={0} aria-label={`View ${customer.name}`} onClick={() => setDetailsCustomerId(customer.id)} onKeyDown={(event) => { if (event.key === "Enter") setDetailsCustomerId(customer.id); }} sx={{ ...desktopGrid, py: 1.5, minHeight: 64, borderBottom: "1px solid", borderColor: "divider", cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>
           <Typography color="text.secondary" sx={{ fontSize: 13, fontWeight: 600 }}>{index + 1}</Typography>
           <Typography noWrap sx={{ minWidth: 0, fontSize: 14, fontWeight: 600 }}>{customer.name}</Typography>
           <Typography noWrap sx={{ minWidth: 0, fontSize: 14, fontWeight: 500 }}>{valueOrDash(customer.phone)}</Typography>

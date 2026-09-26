@@ -12,7 +12,7 @@ export default function AppLayout() {
   const [drawerExpanded, setDrawerExpanded] = useState(false);
   const { pathname } = useLocation();
   const { isGuest, requestRegistration } = useAuth();
-  const isFullscreenMobilePage = pathname.startsWith("/sale/") || pathname === "/customers" || pathname.startsWith("/stock/") || pathname === "/suppliers" || pathname.startsWith("/suppliers/") || pathname.startsWith("/supplier-delivery/") || pathname === "/payment" || pathname.startsWith("/payment/") || pathname === "/price" || pathname.startsWith("/price/") || pathname.startsWith("/settings/") || pathname.startsWith("/report/");
+  const isFullscreenMobilePage = pathname.startsWith("/sale/") || pathname === "/customers" || pathname.startsWith("/customers/") || pathname.startsWith("/stock/") || pathname === "/suppliers" || pathname.startsWith("/suppliers/") || pathname.startsWith("/supplier-delivery/") || pathname === "/payment" || pathname.startsWith("/payment/") || pathname === "/price" || pathname.startsWith("/price/") || pathname.startsWith("/settings/") || pathname.startsWith("/report/");
 
   useEffect(() => {
     const connection = navigator.connection;
